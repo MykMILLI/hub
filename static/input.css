@@ -1,0 +1,531 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ========================================
+   Material 3 + Glassmorphic Theme
+   ======================================== */
+
+:root {
+    /* Material 3 Light Mode */
+    --m3-primary: #6366f1;
+    --m3-on-primary: #ffffff;
+    --m3-primary-container: #eef2ff;
+    --m3-on-primary-container: #1e1b4b;
+    --m3-secondary: #06b6d4;
+    --m3-on-secondary: #ffffff;
+    --m3-tertiary: #ec4899;
+    --m3-error: #ef4444;
+    --m3-surface: #f8fafc;
+    --m3-on-surface: #1f2937;
+    --m3-surface-variant: #e2e8f0;
+    --m3-on-surface-variant: #64748b;
+    --m3-background: #ffffff;
+    
+    /* Glassmorphism */
+    --glass-bg-light: rgba(248, 250, 252, 0.7);
+    --glass-border-light: rgba(226, 232, 240, 0.5);
+    --glass-shadow: 0 8px 32px rgba(31, 41, 55, 0.1);
+    
+    /* Legacy variables for compatibility */
+    --primary-color: #6366f1;
+    --secondary-color: #06b6d4;
+    --background-color: #ffffff;
+    --card-background-color: #f8fafc;
+    --text-color: #1f2937;
+    --sidebar-background-color: #4f46e5;
+    --sidebar-text-color: #ffffff;
+    --sidebar-link-color: rgba(255,255,255,0.95);
+    --sidebar-link-border-color: rgba(255,255,255,0.18);
+    --sidebar-active-color: #6366f1;
+    --input-bg: #ffffff;
+    --input-text: #1f2937;
+    --input-border: #e2e8f0;
+    --muted-text: #64748b;
+    --danger-color: #ef4444;
+    --secondary-bg: #f8fafc;
+}
+
+[data-theme="dark"] {
+    /* Material 3 Dark Mode */
+    --m3-primary: #a5b4fc;
+    --m3-on-primary: #1e1b4b;
+    --m3-primary-container: #3730a3;
+    --m3-secondary: #06d9ff;
+    --m3-on-secondary: #082f4b;
+    --m3-tertiary: #f472b6;
+    --m3-error: #f87171;
+    --m3-surface: #111827;
+    --m3-on-surface: #f1f5f9;
+    --m3-surface-variant: #1e293b;
+    --m3-on-surface-variant: #cbd5e1;
+    --m3-background: #0f172a;
+    
+    /* Glassmorphism Dark */
+    --glass-bg-dark: rgba(30, 41, 59, 0.6);
+    --glass-border-dark: rgba(71, 85, 105, 0.3);
+    --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    
+    /* Legacy variables for compatibility */
+    --primary-color: #a5b4fc;
+    --secondary-color: #06d9ff;
+    --background-color: #0f172a;
+    --card-background-color: #111827;
+    --text-color: #f1f5f9;
+    --sidebar-background-color: #1e1b4b;
+    --sidebar-text-color: #f1f5f9;
+    --sidebar-link-color: rgba(255,255,255,0.92);
+    --sidebar-link-border-color: rgba(255,255,255,0.12);
+    --input-bg: #111827;
+    --input-text: #f1f5f9;
+    --input-border: #1e293b;
+    --muted-text: #cbd5e1;
+    --danger-color: #f87171;
+    --secondary-bg: #1f2937;
+}
+
+/* Material 3 Transitions */
+@layer utilities {
+    .transition-m3 {
+        @apply transition-all duration-300 ease-in-out;
+    }
+    
+    /* Glassmorphism Utilities */
+    .glass {
+        background: var(--glass-bg-light);
+        border: 1px solid var(--glass-border-light);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        box-shadow: var(--glass-shadow);
+    }
+    
+    [data-theme="dark"] .glass {
+        background: var(--glass-bg-dark);
+        border: 1px solid var(--glass-border-dark);
+    }
+    
+    .glass-sm {
+        background: rgba(248, 250, 252, 0.5);
+        border: 1px solid rgba(226, 232, 240, 0.3);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+    }
+    
+    [data-theme="dark"] .glass-sm {
+        background: rgba(30, 41, 59, 0.4);
+        border: 1px solid rgba(71, 85, 105, 0.2);
+    }
+    
+    .glass-lg {
+        background: rgba(248, 250, 252, 0.8);
+        border: 1px solid rgba(226, 232, 240, 0.6);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+    }
+    
+    [data-theme="dark"] .glass-lg {
+        background: rgba(30, 41, 59, 0.7);
+        border: 1px solid rgba(71, 85, 105, 0.4);
+    }
+}
+
+/* Basic styles */
+body {
+    font-family: 'Inter', sans-serif;
+    color: var(--text-color);
+    background-color: var(--background-color);
+}
+
+/* Sidebar */
+.sidebar {
+    background: linear-gradient(135deg, var(--sidebar-background-color) 0%, rgba(79, 70, 229, 0.8) 100%);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+    color: var(--sidebar-text-color);
+}
+
+.sidebar a.sidebar-link {
+    color: var(--sidebar-link-color);
+    border: 1px solid var(--sidebar-link-border-color);
+    transition: all 0.3s ease-in-out;
+}
+
+.sidebar a.sidebar-link.active {
+    background-color: var(--sidebar-active-color);
+    color: #fff;
+    border-color: transparent;
+    font-weight: 600;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.sidebar a.sidebar-link:hover {
+    background-color: var(--primary-color);
+    color: #fff;
+    border-color: transparent;
+    transform: translateX(2px);
+}
+
+/* Main content */
+.main-content {
+    background-color: var(--background-color);
+}
+
+/* Modern Material 3 Cards */
+.card {
+    background-color: var(--card-background-color);
+    border-radius: 1.25rem;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.08);
+    transition: all 0.3s ease-in-out;
+    border: 1px solid rgba(226, 232, 240, 0.5);
+}
+
+[data-theme="dark"] .card {
+    border: 1px solid rgba(71, 85, 105, 0.3);
+}
+
+.card:hover {
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.12);
+    transform: translateY(-2px);
+}
+
+/* Modern Material 3 Form Controls */
+input[type="text"],
+input[type="password"],
+input[type="date"],
+input[type="time"],
+input[type="number"],
+input[type="email"],
+input[type="url"],
+select,
+textarea {
+    background-color: var(--m3-surface-variant);
+    color: var(--m3-on-surface);
+    border: 2px solid var(--m3-surface-variant);
+    border-radius: 0.75rem;
+    padding: 0.875rem 1.125rem;
+    font-size: 0.95rem;
+    transition: all 0.2s ease-in-out;
+    font-family: 'Inter', sans-serif;
+}
+
+input[type="text"]:focus,
+input[type="password"]:focus,
+input[type="date"]:focus,
+input[type="time"]:focus,
+input[type="number"]:focus,
+input[type="email"]:focus,
+input[type="url"]:focus,
+select:focus,
+textarea:focus {
+    outline: none;
+    border-color: var(--m3-primary);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+    background-color: var(--m3-background);
+}
+
+[data-theme="dark"] input[type="text"],
+[data-theme="dark"] input[type="password"],
+[data-theme="dark"] input[type="date"],
+[data-theme="dark"] input[type="time"],
+[data-theme="dark"] input[type="number"],
+[data-theme="dark"] input[type="email"],
+[data-theme="dark"] input[type="url"],
+[data-theme="dark"] select,
+[data-theme="dark"] textarea {
+    background-color: var(--m3-surface-variant);
+    color: var(--m3-on-surface);
+    border-color: var(--m3-surface-variant);
+}
+
+input::placeholder,
+textarea::placeholder {
+    color: var(--m3-on-surface-variant);
+    opacity: 0.7;
+}
+
+/* Recipe page styles */
+.ql-editor { min-height: 150px; max-height: 300px; overflow-y: auto; }
+.ql-container { font-size: 14px; }
+.recipe-card { transition: all 0.3s ease-in-out; border-radius: 1rem; }
+.recipe-card:hover { box-shadow: var(--glass-shadow); transform: translateY(-2px); }
+.recipe-content { max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out; }
+.recipe-content.expanded { max-height: none; transition: max-height 0.5s ease-in; }
+.recipe-header { cursor: pointer; }
+
+/* Modern Material 3 Buttons */
+.btn {
+    border-radius: 0.75rem;
+    font-weight: 600;
+    padding: 0.75rem 1.5rem;
+    transition: all 0.3s ease-in-out;
+    text-transform: uppercase;
+    font-size: 0.875rem;
+    letter-spacing: 0.02em;
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, var(--m3-primary) 0%, #4f46e5 100%);
+    color: white;
+    box-shadow: 0 4px 8px rgba(99, 102, 241, 0.3);
+}
+
+.btn-primary:hover {
+    box-shadow: 0 8px 16px rgba(99, 102, 241, 0.4);
+    transform: translateY(-1px);
+}
+
+.btn-primary:active {
+    transform: translateY(0);
+}
+
+.btn-danger {
+    background-color: var(--danger-color);
+    color: white;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+.btn-danger:hover {
+    filter: brightness(1.08);
+    transform: translateY(-1px);
+    box-shadow: 0 8px 12px rgba(0,0,0,0.15);
+}
+
+.btn-danger:active {
+    transform: translateY(0);
+}
+
+.btn-success {
+    background: #16a34a;
+    color: white;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+.btn-success:hover {
+    filter: brightness(1.08);
+    transform: translateY(-1px);
+    box-shadow: 0 8px 12px rgba(0,0,0,0.15);
+}
+
+.btn-secondary {
+    background: var(--m3-surface-variant);
+    color: var(--m3-on-surface);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.btn-secondary:hover {
+    filter: brightness(0.95);
+}
+
+/* Labels and Text */
+label {
+    font-weight: 600;
+    font-size: 0.875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    color: var(--m3-on-surface);
+    transition: all 0.2s;
+}
+
+/* Links */
+a {
+    color: var(--m3-primary);
+    transition: all 0.2s ease-in-out;
+}
+
+a:hover {
+    color: #4f46e5;
+    text-decoration-thickness: 2px;
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(99, 102, 241, 0.4);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(99, 102, 241, 0.6);
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb {
+    background: rgba(165, 180, 252, 0.3);
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+    background: rgba(165, 180, 252, 0.5);
+}
+
+/* Toast/Alert Notifications */
+.toast {
+    border-radius: 1rem;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+
+/* Table Styling */
+table {
+    border-collapse: collapse;
+    width: 100%;
+}
+
+table thead th {
+    background-color: var(--m3-surface-variant);
+    color: var(--m3-on-surface);
+    padding: 1rem;
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    border-radius: 0.75rem 0.75rem 0 0;
+}
+
+table tbody tr {
+    border-bottom: 1px solid var(--m3-surface-variant);
+    transition: all 0.2s ease-in-out;
+}
+
+table tbody tr:hover {
+    background-color: var(--m3-surface);
+}
+
+table td {
+    padding: 1rem;
+    color: var(--m3-on-surface);
+}
+
+/* Animations */
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes slideInRight {
+    from {
+        opacity: 0;
+        transform: translateX(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@keyframes pulse-gentle {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.7;
+    }
+}
+
+.animate-fadeInUp {
+    animation: fadeInUp 0.4s ease-in-out;
+}
+
+.animate-slideInRight {
+    animation: slideInRight 0.3s ease-in-out;
+}
+
+.animate-pulse-gentle {
+    animation: pulse-gentle 2s ease-in-out infinite;
+}
+
+/* Badges/Pills */
+.badge, .pill {
+    display: inline-block;
+    padding: 0.375rem 0.875rem;
+    border-radius: 0.75rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    background-color: var(--m3-primary-container);
+    color: var(--m3-on-primary-container);
+}
+
+[data-theme="dark"] .badge,
+[data-theme="dark"] .pill {
+    background-color: rgba(99, 102, 241, 0.2);
+    color: #a5b4fc;
+}
+
+/* Dividers */
+hr, .divider {
+    border: none;
+    height: 1px;
+    background-color: var(--m3-surface-variant);
+    margin: 1.5rem 0;
+}
+
+/* Weather Widget Styles */
+.weather-widget {
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.05) 0%, rgba(99, 102, 241, 0.02) 100%);
+}
+
+.weather-header {
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+}
+
+.current-weather {
+    margin-bottom: 2rem;
+}
+
+.weather-details {
+    gap: 1.5rem;
+}
+
+.forecast-scroll {
+    display: flex;
+    gap: 0.75rem;
+    overflow-x: auto;
+    padding-bottom: 0.5rem;
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+}
+
+.forecast-card {
+    flex-shrink: 0;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.forecast-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.15);
+}
+
+/* Smooth scrollbar for weather forecast */
+.forecast-scroll::-webkit-scrollbar {
+    height: 4px;
+}
+
+.forecast-scroll::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.forecast-scroll::-webkit-scrollbar-thumb {
+    background: rgba(99, 102, 241, 0.3);
+    border-radius: 2px;
+}
+
+.forecast-scroll::-webkit-scrollbar-thumb:hover {
+    background: rgba(99, 102, 241, 0.5);
+}
+

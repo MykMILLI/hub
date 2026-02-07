@@ -1,0 +1,62 @@
+admin_name: Administrator
+family_members:
+- Mom
+- Dad
+- Dipanshu
+- Vivek
+- India
+feature_toggles:
+  chores: true
+  expense_tracker: true
+  expiry_tracker: true
+  media_downloader: true
+  notes: true
+  pdf_compressor: true
+  personal_status: true
+  qr_generator: true
+  recipes: true
+  shared_cloud: true
+  shopping_list: true
+  url_shortener: true
+  who_is_home: true
+instance_name: My Home Hub
+menu_visibility:
+  media_downloader: false
+  pdf_compressor: false
+  url_shortener: false
+password: ''
+reminders:
+  calendar_start_day: sunday
+  categories:
+  - color: '#dc2626'
+    key: health
+    label: Health
+  - color: '#0d9488'
+    key: bills
+    label: Bills
+  - color: '#7c3aed'
+    key: school
+    label: School
+  - color: '#2563eb'
+    key: family
+    label: Family
+  time_format: 12h
+theme:
+  background_color: '#f7fafc'
+  card_background_color: '#fff'
+  primary_color: '#8b5cf6'
+  secondary_color: '#a0aec0'
+  sidebar_active_color: '#a78bfa'
+  sidebar_background_color: '#7c3aed'
+  sidebar_link_border_color: rgba(255,255,255,0.18)
+  sidebar_link_color: rgba(255,255,255,0.95)
+  sidebar_text_color: '#ffffff'
+  text_color: '#333'
+weather:
+  enabled: true
+  label: 'Home'
+  latitude: ''
+  longitude: ''
+  timezone: 'America/New_York'
+  units: imperial
+  view: compact

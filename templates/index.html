@@ -1,0 +1,443 @@
+{% extends "base.html" %}
+{% block extra_head %}
+<script>
+window.REMINDERS_TIME_FORMAT = "{{ (config.reminders.time_format if config.reminders and config.reminders.time_format) or '12h' }}";
+</script>
+<style>
+	.welcome-gradient {
+		background: linear-gradient(135deg, var(--primary-color) 0%, var(--sidebar-background-color) 100%);
+		box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+	}
+	.stat-card {
+		background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(59, 130, 246, 0.05) 100%);
+		border: 1px solid rgba(59, 130, 246, 0.2);
+		transition: all 0.3s ease;
+	}
+	.stat-card:hover {
+		transform: translateY(-4px);
+		box-shadow: 0 12px 24px rgba(59, 130, 246, 0.15);
+	}
+	.quick-action-btn {
+		background: linear-gradient(135deg, var(--primary-color) 0%, var(--sidebar-background-color) 100%);
+		transition: all 0.3s ease;
+	}
+	.quick-action-btn:hover {
+		transform: scale(1.05);
+		box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+	}
+	.family-card {
+		background: var(--card-background-color);
+		border: 1px solid rgba(0, 0, 0, 0.1);
+		transition: all 0.3s ease;
+	}
+	.family-card:hover {
+		border-color: var(--primary-color);
+		box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+	}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+	<!-- Welcome Banner -->
+	<div class="welcome-gradient rounded-2xl p-8 text-white">
+		<div class="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+			<div>
+				<h1 class="text-3xl md:text-4xl font-bold mb-2">Welcome back!</h1>
+				<p class="text-lg text-white/80">
+					{% if g.hub_settings %}{{ g.hub_settings.hub_name }}{% else %}{{ config.instance_name }}{% endif %}
+				</p>
+				<p class="text-sm text-white/60 mt-3" id="welcomeDate"></p>
+			</div>
+			<div class="flex flex-col items-start md:items-end gap-2">
+				<div class="text-3xl md:text-4xl font-bold" id="currentTime">--:--</div>
+				<div class="text-xs md:text-sm text-white/60" id="currentDateFull"></div>
+			</div>
+		</div>
+	</div>
+
+	<!-- Weather Widget (if enabled) -->
+	{% if config.weather and config.weather.enabled %}
+	<div class="weather-widget card p-6 md:p-8">
+		<!-- Loading State -->
+		<div id="weather-loading" class="text-center text-gray-500 py-6">
+			<i class="fa-solid fa-spinner fa-spin text-3xl mb-3" style="color: var(--primary-color);"></i>
+			<p class="mt-2">Loading weather...</p>
+		</div>
+
+		<!-- No Location State -->
+		<div id="weather-no-location" class="text-center py-6" style="display: none;">
+			<h3 class="text-lg font-semibold text-gray-800 dark:text-white mb-2">
+				<i class="fa-solid fa-map-pin text-2xl" style="color: var(--primary-color); opacity: 0.7;"></i>
+			</h3>
+			<p class="text-gray-600 dark:text-gray-400 mb-4">Configure your location in Settings to see weather information.</p>
+			<div class="flex gap-3 justify-center flex-wrap">
+				<button onclick="useGPSLocation()" class="btn btn-sm bg-blue-500 hover:bg-blue-600 text-white">
+					<i class="fa-solid fa-location-crosshairs"></i> Use GPS
+				</button>
+				<button onclick="goToLocationSettings()" class="btn btn-sm bg-gray-500 hover:bg-gray-600 text-white">
+					<i class="fa-solid fa-cog"></i> Settings
+				</button>
+			</div>
+		</div>
+
+		<!-- Weather Card -->
+		<div id="weather-card" style="display: none;">
+			<!-- Header -->
+			<div class="weather-header flex items-center justify-between mb-6 pb-4 border-b border-gray-200 dark:border-gray-700">
+				<div>
+					<h2 class="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+						<i class="fa-solid fa-cloud-sun text-2xl" style="color: var(--primary-color);"></i>
+						Weather
+					</h2>
+					<p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+						<i class="fa-solid fa-map-pin text-xs"></i>
+						<span id="location-name"></span>
+					</p>
+				</div>
+				<button onclick="toggleWeatherSettings()" class="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
+					<i class="fa-solid fa-ellipsis-vertical text-xl"></i>
+				</button>
+			</div>
+
+			<!-- Current Weather -->
+			<div class="current-weather mb-8">
+				<div class="flex items-start justify-between mb-6">
+					<!-- Left: Icon + Condition -->
+					<div class="flex items-start gap-4">
+						<div class="text-6xl" id="weather-icon">☀️</div>
+						<div>
+							<div class="text-4xl md:text-5xl font-bold text-gray-900 dark:text-white" id="temperature">--°F</div>
+							<div class="text-gray-600 dark:text-gray-400 text-lg mt-1" id="weather-description"></div>
+							<div class="text-sm text-gray-500 dark:text-gray-500 mt-1" id="feels-like"></div>
+						</div>
+					</div>
+
+					<!-- Right: Details Grid -->
+					<div class="weather-details grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+						<div class="flex items-center gap-2">
+							<span class="text-xl">💨</span>
+							<div>
+								<div class="text-gray-600 dark:text-gray-400 text-xs">Wind</div>
+								<div class="font-semibold text-gray-900 dark:text-white" id="wind-speed">-- mph</div>
+							</div>
+						</div>
+						<div class="flex items-center gap-2">
+							<span class="text-xl">💧</span>
+							<div>
+								<div class="text-gray-600 dark:text-gray-400 text-xs">Humidity</div>
+								<div class="font-semibold text-gray-900 dark:text-white" id="humidity">--%</div>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+
+			<!-- 7-Day Forecast -->
+			<div id="forecast-section" style="display: none;">
+				<h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">7-Day Forecast</h3>
+				<div id="forecast-container" class="forecast-scroll flex gap-3 overflow-x-auto pb-2">
+					<!-- Forecast cards will be populated here -->
+				</div>
+			</div>
+
+			<!-- Last Updated -->
+			<div class="text-xs text-gray-500 dark:text-gray-600 mt-4 text-right" id="last-updated"></div>
+		</div>
+	</div>
+	{% endif %}
+
+	<!-- Quick Stats Grid -->
+	<div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+		<!-- Events Card -->
+		<div class="stat-card rounded-xl p-6 cursor-pointer" onclick="window.location.href='/reminders'">
+			<div class="flex items-start justify-between mb-4">
+				<h3 class="font-semibold text-gray-700 dark:text-gray-200">Upcoming Events</h3>
+				<i class="fa-solid fa-calendar text-2xl" style="color: var(--primary-color); opacity: 0.7;"></i>
+			</div>
+			<p class="text-3xl font-bold text-gray-800 dark:text-white mb-2" id="eventCount">-</p>
+			<p class="text-xs text-gray-600 dark:text-gray-400">Reminders & events this month</p>
+		</div>
+
+		<!-- Tasks Card -->
+		<div class="stat-card rounded-xl p-6 cursor-pointer" onclick="window.location.href='/chores'">
+			<div class="flex items-start justify-between mb-4">
+				<h3 class="font-semibold text-gray-700 dark:text-gray-200">Active Tasks</h3>
+				<i class="fa-solid fa-list-check text-2xl" style="color: #f97316; opacity: 0.7;"></i>
+			</div>
+			<p class="text-3xl font-bold text-gray-800 dark:text-white mb-2" id="taskCount">-</p>
+			<p class="text-xs text-gray-600 dark:text-gray-400">Things to do today</p>
+		</div>
+
+		<!-- Notes Card -->
+		<div class="stat-card rounded-xl p-6 cursor-pointer" onclick="window.location.href='/notes'">
+			<div class="flex items-start justify-between mb-4">
+				<h3 class="font-semibold text-gray-700 dark:text-gray-200">Shared Notes</h3>
+				<i class="fa-solid fa-note-sticky text-2xl" style="color: #8b5cf6; opacity: 0.7;"></i>
+			</div>
+			<p class="text-3xl font-bold text-gray-800 dark:text-white mb-2" id="noteCount">-</p>
+			<p class="text-xs text-gray-600 dark:text-gray-400">Family notes & updates</p>
+		</div>
+	</div>
+
+	<!-- Quick Actions -->
+	<div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+		<a href="/expenses" class="quick-action-btn rounded-xl p-4 text-white text-center hover:text-white no-underline">
+			<i class="fa-solid fa-wallet text-2xl mb-2 block"></i>
+			<span class="text-sm font-medium">Expenses</span>
+		</a>
+		<a href="/shopping" class="quick-action-btn rounded-xl p-4 text-white text-center hover:text-white no-underline">
+			<i class="fa-solid fa-cart-shopping text-2xl mb-2 block"></i>
+			<span class="text-sm font-medium">Shopping</span>
+		</a>
+		<a href="/notes" class="quick-action-btn rounded-xl p-4 text-white text-center hover:text-white no-underline">
+			<i class="fa-solid fa-note-sticky text-2xl mb-2 block"></i>
+			<span class="text-sm font-medium">Notes</span>
+		</a>
+		<a href="/recipes" class="quick-action-btn rounded-xl p-4 text-white text-center hover:text-white no-underline">
+			<i class="fa-solid fa-utensils text-2xl mb-2 block"></i>
+			<span class="text-sm font-medium">Recipes</span>
+		</a>
+	</div>
+
+	<!-- Family Members & Status Section -->
+	<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+		<!-- Family Status - Avatar Circles -->
+		<div class="family-card rounded-xl p-6">
+			<h2 class="text-lg font-bold mb-6 flex items-center gap-2">
+				<i class="fa-solid fa-people-group text-xl" style="color: #10b981;"></i>
+				Family
+			</h2>
+			{% if family_members and family_statuses %}
+			<div class="flex flex-wrap justify-center py-8" style="gap: 100px;">
+				{% for member in family_members %}
+					{% set member_data = family_members_data.get(member, {}) %}
+					{% set avatar = member_data.get('avatar') %}
+					{% set status = family_statuses.get(member, 'home') %}
+					{% set member_id = member_data.get('id') %}
+					<div class="flex flex-col items-center gap-5 cursor-pointer member-avatar-card hover:opacity-85 transition-opacity" data-member-id="{{ member_id }}" data-member-name="{{ member }}">
+						<!-- Avatar Circle -->
+						<div class="relative" style="width: 160px; height: 160px;">
+							<div class="w-full h-full rounded-full flex items-center justify-center font-bold text-5xl text-white transition-transform hover:scale-105 shadow-lg ring-4 ring-white dark:ring-gray-700"
+								{% if avatar %}
+									style="background-image: url('{{ avatar }}'); background-size: cover; background-position: center;"
+								{% else %}
+									style="background: linear-gradient(135deg, var(--primary-color), #667eea);"
+								{% endif %}>
+								{% if not avatar %}
+									{{ member[0]|upper }}
+								{% endif %}
+							</div>
+						</div>
+						<!-- Member Name -->
+						<span class="text-lg font-bold text-gray-900 dark:text-white text-center">{{ member }}</span>
+						<!-- Status Badge -->
+						<span class="text-sm font-semibold px-4 py-1 rounded-full
+							{% if status == 'home' %} bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-200
+							{% elif status == 'away' %} bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-200
+							{% elif status == 'at_work' %} bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-200
+							{% elif status == 'traveling' %} bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-200
+							{% else %} bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-200
+							{% endif %}">
+							{% if status == 'home' %}<i class="fa-solid fa-home mr-1"></i>{% endif %}
+							{% if status == 'away' %}<i class="fa-solid fa-person-wandering mr-1"></i>{% endif %}
+							{% if status == 'at_work' %}<i class="fa-solid fa-briefcase mr-1"></i>{% endif %}
+							{% if status == 'traveling' %}<i class="fa-solid fa-plane mr-1"></i>{% endif %}
+							{{ status|replace('_', ' ')|title }}
+						</span>
+					</div>
+				{% endfor %}
+			</div>
+			{% else %}
+			<p class="text-gray-500 text-sm">No family members yet. Add some in Settings!</p>
+			{% endif %}
+		</div>
+
+		<!-- Personal Status -->
+		{% if config.feature_toggles.personal_status %}
+		<div class="family-card rounded-xl p-6">
+			<h2 class="text-lg font-bold mb-4 flex items-center gap-2">
+				<i class="fa-solid fa-user-circle text-xl" style="color: var(--primary-color);"></i>
+				My Status
+			</h2>
+			<form id="memberForm" method="POST" action="/personal-status" onsubmit="return false" class="space-y-3">
+				<input type="hidden" name="name" id="memberStatusName" value="">
+				<textarea name="text" rows="2" class="w-full border rounded-lg p-3 text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="What's going on with you?"></textarea>
+				<div class="flex gap-2">
+					<button type="submit" class="btn btn-primary flex-1 text-sm">Save Status</button>
+					<button type="button" id="memberStatusDeleteBtn" class="btn text-sm flex-1">Clear</button>
+				</div>
+			</form>
+			<div id="memberStatusDisplay" class="mt-4 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg text-sm text-gray-600 dark:text-gray-300">
+				No status set yet.
+			</div>
+		</div>
+		{% endif %}
+	</div>
+
+	<!-- Family Notice Board -->
+	<div class="family-card rounded-xl p-6">
+		<h2 class="text-lg font-bold mb-4 flex items-center gap-2">
+			<i class="fa-solid fa-bullhorn text-xl" style="color: #f59e0b;"></i>
+			Family Notice Board
+		</h2>
+		{% if notice and notice.content %}
+		<div class="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg p-4 mb-4">
+			<p class="text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{{ notice.content }}</p>
+			<p class="text-xs text-gray-500 dark:text-gray-400 mt-2">
+				<i class="fa-solid fa-info-circle mr-1"></i>
+				Updated by {{ notice.updated_by }} on {{ notice.updated_at.strftime('%b %d, %Y') }}
+			</p>
+		</div>
+		{% else %}
+		<p class="text-gray-500 dark:text-gray-400 mb-4">No notices yet.</p>
+		{% endif %}
+		
+		<form method="POST" action="/notice" class="space-y-2">
+			<textarea name="content" rows="3" class="w-full border rounded-lg p-3 text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="Post an important message for the family..."></textarea>
+			<input type="hidden" name="user" value="">
+			<button type="submit" class="btn btn-primary w-full text-sm">Post Notice (Admin)</button>
+		</form>
+	</div>
+</div>
+
+<script>
+(function() {
+	// Time and date display
+	function updateTime() {
+		const now = new Date();
+		const timeEl = document.getElementById('currentTime');
+		const dateFullEl = document.getElementById('currentDateFull');
+		const welcomeDateEl = document.getElementById('welcomeDate');
+		
+		if (timeEl) {
+			const hours = String(now.getHours() % 12 || 12).padStart(2, '0');
+			const minutes = String(now.getMinutes()).padStart(2, '0');
+			const ampm = now.getHours() >= 12 ? 'PM' : 'AM';
+			timeEl.textContent = `${hours}:${minutes} ${ampm}`;
+		}
+		
+		if (dateFullEl || welcomeDateEl) {
+			const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+			const dateStr = now.toLocaleDateString('en-US', options);
+			if (dateFullEl) dateFullEl.textContent = dateStr;
+			if (welcomeDateEl) welcomeDateEl.textContent = dateStr;
+		}
+	}
+	
+	updateTime();
+	setInterval(updateTime, 1000);
+
+	// Who is Home form
+	const whoForm = document.getElementById('whoUnifiedForm');
+	if (whoForm) {
+		whoForm.addEventListener('submit', async (e) => {
+			e.preventDefault();
+			const status = whoForm.querySelector('[name=status]').value;
+			const user = currentUser();
+			
+			try {
+				const fd = new FormData();
+				fd.append('name', user);
+				fd.append('status', status);
+				fd.append('action', 'update');
+				
+				const response = await fetch('/whoishome', {
+					method: 'POST',
+					body: new URLSearchParams(fd)
+				});
+				
+				if (response.ok) {
+					globalToast('Status updated', 'success');
+				} else {
+					globalToast('Failed to update status', 'error');
+				}
+			} catch (err) {
+				globalToast('Error: ' + err.message, 'error');
+			}
+		});
+	}
+
+	// Member status form
+	const memberForm = document.getElementById('memberForm');
+	const memberStatusName = document.getElementById('memberStatusName');
+	const memberDeleteBtn = document.getElementById('memberStatusDeleteBtn');
+	
+	if (memberStatusName) {
+		memberStatusName.value = currentUser();
+	}
+	
+	if (memberForm) {
+		memberForm.addEventListener('submit', async (e) => {
+			e.preventDefault();
+			const text = memberForm.querySelector('[name=text]').value.trim();
+			const name = memberForm.querySelector('[name=name]').value;
+			
+			if (!text) {
+				globalToast('Status cannot be empty', 'info');
+				return;
+			}
+			
+			try {
+				const fd = new FormData();
+				fd.append('name', name);
+				fd.append('text', text);
+				
+				const response = await fetch('/personal-status', {
+					method: 'POST',
+					body: new URLSearchParams(fd)
+				});
+				
+				if (response.ok) {
+					memberForm.reset();
+					globalToast('Status saved', 'success');
+				} else {
+					globalToast('Failed to save status', 'error');
+				}
+			} catch (err) {
+				globalToast('Error: ' + err.message, 'error');
+			}
+		});
+	}
+
+	if (memberDeleteBtn) {
+		memberDeleteBtn.addEventListener('click', async (e) => {
+			e.preventDefault();
+			const name = memberStatusName.value;
+			
+			try {
+				const fd = new FormData();
+				fd.append('name', name);
+				fd.append('action', 'delete');
+				
+				const response = await fetch('/personal-status', {
+					method: 'POST',
+					body: new URLSearchParams(fd)
+				});
+				
+				if (response.ok) {
+					memberForm.reset();
+					globalToast('Status cleared', 'success');
+				}
+			} catch (err) {
+				globalToast('Error: ' + err.message, 'error');
+			}
+		});
+	}
+
+	// Notice form
+	const noticeForm = document.querySelector('form[action="/notice"]');
+	if (noticeForm) {
+		const userInput = noticeForm.querySelector('[name=user]');
+		if (userInput) {
+			userInput.value = currentUser();
+		}
+	}
+
+	// Load placeholder data for stats
+	document.getElementById('eventCount').textContent = '5';
+	document.getElementById('taskCount').textContent = '3';
+	document.getElementById('noteCount').textContent = '12';
+})();
+</script>
+{% endblock %}

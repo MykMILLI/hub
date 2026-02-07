@@ -1,0 +1,1113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% if g.hub_settings %}{{ g.hub_settings.hub_name }}{% else %}{{ config.instance_name }}{% endif %} - HomeHub</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='output.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <!-- Config-driven theme variables (takes priority) -->
+    {% set pc = config.theme.primary_color.lstrip('#') %}
+    <style id="config-theme-vars">
+    /* Apply configured colors only when not in dark mode so dark overrides can take effect */
+    :root:not([data-theme="dark"]), [data-theme="light"] {
+        --primary-color: {{ config.theme.primary_color }};
+        --secondary-color: {{ config.theme.secondary_color }};
+        --background-color: {{ config.theme.background_color }};
+        --card-background-color: {{ config.theme.card_background_color }};
+        --text-color: {{ config.theme.text_color }};
+        --sidebar-background-color: {{ config.theme.sidebar_background_color }};
+        --sidebar-text-color: {{ config.theme.sidebar_text_color }};
+        --sidebar-link-color: {{ config.theme.sidebar_link_color }};
+        --sidebar-link-border-color: {{ config.theme.sidebar_link_border_color }};
+        --sidebar-active-color: {{ config.theme.sidebar_active_color }};
+    }
+    </style>
+    {% if pc|length == 6 %}
+    <style>:root { --primary-rgb: {{ pc[0:2]|int(base=16) }}, {{ pc[2:4]|int(base=16) }}, {{ pc[4:6]|int(base=16) }}; }</style>
+    {% endif %}
+    <style>
+    .btn, button.btn, a.btn { padding:0.5rem 0.75rem; font-size:0.875rem; font-weight:500; line-height:1.25rem; border-radius:0.75rem; display:inline-flex; align-items:center; gap:0.25rem; transition-m3; }
+    .btn-primary { background:var(--primary-color); color:white; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    .btn-primary:hover { filter:brightness(1.08); transform: translateY(-1px); box-shadow: 0 8px 12px rgba(0,0,0,0.15); }
+    .btn-primary:active { transform: translateY(0); }
+    .btn-danger { background:var(--danger-color); color:white; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    .btn-danger:hover { filter:brightness(1.08); transform: translateY(-1px); box-shadow: 0 8px 12px rgba(0,0,0,0.15); }
+    .btn-danger:active { transform: translateY(0); }
+    .btn-success { background:#16a34a; color:white; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    .btn-success:hover { filter:brightness(1.08); transform: translateY(-1px); box-shadow: 0 8px 12px rgba(0,0,0,0.15); }
+    .btn-secondary { background:var(--m3-surface-variant); color:var(--m3-on-surface); box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    .btn-secondary:hover { filter:brightness(0.95); }
+    /* Sidebar modern styling with glassmorphism */
+    .sidebar {
+        background: linear-gradient(135deg, var(--sidebar-background-color) 0%, rgba(79, 70, 229, 0.8) 100%);
+        box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+    }
+    /* Sidebar collapse styles (desktop-only) + root hint to avoid flash */
+    @media (min-width: 768px){
+        .sidebar.collapsed,
+        .prefers-sidebar-collapsed .sidebar{ width: 4rem; }
+        .sidebar.collapsed .brand-name,
+        .prefers-sidebar-collapsed .sidebar .brand-name{ display:none; }
+        .sidebar.collapsed .nav-label,
+        .prefers-sidebar-collapsed .sidebar .nav-label{ display:none; }
+        .sidebar.collapsed #sidebarNav a,
+        .prefers-sidebar-collapsed .sidebar #sidebarNav a{ padding-left: 1rem; padding-right: 1rem; justify-content: center; }
+    }
+    /* Ensure dark theme variable overrides reassert after config injection */
+    [data-theme="dark"] {
+        --background-color: #0f172a;
+        --card-background-color: #111827;
+        --text-color: #f1f5f9;
+    }
+    </style>
+    <link rel="manifest" href="/manifest.webmanifest">
+    <meta name="theme-color" content="{{ config.theme.primary_color }}">
+    <!-- App icons -->
+    <link rel="icon" type="image/png" sizes="192x192" href="/static/icons/icon-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="/static/icons/icon-512.png">
+    <!-- iOS PWA hints -->
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+    {% block extra_head %}{% endblock %}
+    <script>
+        // Apply saved sidebar collapsed state ASAP to avoid flash before main JS runs
+        (function(){
+            try{
+                var saved = localStorage.getItem('ui:sidebarCollapsed');
+                var collapsed = (saved==='1' || saved==='true');
+                if(collapsed){
+                    document.documentElement.classList.add('prefers-sidebar-collapsed');
+                }
+                // Also set initial icon/title when DOM is ready, using the same preference
+                function setInitialIcon(){
+                    var icon = document.getElementById('collapseIcon');
+                    if(icon){ icon.className = 'fa-solid '+(collapsed ? 'fa-angles-right' : 'fa-angles-left'); }
+                    var btn = document.getElementById('toggleCollapse');
+                    if(btn){ btn.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar'; }
+                }
+                document.addEventListener('DOMContentLoaded', setInitialIcon, { once: true });
+            }catch(e){}
+        })();
+    </script>
+    <script>
+        (function() {
+            const mq = window.matchMedia('(prefers-color-scheme: dark)');
+            const apply = () => document.documentElement.setAttribute('data-theme', mq.matches ? 'dark' : 'light');
+            apply();
+            try { mq.addEventListener('change', apply); } catch(e) { mq.addListener(apply); }
+        })();
+    </script>
+</head>
+<body class="min-h-screen">
+    <div class="flex min-h-screen">
+        <!-- Global JSON data for client scripts -->
+        <script id="familyData" type="application/json">[]</script>
+        <!-- Sidebar -->
+        <aside id="sidebar" class="sidebar w-64 text-white flex flex-col fixed md:static inset-y-0 left-0 transform -translate-x-full md:translate-x-0 transition-transform duration-200 z-40">
+            <div class="glass-lg m-2 p-6 text-2xl font-bold border border-white/30 flex items-center justify-between rounded-2xl" style="color: var(--sidebar-text-color);">
+                <span class="brand-name font-extrabold tracking-tight">{% if g.hub_settings %}{{ g.hub_settings.hub_name }}{% else %}{{ config.instance_name }}{% endif %}</span>
+                <div class="flex items-center gap-2">
+                    <button id="toggleCollapse" class="hidden md:inline-flex text-white/90 hover:text-white hover:scale-110 transition-m3" title="Collapse sidebar" aria-label="Collapse">
+                        <i id="collapseIcon" class="fa-solid fa-angles-left"></i>
+                    </button>
+                    <button id="closeSidebar" class="md:hidden text-white/90 hover:text-white" aria-label="Close">✕</button>
+                </div>
+            </div>
+            <nav class="flex-1 p-4 space-y-2 overflow-y-auto" id="sidebarNav">
+                {% if config.menu_visibility.get('welcome', true) %}<a href="/" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Welcome" data-menu="welcome"><i class="fa-solid fa-house w-5 text-center"></i><span class="nav-label">Welcome</span></a>{% endif %}
+                {% if config.menu_visibility.get('shared_notes', true) and config.feature_toggles.get('notes') %}<a href="/notes" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Shared Notes" data-menu="shared_notes"><i class="fa-solid fa-note-sticky w-5 text-center"></i><span class="nav-label">Shared Notes</span></a>{% endif %}
+                {% if config.menu_visibility.get('shared_cloud', true) and config.feature_toggles.get('shared_cloud') %}<a href="/upload" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Shared Cloud" data-menu="shared_cloud"><i class="fa-solid fa-cloud w-5 text-center"></i><span class="nav-label">Shared Cloud</span></a>{% endif %}
+                {% if config.menu_visibility.get('shopping_list', true) and config.feature_toggles.get('shopping_list') %}<a href="/shopping" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Shopping List" data-menu="shopping_list"><i class="fa-solid fa-cart-shopping w-5 text-center"></i><span class="nav-label">Shopping List</span></a>{% endif %}
+                {% if config.menu_visibility.get('chores', true) and config.feature_toggles.get('chores') %}<a href="/chores" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="To-Do/Chores" data-menu="chores"><i class="fa-solid fa-list-check w-5 text-center"></i><span class="nav-label">To-Do/Chores</span></a>{% endif %}
+                {% if config.menu_visibility.get('recipes', true) and config.feature_toggles.get('recipes') %}<a href="/recipes" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Recipe Book" data-menu="recipes"><i class="fa-solid fa-utensils w-5 text-center"></i><span class="nav-label">Recipe Book</span></a>{% endif %}
+                {% if config.menu_visibility.get('expiry_tracker', true) and config.feature_toggles.get('expiry_tracker') %}<a href="/expiry" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Expiry Tracker" data-menu="expiry_tracker"><i class="fa-solid fa-hourglass-half w-5 text-center"></i><span class="nav-label">Expiry Tracker</span></a>{% endif %}
+                {% if config.menu_visibility.get('url_shortener', true) and config.feature_toggles.get('url_shortener') %}<a href="/shorten" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="URL Shortener" data-menu="url_shortener"><i class="fa-solid fa-link w-5 text-center"></i><span class="nav-label">URL Shortener</span></a>{% endif %}
+                {% if config.menu_visibility.get('media_downloader', true) and config.feature_toggles.get('media_downloader') %}<a href="/media" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Media Downloader" data-menu="media_downloader"><i class="fa-solid fa-download w-5 text-center"></i><span class="nav-label">Media Downloader</span></a>{% endif %}
+                {% if config.menu_visibility.get('pdf_compressor', true) and config.feature_toggles.get('pdf_compressor') %}<a href="/pdfs" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="PDF Compressor" data-menu="pdf_compressor"><i class="fa-solid fa-file-pdf w-5 text-center"></i><span class="nav-label">PDF Compressor</span></a>{% endif %}
+                {% if config.menu_visibility.get('qr_generator', true) and config.feature_toggles.get('qr_generator') %}<a href="/qr" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="QR Generator" data-menu="qr_generator"><i class="fa-solid fa-qrcode w-5 text-center"></i><span class="nav-label">QR Generator</span></a>{% endif %}
+                {% if config.menu_visibility.get('expense_tracker', true) and config.feature_toggles.get('expense_tracker', true) %}<a href="/expenses" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Expense & Money Tracker" data-menu="expense_tracker"><i class="fa-solid fa-wallet w-5 text-center"></i><span class="nav-label">Expense & Money Tracker</span></a>{% endif %}
+            </nav>
+            <div class="border-t border-white/20 p-4">
+                {% if config.menu_visibility.get('settings', true) %}<a href="/settings" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Settings" data-menu="settings"><i class="fa-solid fa-gear w-5 text-center"></i><span class="nav-label">Settings</span></a>{% endif %}
+            </div>
+            <script>
+            // Highlight active sidebar link
+            (() => {
+                const links = document.querySelectorAll('#sidebarNav .sidebar-link');
+                const path = window.location.pathname.replace(/\/$/, '');
+                links.forEach(link => {
+                    let href = link.getAttribute('href').replace(/\/$/, '');
+                    // Only mark active if exact match
+                    if (href === path) {
+                        link.classList.add('active');
+                    } else {
+                        link.classList.remove('active');
+                    }
+                });
+            })();
+            </script>
+        </aside>
+        <!-- Main Content -->
+        <main class="main-content flex-1 p-4 md:p-8 overflow-y-auto md:ml-0 ml-0">
+            <div class="max-w-none md:max-w-none mx-auto">
+                <div class="sticky top-0 z-20 mb-6">
+                    <div class="glass p-4 rounded-2xl flex items-center flex-wrap gap-2">
+                        <button id="openSidebar" class="md:hidden bg-gradient-to-br from-m3-primary to-m3-secondary text-white px-4 py-2 rounded-xl hover:shadow-lg transition-m3 font-medium"><i class="fa-solid fa-bars"></i> Menu</button>
+                        <button id="themeToggle" class="bg-gradient-to-br from-yellow-500 to-orange-500 dark:from-blue-600 dark:to-indigo-600 text-white px-4 py-2 rounded-xl hover:shadow-lg transition-m3 font-medium" title="Toggle dark mode"><i class="fa-solid fa-sun dark:hidden"></i><i class="fa-solid fa-moon hidden dark:inline"></i></button>
+                        {% if not (hide_user_ui | default(false)) %}
+                        <div class="ml-auto flex items-center gap-3 flex-wrap justify-end">
+                            <div id="welcome" class="text-sm font-medium text-m3-on-surface-variant truncate max-w-[50vw]"></div>
+                            <div>
+                                <label class="text-sm font-medium text-m3-on-surface-variant mr-2">User:</label>
+                                <select id="userSwitcher" class="glass border rounded-lg p-2 text-sm font-medium cursor-pointer hover:shadow-md transition-m3"></select>
+                            </div>
+                            {% if is_authed %}
+                            <a href="/logout" class="glass px-3 py-2 rounded-lg text-sm font-medium hover:shadow-md transition-m3"><i class="fa-solid fa-right-from-bracket"></i> Logout</a>
+                            {% endif %}
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                <div id="globalFlashWrap" class="hidden">{% include "_flash.html" %}</div>
+                {% block content %}{% endblock %}
+            </div>
+        </main>
+    </div>
+    <script>        
+        (function(){
+            if(window.globalToast) return;
+            const hostId='toastHost';
+            let toastEl = null;
+            let hideTimer = null;
+            let hideEndTimer = null;
+            function ensure(){ let h=document.getElementById(hostId); if(!h){ h=document.createElement('div'); h.id=hostId; h.className='fixed top-4 right-4 z-50 pointer-events-none'; document.body.appendChild(h);} return h; }
+            function classFor(type){ return type==='error'?['bg-red-600']:(type==='success'?['bg-green-600']:(type==='info'?['bg-blue-600']:['bg-gray-800'])); }
+            window.globalToast=function(msg,type){ const host=ensure(); if(!toastEl){ toastEl=document.createElement('div'); host.appendChild(toastEl);} if(hideTimer){ clearTimeout(hideTimer); hideTimer=null; } if(hideEndTimer){ clearTimeout(hideEndTimer); hideEndTimer=null; }
+                toastEl.className='pointer-events-auto inline-block px-3 py-2 rounded shadow text-sm text-white transition-opacity duration-200 '+classFor(type).join(' ');
+                toastEl.style.display='';
+                toastEl.style.opacity='1';
+                toastEl.style.pointerEvents='auto';
+                toastEl.textContent=msg; 
+                hideTimer=setTimeout(()=>{                     
+                    toastEl.style.opacity='0'; 
+                    toastEl.style.pointerEvents='none';                    
+                    hideEndTimer=setTimeout(()=>{ toastEl && (toastEl.style.display='none'); }, 240);
+                }, 2600); // fade start
+            };
+        })();        
+        (function(){
+            const wrap = document.getElementById('globalFlashWrap');
+            if(!wrap) return;
+            const msgs = Array.from(wrap.querySelectorAll('.px-3, .flash-msg'));
+            if(!msgs.length){ wrap.remove(); return; }
+            const classify = (el)=>{
+                const cls = el.className;
+                if(/green/i.test(cls)) return 'success';
+                if(/red/i.test(cls)) return 'error';
+                if(/yellow|amber/i.test(cls)) return 'info';
+                return 'info';
+            };
+            msgs.forEach((el,i)=>{
+                const text = (el.textContent||'').trim();
+                setTimeout(()=>{ if(window.globalToast && text) globalToast(text, classify(el)); }, i*60);
+            });            
+            setTimeout(()=>wrap.remove(), msgs.length*70 + 200);
+        })();        
+        function showUserSelectModal(users){
+            const modal = document.getElementById('userSelectModal');
+            const input = document.getElementById('userSelectInput');
+            const confirmBtn = document.getElementById('userSelectConfirm');
+            if (!modal || !input || !confirmBtn) return;
+            input.innerHTML = '';
+            users.forEach(u => {
+                const opt = document.createElement('option');
+                opt.value = u; opt.textContent = u; input.appendChild(opt);
+            });
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            confirmBtn.onclick = function(){
+                const selected = input.value;
+                if (selected){
+                    localStorage.setItem('username', selected);
+                    const switcher = document.getElementById('userSwitcher');
+                    if (switcher){ switcher.value = selected; }
+                    renderWelcome();
+                    applyUserContext();
+                }
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            };
+        }
+        // Ensure a username is stored in localStorage; initialize after DOM is ready
+        document.addEventListener('DOMContentLoaded', async function(){
+            const switcher = document.getElementById('userSwitcher');
+            if (switcher){
+                const adminName = '{{ config.admin_name }}';
+                
+                // Fetch family members from database
+                fetch('/api/family-members')
+                    .then(r => r.json())
+                    .then(data => {
+                        let family = [];
+                        if (data.ok && data.members) {
+                            family = data.members.map(m => m.name);
+                        }
+                        const users = [adminName, ...family];
+                        switcher.innerHTML = '';
+                        users.forEach(u => {
+                            const opt = document.createElement('option');
+                            opt.value = u; opt.textContent = u;
+                            switcher.appendChild(opt);
+                        });
+                        const existing = localStorage.getItem('username');
+                        if (existing){
+                            switcher.value = existing;
+                        } else {
+                            // Show first-run user selection modal now that DOM is ready
+                            showUserSelectModal(users);
+                        }
+                    })
+                    .catch(e => {
+                        console.warn('Failed to load family members from API, using config fallback', e);
+                        const familyEl = document.getElementById('familyData');
+                        let family = [];
+                        try { family = JSON.parse(familyEl?.textContent || '[]'); } catch(e) { family = []; }
+                        const users = [adminName, ...family];
+                        switcher.innerHTML = '';
+                        users.forEach(u => {
+                            const opt = document.createElement('option');
+                            opt.value = u; opt.textContent = u;
+                            switcher.appendChild(opt);
+                        });
+                        const existing = localStorage.getItem('username');
+                        if (existing){
+                            switcher.value = existing;
+                        } else {
+                            showUserSelectModal(users);
+                        }
+                    });
+                
+                switcher.addEventListener('change', async function(){
+                    const selectedMember = this.value;
+                    const adminName = '{{ config.admin_name }}';
+                    
+                    // Admin doesn't require PIN, switch directly
+                    if (selectedMember === adminName) {
+                        localStorage.setItem('username', selectedMember);
+                        renderWelcome();
+                        applyUserContext();
+                        document.dispatchEvent(new CustomEvent('user-switched', { detail: { user: selectedMember }}));
+                        return;
+                    }
+                    
+                    // Family members: check if they have a PIN set
+                    try {
+                        const response = await fetch('/api/family-members');
+                        const data = await response.json();
+                        
+                        const member = data.members?.find(m => m.name === selectedMember);
+                        const hasPIN = member && member.pin; // Check if member has a PIN
+                        
+                        if (hasPIN) {
+                            // Member has PIN: show verification modal
+                            window.showMemberPINModal(selectedMember);
+                        } else {
+                            // No PIN set: show setup modal or login directly
+                            // After they set a PIN, they'll see setup modal
+                            // For first-time, we'll allow them to set it now
+                            window.showMemberSetPinModal(selectedMember);
+                        }
+                    } catch (err) {
+                        console.error('Error checking member PIN status:', err);
+                        // Fallback: show PIN modal anyway
+                        window.showMemberPINModal(selectedMember);
+                    }
+                    
+                    // Reset selector to current user until PIN verified
+                    const currentUser = localStorage.getItem('username') || adminName;
+                    this.value = currentUser;
+                });
+            }
+            
+            // Sync with server session - fetch current member from backend
+            // This MUST complete before we render, so we use await
+            try {
+                const response = await fetch('/api/current-member');
+                const data = await response.json();
+                if (data.ok && data.member) {
+                    // Server has a session - use the server's member name
+                    console.log('Synced with server session:', data.member);
+                    localStorage.setItem('username', data.member);
+                }
+            } catch (err) {
+                console.warn('Could not sync with server session', err);
+            }
+            
+            // CRITICAL: Render AFTER server sync completes
+            // This ensures the welcome message shows the correct user from server session
+            console.log('Rendering welcome with username:', localStorage.getItem('username'));
+            renderWelcome();
+            applyUserContext();
+            
+            // Sidebar toggles
+            const sidebar = document.getElementById('sidebar');
+            const COLLAPSE_KEY = 'ui:sidebarCollapsed';
+            const rootEl = document.documentElement;
+            document.getElementById('openSidebar')?.addEventListener('click', ()=> sidebar.classList.remove('-translate-x-full'));
+            document.getElementById('closeSidebar')?.addEventListener('click', ()=> sidebar.classList.add('-translate-x-full'));
+            // Desktop collapse/expand
+            const collapseIcon = document.getElementById('collapseIcon');
+            function applyCollapsedState(collapsed){
+                const isCollapsed = !!collapsed;
+                if(window.matchMedia('(min-width: 768px)').matches){
+                    sidebar.classList.toggle('collapsed', isCollapsed);
+                }
+                // Keep root hint in sync for next load (used to avoid flash)
+                rootEl.classList.toggle('prefers-sidebar-collapsed', isCollapsed);
+                if(collapseIcon){ collapseIcon.className = 'fa-solid '+(isCollapsed ? 'fa-angles-right' : 'fa-angles-left'); }
+                const btn = document.getElementById('toggleCollapse');
+                if(btn){ btn.title = isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'; }
+            }
+            // Initialize from saved preference
+            try{ const saved = localStorage.getItem(COLLAPSE_KEY); applyCollapsedState(saved==='1'||saved==='true'); }catch(e){}
+            document.getElementById('toggleCollapse')?.addEventListener('click', ()=>{
+                if(window.matchMedia('(min-width: 768px)').matches){
+                    const willCollapse = !sidebar.classList.contains('collapsed');
+                    applyCollapsedState(willCollapse);
+                    try{ localStorage.setItem(COLLAPSE_KEY, willCollapse ? '1' : '0'); }catch(e){}
+                }
+            });
+        });
+        function renderWelcome(){
+            const name = localStorage.getItem('username') || '';
+            const d = new Date();
+            const ds = d.toLocaleString('en-US', { 
+                month: 'short', 
+                day: 'numeric', 
+                year: 'numeric',
+                hour: 'numeric',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: true
+            });
+            document.getElementById('welcome').textContent = name ? `Dashboard: ${name} — ${ds}` : ds;
+        }
+        function applyUserContext(){
+            const current = localStorage.getItem('username') || '';
+            const adminName = '{{ config.admin_name }}';
+            // hidden inputs
+            document.querySelectorAll('input[name="creator"]').forEach(function(i){ i.value = current; });
+            document.querySelectorAll('input[name="user"]').forEach(function(i){ i.value = current; });
+            // delete button visibility where data-creator is available
+            document.querySelectorAll('.delete-form').forEach(f => {
+                const creator = f.getAttribute('data-creator');
+                const allowed = (current === creator || current === adminName || current === 'Administrator' || current === 'admin');
+                f.style.display = allowed ? '' : 'none';
+            });
+            // Notice editor visibility if present
+            const nf = document.getElementById('noticeForm');
+            if (nf){
+                const isAdmin = (current === adminName || current === 'Administrator' || current === 'admin');
+                nf.style.display = isAdmin ? '' : 'none';
+                const userField = nf.querySelector('input[name="user"]');
+                if (userField) userField.value = current;
+            }
+        }
+        // renderWelcome/applyUserContext are invoked from DOMContentLoaded
+    </script>
+    <!-- First-visit user selection modal -->
+    <div id="userSelectModal" class="fixed inset-0 bg-black/50 backdrop-blur-md hidden items-center justify-center z-50">
+        <div class="glass-lg bg-opacity-95 w-full max-w-sm p-8 rounded-3xl shadow-2xl">
+            <h3 class="text-2xl font-bold mb-2 text-m3-on-surface">Welcome to HomeHub</h3>
+            <p class="text-sm font-medium text-m3-on-surface-variant mb-6">Select your user to personalize your experience.</p>
+            <div class="mb-6">
+                <label class="block text-sm font-semibold text-m3-on-surface mb-3" for="userSelectInput">Your User</label>
+                <select id="userSelectInput" class="w-full glass-sm rounded-xl p-3 font-medium cursor-pointer focus:outline-none focus:ring-2 focus:ring-m3-primary"></select>
+            </div>
+            <div class="flex justify-end gap-3">
+                <button id="userSelectConfirm" class="btn btn-primary px-6 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl">Continue</button>
+            </div>
+        </div>
+    </div>
+    
+</body>
+<script src="/static/js/reminders_api.js"></script>
+<script>
+// Dark mode toggle
+(function() {
+    const themeToggle = document.getElementById('themeToggle');
+    if (!themeToggle) return;
+    
+    const htmlElement = document.documentElement;
+    const savedTheme = localStorage.getItem('app-theme');
+    
+    // Sync with OS if no saved preference
+    if (!savedTheme) {
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        htmlElement.setAttribute('data-theme', prefersDark ? 'dark' : 'light');
+    } else {
+        htmlElement.setAttribute('data-theme', savedTheme);
+    }
+    
+    themeToggle.addEventListener('click', () => {
+        const currentTheme = htmlElement.getAttribute('data-theme') || 'light';
+        const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+        htmlElement.setAttribute('data-theme', newTheme);
+        localStorage.setItem('app-theme', newTheme);
+    });
+})();
+</script>
+
+<!-- PIN Verification Modal -->
+<div id="pinModal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
+    <div class="bg-white dark:bg-gray-800 rounded-xl p-6 w-96 max-w-sm shadow-2xl">
+        <h2 class="text-2xl font-bold mb-2 text-gray-800 dark:text-white" id="pinModalTitle">Enter PIN</h2>
+        <p class="text-gray-600 dark:text-gray-400 mb-6" id="pinModalSubtitle">for <span id="memberNameInModal"></span></p>
+        
+        <form id="pinForm" class="space-y-4">
+            <div>
+                <input type="password" id="pinInput" class="w-full p-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:bg-gray-700 dark:text-white text-center text-4xl font-bold tracking-widest" placeholder="••••" maxlength="4" pattern="[0-9]{4}" required>
+            </div>
+            <div id="pinError" class="text-red-600 dark:text-red-400 text-sm hidden"></div>
+            
+            <div class="flex gap-2">
+                <button type="button" id="pinCancel" class="flex-1 btn btn-secondary">Cancel</button>
+                <button type="submit" class="flex-1 btn btn-primary">Verify</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Welcome Overlay with Status Selection -->
+<div id="welcomeOverlay" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
+    <div class="bg-white dark:bg-gray-800 rounded-xl p-8 w-96 max-w-sm shadow-2xl">
+        <div class="text-center mb-8">
+            <div class="text-6xl mb-4">👋</div>
+            <h1 class="text-3xl font-bold text-gray-800 dark:text-white mb-2" id="welcomeMessage">Welcome!</h1>
+        </div>
+        
+        <div id="statusSection" class="hidden">
+            <p class="text-center text-gray-600 dark:text-gray-400 mb-4 font-semibold">Where are you right now?</p>
+            <div id="statusOptions" class="space-y-3 mb-4">
+                <button type="button" class="status-btn w-full p-3 rounded-lg border-2 border-gray-300 hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-all text-left font-semibold text-gray-700 dark:text-gray-300 text-sm" data-status="home">
+                    <i class="fas fa-home text-blue-500 mr-2"></i>Home
+                </button>
+                <button type="button" class="status-btn w-full p-3 rounded-lg border-2 border-gray-300 hover:border-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-all text-left font-semibold text-gray-700 dark:text-gray-300 text-sm" data-status="at_work">
+                    <i class="fas fa-briefcase text-orange-500 mr-2"></i>At Work
+                </button>
+                <button type="button" class="status-btn w-full p-3 rounded-lg border-2 border-gray-300 hover:border-green-500 hover:bg-green-50 dark:hover:bg-green-900/20 transition-all text-left font-semibold text-gray-700 dark:text-gray-300 text-sm" data-status="traveling">
+                    <i class="fas fa-plane text-green-500 mr-2"></i>Traveling
+                </button>
+                <button type="button" class="status-btn w-full p-3 rounded-lg border-2 border-gray-300 hover:border-purple-500 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-all text-left font-semibold text-gray-700 dark:text-gray-300 text-sm" data-status="away">
+                    <i class="fas fa-person-wandering text-purple-500 mr-2"></i>Away
+                </button>
+            </div>
+            <div class="mb-3">
+                <label class="block text-xs text-gray-600 dark:text-gray-400 mb-2">Or type a custom status:</label>
+                <input type="text" id="customStatusInput" class="w-full p-2 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:bg-gray-700 dark:text-white text-sm" placeholder="e.g., At the gym, Shopping...">
+            </div>
+            <button id="confirmStatusBtn" class="w-full btn btn-primary">Continue</button>
+        </div>
+        
+        <p id="loadingMessage" class="text-center text-gray-600 dark:text-gray-400">Switching to your dashboard...</p>
+    </div>
+</div>
+
+<!-- First-Time PIN Setup Modal -->
+<div id="setPinModal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
+    <div class="bg-white dark:bg-gray-800 rounded-xl p-6 w-96 max-w-sm shadow-2xl">
+        <h2 class="text-2xl font-bold mb-2 text-gray-800 dark:text-white">Secure Your Account</h2>
+        <p class="text-gray-600 dark:text-gray-400 mb-6">Set a 4-digit PIN to protect your personal data</p>
+        
+        <form id="setPinForm" class="space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Create PIN</label>
+                <input type="password" id="newPinInput" class="w-full p-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:bg-gray-700 dark:text-white text-center text-4xl font-bold tracking-widest" placeholder="••••" maxlength="4" pattern="[0-9]{4}" required>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Must be exactly 4 digits (0-9)</p>
+            </div>
+            
+            <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Confirm PIN</label>
+                <input type="password" id="confirmPinInput" class="w-full p-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:bg-gray-700 dark:text-white text-center text-4xl font-bold tracking-widest" placeholder="••••" maxlength="4" pattern="[0-9]{4}" required>
+            </div>
+            
+            <div id="setPinError" class="text-red-600 dark:text-red-400 text-sm hidden"></div>
+            
+            <div class="flex gap-2">
+                <button type="button" id="skipPinSetup" class="flex-1 btn btn-secondary">Skip for Now</button>
+                <button type="submit" class="flex-1 btn btn-primary">Set PIN</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+// PIN Modal and Member Login Handler
+(function() {
+    const pinModal = document.getElementById('pinModal');
+    const setPinModal = document.getElementById('setPinModal');
+    const pinForm = document.getElementById('pinForm');
+    const setPinForm = document.getElementById('setPinForm');
+    const pinInput = document.getElementById('pinInput');
+    const pinError = document.getElementById('pinError');
+    const pinCancel = document.getElementById('pinCancel');
+    const memberNameInModal = document.getElementById('memberNameInModal');
+    const welcomeOverlay = document.getElementById('welcomeOverlay');
+    const welcomeMessage = document.getElementById('welcomeMessage');
+    const newPinInput = document.getElementById('newPinInput');
+    const confirmPinInput = document.getElementById('confirmPinInput');
+    const setPinError = document.getElementById('setPinError');
+    const skipPinSetup = document.getElementById('skipPinSetup');
+    const statusSection = document.getElementById('statusSection');
+    const loadingMessage = document.getElementById('loadingMessage');
+    const customStatusInput = document.getElementById('customStatusInput');
+    const confirmStatusBtn = document.getElementById('confirmStatusBtn');
+    const statusBtns = document.querySelectorAll('.status-btn');
+    
+    let pendingMember = null;
+    let needsSetupPin = false;
+    let selectedStatus = null;
+    
+    // Show PIN verification modal
+    function showPINModal(memberName) {
+        pendingMember = memberName;
+        memberNameInModal.textContent = memberName;
+        pinInput.value = '';
+        pinError.classList.add('hidden');
+        pinModal.classList.remove('hidden');
+        setTimeout(() => pinInput.focus(), 100);
+    }
+    
+    // Hide PIN verification modal
+    function hidePINModal() {
+        pinModal.classList.add('hidden');
+        pendingMember = null;
+    }
+    
+    // Show first-time PIN setup modal
+    function showSetPinModal(memberName) {
+        pendingMember = memberName;
+        needsSetupPin = true;
+        newPinInput.value = '';
+        confirmPinInput.value = '';
+        setPinError.classList.add('hidden');
+        setPinModal.classList.remove('hidden');
+        setTimeout(() => newPinInput.focus(), 100);
+    }
+    
+    // Hide first-time PIN setup modal
+    function hideSetPinModal() {
+        setPinModal.classList.add('hidden');
+        pendingMember = null;
+        needsSetupPin = false;
+    }
+    
+    // Show status selection modal
+    function showStatusModal() {
+        selectedStatus = null;
+        statusModal.classList.remove('hidden');
+    }
+    
+    // Hide status selection modal
+    function hideStatusModal() {
+        statusModal.classList.add('hidden');
+    }
+    
+    // Show welcome overlay
+    function showWelcomeOverlay(memberName) {
+        welcomeMessage.textContent = `Welcome, ${memberName}!`;
+        welcomeOverlay.classList.remove('hidden');
+    }
+    
+    // Show status selection (integrated into welcome overlay)
+    function showStatusSelection() {
+        statusSection.classList.remove('hidden');
+        loadingMessage.classList.add('hidden');
+        customStatusInput.value = '';
+        selectedStatus = null;
+    }
+    
+    // Hide welcome overlay
+    function hideWelcomeOverlay() {
+        welcomeOverlay.classList.add('hidden');
+        statusSection.classList.add('hidden');
+        loadingMessage.classList.remove('hidden');
+    }
+    
+    // PIN verification form submission
+    pinForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const pin = pinInput.value.trim();
+        const memberToLogin = pendingMember; // Capture member name before anything async
+        
+        if (!pin || !memberToLogin) {
+            pinError.textContent = 'Member name not set - please try again';
+            pinError.classList.remove('hidden');
+            return;
+        }
+        
+        try {
+            const response = await fetch('/api/member-login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: memberToLogin, pin: pin })
+            });
+            
+            const data = await response.json();
+            
+            if (!response.ok) {
+                pinError.textContent = data.error || 'Invalid PIN';
+                pinError.classList.remove('hidden');
+                pinInput.value = '';
+                return;
+            }
+            
+            // Success - use the captured member name
+            hidePINModal();
+            console.log('PIN verified, showing welcome + status for:', memberToLogin);
+            
+            // Update localStorage
+            localStorage.setItem('username', memberToLogin);
+            
+            // Show welcome overlay with status selection
+            showWelcomeOverlay(memberToLogin);
+            setTimeout(() => showStatusSelection(), 500);
+            
+        } catch (err) {
+            pinError.textContent = 'Error: ' + err.message;
+            pinError.classList.remove('hidden');
+        }
+    });
+    
+    // First-time PIN setup form submission
+    setPinForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const newPin = newPinInput.value.trim();
+        const confirmPin = confirmPinInput.value.trim();
+        const memberToSetup = pendingMember; // Capture member name before anything async
+        
+        if (!newPin || !confirmPin || !memberToSetup) {
+            setPinError.textContent = 'Member name not set - please try again';
+            setPinError.classList.remove('hidden');
+            return;
+        }
+        
+        // Validate PIN format
+        if (!/^\d{4}$/.test(newPin)) {
+            setPinError.textContent = 'PIN must be exactly 4 digits';
+            setPinError.classList.remove('hidden');
+            return;
+        }
+        
+        // Check pins match
+        if (newPin !== confirmPin) {
+            setPinError.textContent = 'PINs do not match';
+            setPinError.classList.remove('hidden');
+            return;
+        }
+        
+        try {
+            // First, set the PIN
+            const response = await fetch('/api/member/set-pin', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    pin: newPin,
+                    member_name: memberToSetup
+                })
+            });
+            
+            const data = await response.json();
+            
+            if (!response.ok) {
+                setPinError.textContent = data.error || 'Failed to set PIN';
+                setPinError.classList.remove('hidden');
+                return;
+            }
+            
+            // PIN set successfully - now log them in
+            const loginResponse = await fetch('/api/member-login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: memberToSetup, pin: newPin })
+            });
+            
+            const loginData = await loginResponse.json();
+            
+            if (!loginResponse.ok) {
+                setPinError.textContent = loginData.error || 'Failed to log in';
+                setPinError.classList.remove('hidden');
+                return;
+            }
+            
+            // Logged in successfully - use captured member name
+            localStorage.setItem('username', memberToSetup);
+            hideSetPinModal();
+            console.log('PIN setup complete, showing welcome + status for:', memberToSetup);
+            
+            // Show welcome overlay with status selection
+            showWelcomeOverlay(memberToSetup);
+            setTimeout(() => showStatusSelection(), 500);
+            
+        } catch (err) {
+            setPinError.textContent = 'Error: ' + err.message;
+            setPinError.classList.remove('hidden');
+        }
+    });
+    
+    pinCancel.addEventListener('click', hidePINModal);
+    skipPinSetup.addEventListener('click', () => {
+        const memberToSkip = pendingMember; // Capture before anything changes
+        hideSetPinModal();
+        if (memberToSkip) {
+            localStorage.setItem('username', memberToSkip);
+            console.log('Skipping PIN setup, showing welcome + status for:', memberToSkip);
+            showWelcomeOverlay(memberToSkip);
+            setTimeout(() => showStatusSelection(), 500);
+        }
+    });
+    
+    // Status button click handlers
+    statusBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            selectedStatus = btn.dataset.status;
+            // Highlight selected button
+            statusBtns.forEach(b => b.style.borderColor = '#d1d5db');
+            btn.style.borderColor = '#3b82f6';
+            btn.style.backgroundColor = '#eff6ff';
+            if (btn.classList.contains('dark:hover:bg-blue-900/20')) {
+                btn.classList.add('dark:bg-blue-900/20');
+            }
+        });
+    });
+    
+    // Custom status input
+    customStatusInput.addEventListener('focus', () => {
+        selectedStatus = null;
+        statusBtns.forEach(b => {
+            b.style.borderColor = '#d1d5db';
+            b.style.backgroundColor = '';
+            b.classList.remove('dark:bg-blue-900/20');
+        });
+    });
+    
+    // Confirm status button
+    confirmStatusBtn.addEventListener('click', async () => {
+        const memberName = localStorage.getItem('username');
+        const customStatus = customStatusInput.value.trim();
+        const statusToSet = customStatus || selectedStatus || 'home';
+        
+        if (!memberName) return;
+        
+        try {
+            // Save status to server
+            const response = await fetch('/api/member/set-status', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    status: statusToSet,
+                    member_name: memberName
+                })
+            });
+            
+            const statusData = await response.json();
+            if (statusData.ok) {
+                console.log('Status set to:', statusToSet);
+            }
+        } catch (err) {
+            console.warn('Could not save status to server:', err);
+        }
+        
+        // Hide status and show loading message
+        hideWelcomeOverlay();
+        
+        setTimeout(() => {
+            location.reload();
+        }, 1500);
+    });
+    
+    // Expose for use in member switcher
+    window.showMemberPINModal = showPINModal;
+    window.showMemberSetPinModal = showSetPinModal;
+})();
+</script>
+
+<!-- Member Profile Overlay Modal -->
+<div id="memberProfileOverlay" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+    <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
+        <!-- Header -->
+        <div class="sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-6 flex justify-between items-center">
+            <h2 class="text-2xl font-bold" id="profileMemberName">Member Profile</h2>
+            <button onclick="closeMemberProfile()" class="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
+                <i class="fa-solid fa-times text-xl"></i>
+            </button>
+        </div>
+        
+        <!-- Content -->
+        <div class="p-8 space-y-8">
+            <!-- Avatar Section -->
+            <div class="flex flex-col items-center gap-4">
+                <div class="relative">
+                    <div id="profileAvatar" class="w-40 h-40 rounded-full flex items-center justify-center font-bold text-5xl text-white bg-gradient-to-br from-blue-500 to-purple-600 shadow-lg">
+                        A
+                    </div>
+                    <label class="absolute bottom-0 right-0 bg-blue-500 hover:bg-blue-600 text-white w-12 h-12 rounded-full flex items-center justify-center cursor-pointer transition-colors shadow-md">
+                        <i class="fa-solid fa-camera text-lg"></i>
+                        <input type="file" id="avatarUpload" class="hidden" accept="image/*" onchange="handleAvatarUpload(event)">
+                    </label>
+                </div>
+                <p class="text-sm text-gray-500 mt-2">Click camera to change photo</p>
+            </div>
+            
+            <!-- Location/Status Section -->
+            <div class="space-y-5">
+                <label class="block text-base font-semibold text-gray-700 dark:text-gray-300">Current Location</label>
+                
+                <!-- Preset Buttons -->
+                <div class="grid grid-cols-2 gap-3">
+                    <button class="profile-status-btn px-4 py-3 rounded-lg text-base font-medium border-2 border-gray-200 dark:border-gray-600 hover:border-green-500 transition-colors" data-status="home">
+                        <i class="fa-solid fa-home mr-2"></i>Home
+                    </button>
+                    <button class="profile-status-btn px-4 py-3 rounded-lg text-base font-medium border-2 border-gray-200 dark:border-gray-600 hover:border-purple-500 transition-colors" data-status="away">
+                        <i class="fa-solid fa-person-wandering mr-2"></i>Away
+                    </button>
+                    <button class="profile-status-btn px-4 py-3 rounded-lg text-base font-medium border-2 border-gray-200 dark:border-gray-600 hover:border-orange-500 transition-colors" data-status="at_work">
+                        <i class="fa-solid fa-briefcase mr-2"></i>At Work
+                    </button>
+                    <button class="profile-status-btn px-4 py-3 rounded-lg text-base font-medium border-2 border-gray-200 dark:border-gray-600 hover:border-blue-500 transition-colors" data-status="traveling">
+                        <i class="fa-solid fa-plane mr-2"></i>Traveling
+                    </button>
+                </div>
+                
+                <!-- Custom Status Input -->
+                <div class="mt-4">
+                    <label class="text-sm font-medium text-gray-600 dark:text-gray-400 block mb-3">Or set a custom location</label>
+                    <input type="text" id="profileCustomStatus" placeholder="e.g., Office, Gym, Shopping..." 
+                        class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg text-base dark:bg-gray-700 dark:text-white placeholder-gray-400 dark:placeholder-gray-500"
+                        onchange="clearProfileStatusSelection()">
+                </div>
+            </div>
+            
+            <!-- Info Text -->
+            <div class="text-sm text-gray-500 dark:text-gray-400 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                <i class="fa-solid fa-info-circle mr-2"></i>
+                More settings coming soon
+            </div>
+            
+            <!-- Action Buttons -->
+            <div class="flex gap-4">
+                <button onclick="closeMemberProfile()" class="flex-1 px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg text-base font-semibold hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                    Cancel
+                </button>
+                <button onclick="saveMemberProfile()" class="flex-1 px-4 py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-base font-semibold transition-colors">
+                    Save Changes
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let currentProfileData = {
+    memberId: null,
+    memberName: null,
+    avatar: null,
+    status: 'home'
+};
+
+let selectedProfileStatus = null;
+
+function openMemberProfile(memberId, memberName, status, hasAvatar) {
+    // Fetch the actual avatar data from the API
+    fetch(`/api/member/${memberId}/profile`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.ok) {
+                currentProfileData = {
+                    memberId: data.id,
+                    memberName: data.name,
+                    avatar: data.avatar,
+                    status: data.status || 'home'
+                };
+                
+                // Update overlay
+                document.getElementById('profileMemberName').textContent = data.name;
+                document.getElementById('profileCustomStatus').value = '';
+                selectedProfileStatus = null;
+                
+                // Set avatar
+                const avatarEl = document.getElementById('profileAvatar');
+                if (data.avatar) {
+                    avatarEl.style.backgroundImage = `url('${data.avatar}')`;
+                    avatarEl.style.backgroundSize = 'cover';
+                    avatarEl.style.backgroundPosition = 'center';
+                    avatarEl.textContent = '';
+                } else {
+                    avatarEl.style.backgroundImage = 'none';
+                    avatarEl.style.background = 'linear-gradient(135deg, var(--primary-color), #667eea)';
+                    avatarEl.textContent = data.name.charAt(0).toUpperCase();
+                }
+                
+                // Reset status buttons
+                document.querySelectorAll('.profile-status-btn').forEach(btn => {
+                    btn.classList.remove('border-green-500', 'border-purple-500', 'border-orange-500', 'border-blue-500', 'bg-green-50', 'bg-purple-50', 'bg-orange-50', 'bg-blue-50');
+                    btn.style.borderColor = '';
+                    btn.style.backgroundColor = '';
+                    
+                    // Highlight current status
+                    if (btn.dataset.status === (data.status || 'home')) {
+                        const colors = {
+                            'home': { border: '#22c55e', bg: '#dcfce7' },
+                            'away': { border: '#a855f7', bg: '#f3e8ff' },
+                            'at_work': { border: '#f97316', bg: '#ffedd5' },
+                            'traveling': { border: '#3b82f6', bg: '#dbeafe' }
+                        };
+                        const color = colors[data.status || 'home'];
+                        if (color) {
+                            btn.style.borderColor = color.border;
+                            btn.style.borderWidth = '2px';
+                            btn.style.backgroundColor = color.bg;
+                        }
+                        selectedProfileStatus = data.status || 'home';
+                    }
+                });
+                
+                // Show overlay
+                document.getElementById('memberProfileOverlay').classList.remove('hidden');
+            }
+        })
+        .catch(e => console.error('Error loading member profile:', e));
+}
+
+function closeMemberProfile() {
+    document.getElementById('memberProfileOverlay').classList.add('hidden');
+    currentProfileData = { memberId: null, memberName: null, avatar: null, status: 'home' };
+    selectedProfileStatus = null;
+}
+
+function clearProfileStatusSelection() {
+    selectedProfileStatus = null;
+    document.querySelectorAll('.profile-status-btn').forEach(btn => {
+        btn.style.borderColor = '';
+        btn.style.backgroundColor = '';
+    });
+}
+
+// Status button clicks in profile
+document.querySelectorAll('.profile-status-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+        clearProfileStatusSelection();
+        selectedProfileStatus = this.dataset.status;
+        document.getElementById('profileCustomStatus').value = '';
+        
+        // Highlight selected button
+        const colors = {
+            'home': { border: '#22c55e', bg: '#dcfce7' },
+            'away': { border: '#a855f7', bg: '#f3e8ff' },
+            'at_work': { border: '#f97316', bg: '#ffedd5' },
+            'traveling': { border: '#3b82f6', bg: '#dbeafe' }
+        };
+        const color = colors[this.dataset.status];
+        if (color) {
+            this.style.borderColor = color.border;
+            this.style.borderWidth = '2px';
+            this.style.backgroundColor = color.bg;
+        }
+    });
+});
+
+function handleAvatarUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    // Check file size (max 500KB)
+    if (file.size > 500000) {
+        alert('Image too large. Maximum size is 500KB.');
+        return;
+    }
+    
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const base64 = e.target.result;
+        currentProfileData.avatar = base64;
+        
+        // Update avatar display
+        const avatarEl = document.getElementById('profileAvatar');
+        avatarEl.style.backgroundImage = `url('${base64}')`;
+        avatarEl.style.backgroundSize = 'cover';
+        avatarEl.style.backgroundPosition = 'center';
+        avatarEl.textContent = '';
+    };
+    reader.readAsDataURL(file);
+}
+
+async function saveMemberProfile() {
+    if (!currentProfileData.memberId) return;
+    
+    const customStatus = document.getElementById('profileCustomStatus').value.trim();
+    const statusToSave = customStatus || selectedProfileStatus || currentProfileData.status;
+    
+    try {
+        const response = await fetch(`/api/member/${currentProfileData.memberId}/profile`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                avatar: currentProfileData.avatar,
+                status: statusToSave
+            })
+        });
+        
+        const data = await response.json();
+        if (data.ok) {
+            console.log('Profile saved successfully');
+            closeMemberProfile();
+            // Reload to show updated avatar and status
+            setTimeout(() => location.reload(), 500);
+        } else {
+            alert('Error: ' + (data.error || 'Failed to save profile'));
+        }
+    } catch (err) {
+        console.error('Error saving profile:', err);
+        alert('Error saving profile. Please try again.');
+    }
+}
+
+// Close overlay on escape key
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeMemberProfile();
+});
+
+// Close overlay when clicking outside
+document.getElementById('memberProfileOverlay')?.addEventListener('click', function(e) {
+    if (e.target === this) closeMemberProfile();
+});
+
+// Member avatar card click handlers
+document.querySelectorAll('.member-avatar-card').forEach(card => {
+    card.addEventListener('click', function() {
+        const memberId = this.dataset.memberId;
+        const memberName = this.dataset.memberName;
+        openMemberProfile(memberId, memberName);
+    });
+});
+</script>
+
+<!-- Weather Widget Script -->
+<script src="{{ url_for('static', filename='js/weather-new.js') }}"></script>
+
+<script>
+(function(){
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function(){
+            navigator.serviceWorker.register('/sw.js', { scope: '/' })
+                .catch(function(err){ console.warn('SW registration failed', err); });
+        });
+    }
+})();
+</script>
+</html>

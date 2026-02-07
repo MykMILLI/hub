@@ -1,0 +1,459 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .glass-container {
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+  }
+  
+  .tab-active { 
+    border-bottom: 3px solid #6366f1;
+    color: #6366f1;
+  }
+  
+  .tab-inactive {
+    border-bottom: 2px solid transparent;
+    color: #6b7280;
+  }
+  
+  .progress-ring {
+    transform: rotate(-90deg);
+    transform-origin: 50% 50%;
+  }
+  
+  .progress-ring-circle {
+    transition: stroke-dashoffset 0.5s ease;
+  }
+  
+  .metric-card {
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(6, 182, 212, 0.1) 100%);
+    border: 1px solid rgba(99, 102, 241, 0.2);
+  }
+  
+  .modal { 
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+  }
+  
+  .modal.active { display: flex; }
+  .modal-content { background: white; border-radius: 12px; width: 90%; max-width: 500px; }
+</style>
+
+<div class="max-w-screen-2xl mx-auto py-8 space-y-8">
+  <!-- Header -->
+  <div class="flex items-center justify-between">
+    <h1 class="text-4xl font-bold text-gray-900">Money Management</h1>
+    <div class="flex gap-2">
+      <button onclick="openModal('budgetModal')" class="btn bg-indigo-600 text-white">
+        <i class="fas fa-plus mr-2"></i>New Budget
+      </button>
+      <button onclick="openModal('expenseModal')" class="btn bg-cyan-600 text-white">
+        <i class="fas fa-share mr-2"></i>Split Expense
+      </button>
+      <button onclick="openModal('goalModal')" class="btn bg-green-600 text-white">
+        <i class="fas fa-bullseye mr-2"></i>Set Goal
+      </button>
+    </div>
+  </div>
+
+  <!-- Analytics Summary -->
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4" id="analytics-summary">
+    <div class="glass-container rounded-lg p-6">
+      <div class="flex items-start justify-between">
+        <div>
+          <p class="text-gray-600 text-sm font-medium">Budget Status</p>
+          <p class="text-3xl font-bold text-gray-900 mt-2" id="budget-remaining">$0</p>
+          <p class="text-gray-500 text-xs mt-1">Remaining this month</p>
+        </div>
+        <div class="bg-indigo-100 p-3 rounded-full">
+          <i class="fas fa-wallet text-indigo-600 text-lg"></i>
+        </div>
+      </div>
+    </div>
+
+    <div class="glass-container rounded-lg p-6">
+      <div class="flex items-start justify-between">
+        <div>
+          <p class="text-gray-600 text-sm font-medium">Total Debt</p>
+          <p class="text-3xl font-bold text-gray-900 mt-2" id="total-debt">$0</p>
+          <p class="text-gray-500 text-xs mt-1"><span id="debt-count">0</span> active accounts</p>
+        </div>
+        <div class="bg-red-100 p-3 rounded-full">
+          <i class="fas fa-credit-card text-red-600 text-lg"></i>
+        </div>
+      </div>
+    </div>
+
+    <div class="glass-container rounded-lg p-6">
+      <div class="flex items-start justify-between">
+        <div>
+          <p class="text-gray-600 text-sm font-medium">Goals Progress</p>
+          <p class="text-3xl font-bold text-gray-900 mt-2" id="goals-progress">0%</p>
+          <p class="text-gray-500 text-xs mt-1" id="goals-target">$0 / $0</p>
+        </div>
+        <div class="bg-green-100 p-3 rounded-full">
+          <i class="fas fa-flag text-green-600 text-lg"></i>
+        </div>
+      </div>
+    </div>
+
+    <div class="glass-container rounded-lg p-6">
+      <div class="flex items-start justify-between">
+        <div>
+          <p class="text-gray-600 text-sm font-medium">This Month</p>
+          <p class="text-3xl font-bold text-gray-900 mt-2" id="month-spent">$0</p>
+          <p class="text-gray-500 text-xs mt-1">Individual + Shared</p>
+        </div>
+        <div class="bg-cyan-100 p-3 rounded-full">
+          <i class="fas fa-chart-pie text-cyan-600 text-lg"></i>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tabs Navigation -->
+  <div class="glass-container rounded-lg border-b">
+    <div class="flex gap-8 px-6">
+      <button onclick="switchTab('budgets')" class="tab-button py-4 font-medium tab-active" data-tab="budgets">
+        <i class="fas fa-piggy-bank mr-2"></i>Budgets
+      </button>
+      <button onclick="switchTab('expenses')" class="tab-button py-4 font-medium tab-inactive" data-tab="expenses">
+        <i class="fas fa-exchange-alt mr-2"></i>Shared Expenses
+      </button>
+      <button onclick="switchTab('debts')" class="tab-button py-4 font-medium tab-inactive" data-tab="debts">
+        <i class="fas fa-handshake mr-2"></i>Debts
+      </button>
+      <button onclick="switchTab('goals')" class="tab-button py-4 font-medium tab-inactive" data-tab="goals">
+        <i class="fas fa-rocket mr-2"></i>Goals
+      </button>
+      <button onclick="switchTab('plaid')" class="tab-button py-4 font-medium tab-inactive" data-tab="plaid">
+        <i class="fas fa-university mr-2"></i>Bank Accounts
+      </button>
+    </div>
+  </div>
+
+  <!-- Tab Content -->
+  <div id="budgets" class="tab-content space-y-6">
+    <!-- Budget List -->
+    <div id="budgets-list" class="grid grid-cols-1 gap-4"></div>
+  </div>
+
+  <div id="expenses" class="tab-content space-y-6" style="display: none;">
+    <!-- Shared Expenses List -->
+    <div id="expenses-list" class="space-y-4"></div>
+  </div>
+
+  <div id="debts" class="tab-content space-y-6" style="display: none;">
+    <!-- Debts List -->
+    <div id="debts-list" class="space-y-4"></div>
+  </div>
+
+  <div id="goals" class="tab-content space-y-6" style="display: none;">
+    <!-- Goals List -->
+    <div id="goals-list" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+  </div>
+
+  <div id="plaid" class="tab-content space-y-6" style="display: none;">
+    <!-- Plaid Accounts -->
+    <button onclick="openModal('plaidLinkModal')" class="btn bg-blue-600 text-white">
+      <i class="fas fa-link mr-2"></i>Link Bank Account
+    </button>
+    <div id="plaid-accounts" class="space-y-4"></div>
+  </div>
+</div>
+
+<!-- ==================== MODALS ==================== -->
+
+<!-- Budget Modal -->
+<div id="budgetModal" class="modal">
+  <div class="modal-content p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-2xl font-bold">Create Budget</h2>
+      <button onclick="closeModal('budgetModal')" class="text-gray-500 hover:text-gray-700">
+        <i class="fas fa-times text-xl"></i>
+      </button>
+    </div>
+    <form id="budgetForm" class="space-y-4">
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Budget Name</label>
+        <input type="text" name="name" required class="form-input w-full" placeholder="Monthly Budget">
+      </div>
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Month</label>
+          <select name="month" required class="form-input w-full">
+            <option value="1">January</option>
+            <option value="2">February</option>
+            <option value="3">March</option>
+            <option value="4">April</option>
+            <option value="5">May</option>
+            <option value="6">June</option>
+            <option value="7">July</option>
+            <option value="8">August</option>
+            <option value="9">September</option>
+            <option value="10">October</option>
+            <option value="11">November</option>
+            <option value="12">December</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Year</label>
+          <input type="number" name="year" required class="form-input w-full" id="budgetYear">
+        </div>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Total Amount</label>
+        <input type="number" name="total_amount" step="0.01" required class="form-input w-full" placeholder="5000">
+      </div>
+      <div class="flex gap-2 justify-end">
+        <button type="button" onclick="closeModal('budgetModal')" class="btn btn-secondary">Cancel</button>
+        <button type="submit" class="btn bg-indigo-600 text-white">Create</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Shared Expense Modal -->
+<div id="expenseModal" class="modal">
+  <div class="modal-content p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-2xl font-bold">Split Expense</h2>
+      <button onclick="closeModal('expenseModal')" class="text-gray-500 hover:text-gray-700">
+        <i class="fas fa-times text-xl"></i>
+      </button>
+    </div>
+    <form id="expenseForm" class="space-y-4">
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+        <input type="text" name="description" required class="form-input w-full" placeholder="Groceries">
+      </div>
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Total Amount</label>
+          <input type="number" name="total_amount" step="0.01" required class="form-input w-full" placeholder="100">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Category</label>
+          <input type="text" name="category" class="form-input w-full" placeholder="Food">
+        </div>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Paid By</label>
+        <input type="text" name="paid_by" required class="form-input w-full" placeholder="Alice">
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-2">Participants</label>
+        <div id="participantsList" class="space-y-2"></div>
+        <button type="button" onclick="addParticipant()" class="text-sm text-indigo-600 hover:text-indigo-700">
+          + Add Participant
+        </button>
+      </div>
+      <div class="flex gap-2 justify-end">
+        <button type="button" onclick="closeModal('expenseModal')" class="btn btn-secondary">Cancel</button>
+        <button type="submit" class="btn bg-cyan-600 text-white">Create</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Goal Modal -->
+<div id="goalModal" class="modal">
+  <div class="modal-content p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-2xl font-bold">Create Goal</h2>
+      <button onclick="closeModal('goalModal')" class="text-gray-500 hover:text-gray-700">
+        <i class="fas fa-times text-xl"></i>
+      </button>
+    </div>
+    <form id="goalForm" class="space-y-4">
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Goal Name</label>
+        <input type="text" name="name" required class="form-input w-full" placeholder="Summer Vacation">
+      </div>
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Target Amount</label>
+          <input type="number" name="target_amount" step="0.01" required class="form-input w-full" placeholder="3000">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Category</label>
+          <input type="text" name="category" class="form-input w-full" placeholder="Travel">
+        </div>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Target Date</label>
+        <input type="date" name="target_date" class="form-input w-full">
+      </div>
+      <div class="flex gap-2 justify-end">
+        <button type="button" onclick="closeModal('goalModal')" class="btn btn-secondary">Cancel</button>
+        <button type="submit" class="btn bg-green-600 text-white">Create</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Plaid Link Modal -->
+<div id="plaidLinkModal" class="modal">
+  <div class="modal-content p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-2xl font-bold">Link Bank Account</h2>
+      <button onclick="closeModal('plaidLinkModal')" class="text-gray-500 hover:text-gray-700">
+        <i class="fas fa-times text-xl"></i>
+      </button>
+    </div>
+    <div id="plaidContainer"></div>
+  </div>
+</div>
+
+<script>
+// Initialize year selector in budget form
+document.getElementById('budgetYear').valueAsNumber = new Date().getFullYear();
+
+// Tab switching
+function switchTab(tabName) {
+  document.querySelectorAll('.tab-content').forEach(tab => tab.style.display = 'none');
+  document.getElementById(tabName).style.display = 'block';
+  
+  document.querySelectorAll('.tab-button').forEach(btn => {
+    btn.classList.remove('tab-active');
+    btn.classList.add('tab-inactive');
+  });
+  document.querySelector(`[data-tab="${tabName}"]`).classList.add('tab-active');
+  document.querySelector(`[data-tab="${tabName}"]`).classList.remove('tab-inactive');
+}
+
+// Modal functions
+function openModal(modalId) {
+  document.getElementById(modalId).classList.add('active');
+}
+
+function closeModal(modalId) {
+  document.getElementById(modalId).classList.remove('active');
+}
+
+// Form submission
+document.getElementById('budgetForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const formData = new FormData(e.target);
+  const data = {
+    name: formData.get('name'),
+    month: parseInt(formData.get('month')),
+    year: parseInt(formData.get('year')),
+    total_amount: parseFloat(formData.get('total_amount')),
+    created_by: 'Family'
+  };
+  
+  try {
+    const response = await fetch('/money/budgets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    
+    if (response.ok) {
+      alert('Budget created successfully!');
+      closeModal('budgetModal');
+      loadBudgets();
+    } else {
+      const err = await response.json();
+      alert('Error: ' + err.error);
+    }
+  } catch (error) {
+    alert('Error creating budget: ' + error.message);
+  }
+});
+
+// Load data on page load
+async function loadData() {
+  await Promise.all([
+    loadAnalytics(),
+    loadBudgets(),
+    loadExpenses(),
+    loadDebts(),
+    loadGoals(),
+    loadPlaidAccounts()
+  ]);
+}
+
+async function loadAnalytics() {
+  try {
+    const response = await fetch('/money/analytics/summary');
+    if (response.ok) {
+      const data = await response.json();
+      document.getElementById('budget-remaining').textContent = '$' + data.budget.remaining.toFixed(2);
+      document.getElementById('total-debt').textContent = '$' + data.debts.total_balance.toFixed(2);
+      document.getElementById('debt-count').textContent = data.debts.active_count;
+      document.getElementById('goals-progress').textContent = data.goals.progress.toFixed(0) + '%';
+      document.getElementById('goals-target').textContent = '$' + data.goals.current_total.toFixed(2) + ' / $' + data.goals.target_total.toFixed(2);
+      document.getElementById('month-spent').textContent = '$' + data.budget.spent.toFixed(2);
+    }
+  } catch (error) {
+    console.error('Error loading analytics:', error);
+  }
+}
+
+async function loadBudgets() {
+  try {
+    const response = await fetch('/money/budgets?page=1');
+    if (response.ok) {
+      const data = await response.json();
+      const container = document.getElementById('budgets-list');
+      container.innerHTML = '';
+      
+      data.budgets.forEach(budget => {
+        const spent = budget.spent || 0;
+        const remaining = budget.total - spent;
+        const percentage = (spent / budget.total * 100).toFixed(0);
+        
+        const card = document.createElement('div');
+        card.className = 'glass-container rounded-lg p-6';
+        card.innerHTML = `
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-xl font-bold">${budget.name}</h3>
+            <span class="text-gray-500 text-sm">${budget.month}/${budget.year}</span>
+          </div>
+          <div class="mb-4">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-gray-600">$${spent.toFixed(2)} / $${budget.total.toFixed(2)}</span>
+              <span class="text-gray-500 text-sm">${percentage}%</span>
+            </div>
+            <div class="w-full bg-gray-200 rounded-full h-2">
+              <div class="bg-indigo-600 h-2 rounded-full" style="width: ${percentage}%"></div>
+            </div>
+          </div>
+        `;
+        container.appendChild(card);
+      });
+    }
+  } catch (error) {
+    console.error('Error loading budgets:', error);
+  }
+}
+
+async function loadExpenses() {
+  // Implementation for loading expenses
+}
+
+async function loadDebts() {
+  // Implementation for loading debts
+}
+
+async function loadGoals() {
+  // Implementation for loading goals
+}
+
+async function loadPlaidAccounts() {
+  // Implementation for loading Plaid accounts
+}
+
+document.addEventListener('DOMContentLoaded', loadData);
+</script>
+
+{% endblock %}

@@ -1,0 +1,22 @@
+services:
+  homehub:
+    container_name: homehub
+    build: .
+    # image: ghcr.io/surajverma/homehub:latest  # Use local build instead
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./app:/app/app                       # Mount app directory for live code changes
+      - ./templates:/app/templates           # Mount templates for live changes
+      - ./static:/app/static                 # Mount static files
+      - ./uploads:/app/uploads               # Persist uploads
+      - ./media:/app/media                   # Persist media
+      - ./pdfs:/app/pdfs                     # Persist PDFs
+      - ./data:/app/data                     # Persist database
+      - ./config.yml:/app/config.yml         # Config (read-write for menu visibility)
+    environment:
+      - FLASK_ENV=production
+      - SECRET_KEY=aOesnubvf5Ml6HNQvv9oAZs9wx8pU
+      - PLAID_CLIENT_ID=6956e9a4168aa50020a8e7cb
+      - PLAID_SECRET=ac0a3dff15d185b71aab7ae0a4854a
+      - PLAID_ENV=production

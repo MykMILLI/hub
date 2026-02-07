@@ -1,0 +1,406 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="mx-auto">
+    <h2 class="text-3xl font-bold mb-6">Shared Cloud</h2>
+    
+    <!-- Upload Section -->
+    <form method="POST" enctype="multipart/form-data" class="mb-8 card p-6">
+        <label class="block text-sm font-semibold text-m3-on-surface-variant mb-3">Upload Files</label>
+        <div class="flex gap-3 items-end">
+            <div class="flex-1">
+                <input type="file" name="files" multiple required class="w-full">
+            </div>
+            <input type="hidden" name="creator" id="creator">
+            <button type="submit" class="btn btn-primary">
+                <i class="fa-solid fa-cloud-arrow-up"></i> Upload
+            </button>
+        </div>
+    </form>
+    
+    <!-- Category Tabs -->
+    <div class="mb-6 flex flex-wrap gap-2">
+        <button class="category-tab glass-sm px-4 py-2 rounded-full font-semibold transition-m3 cursor-pointer" data-category="all">
+            <i class="fa-solid fa-list"></i> All Files
+        </button>
+        <button class="category-tab glass-sm px-4 py-2 rounded-full font-semibold transition-m3 cursor-pointer" data-category="photos_videos">
+            <i class="fa-solid fa-image"></i> Photos & Videos
+        </button>
+        <button class="category-tab glass-sm px-4 py-2 rounded-full font-semibold transition-m3 cursor-pointer" data-category="documents">
+            <i class="fa-solid fa-file-pdf"></i> Documents
+        </button>
+        <button class="category-tab glass-sm px-4 py-2 rounded-full font-semibold transition-m3 cursor-pointer" data-category="audio">
+            <i class="fa-solid fa-headphones"></i> Audio
+        </button>
+        <button class="category-tab glass-sm px-4 py-2 rounded-full font-semibold transition-m3 cursor-pointer" data-category="archives">
+            <i class="fa-solid fa-box"></i> Archives
+        </button>
+        <button class="category-tab glass-sm px-4 py-2 rounded-full font-semibold transition-m3 cursor-pointer" data-category="other">
+            <i class="fa-solid fa-file"></i> Other
+        </button>
+    </div>
+    
+    <!-- Files List -->
+    <div id="filesList">
+        <!-- Photos & Videos Grid View -->
+        <div id="photosVideosGrid" style="display: none;">
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                {% for file in files %}
+                    {% set is_photo = file.filename.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.ico')) %}
+                    {% set is_video = file.filename.lower().endswith(('.mp4', '.webm', '.avi', '.mov', '.mkv', '.flv')) %}
+                    {% if is_photo or is_video %}
+                    <div class="file-item media-thumbnail group relative rounded-lg overflow-hidden bg-gray-200 dark:bg-gray-700 aspect-square cursor-pointer transition-transform hover:scale-105" 
+                        data-category="{{ file.category }}" 
+                        data-file-id="{{ file.id }}"
+                        data-filename="{{ file.filename }}"
+                        data-is-video="{% if is_video %}true{% else %}false{% endif %}"
+                        onclick="openMediaPreview('{{ file.filename }}', {{ 'true' if is_video else 'false' }})">
+                        
+                        <!-- Thumbnail Image/Video Poster -->
+                        {% if is_photo %}
+                            <img src="/uploads/{{ file.filename }}" alt="{{ file.filename }}" class="w-full h-full object-cover">
+                        {% elif is_video %}
+                            <video class="w-full h-full object-cover" preload="metadata">
+                                <source src="/uploads/{{ file.filename }}" type="video/mp4">
+                            </video>
+                            <div class="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:bg-black/50 transition-colors">
+                                <i class="fa-solid fa-play text-white text-3xl drop-shadow-lg"></i>
+                            </div>
+                        {% endif %}
+                        
+                        <!-- Hover Overlay -->
+                        <div class="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100">
+                            <a href="/uploads/preview/{{ file.filename }}" target="_blank" rel="noopener noreferrer" class="btn btn-success text-xs p-2" title="Preview">
+                                <i class="fa-solid fa-eye"></i>
+                            </a>
+                            <a href="/uploads/{{ file.filename }}" class="btn btn-primary text-xs p-2" title="Download">
+                                <i class="fa-solid fa-download"></i>
+                            </a>
+                            <button class="move-btn btn btn-secondary text-xs p-2" data-file-id="{{ file.id }}" title="Move">
+                                <i class="fa-solid fa-arrow-right-arrow-left"></i>
+                            </button>
+                            <form method="POST" action="/upload/delete/{{ file.id }}" class="delete-form inline" data-creator="{{ file.creator }}">
+                                <input type="hidden" name="user">
+                                <button type="submit" class="btn btn-danger text-xs p-2" title="Delete">
+                                    <i class="fa-solid fa-trash"></i>
+                                </button>
+                            </form>
+                        </div>
+                        
+                        <!-- File Info on Hover -->
+                        <div class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-2 text-white text-xs opacity-0 group-hover:opacity-100 transition-opacity">
+                            {{ file.filename }}
+                        </div>
+                    </div>
+                    {% endif %}
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- All Other Files List View -->
+        <div id="otherFilesList">
+            {% for file in files %}
+            <div class="file-item card p-4 mb-3 flex justify-between items-center transition-m3" data-category="{{ file.category }}">
+                <div class="flex-1">
+                    <a href="/uploads/{{ file.filename }}" class="font-semibold text-m3-primary hover:underline">{{ file.filename }}</a>
+                    <div class="text-xs text-m3-on-surface-variant mt-1">
+                        By <span class="font-medium">{{ file.creator }}</span> at {{ file.upload_time.strftime('%Y-%m-%d %H:%M') }}
+                    </div>
+                </div>
+                <div class="flex gap-2 ml-4">
+                    <a href="/uploads/preview/{{ file.filename }}" target="_blank" rel="noopener noreferrer" class="btn btn-success text-sm" aria-label="Preview">
+                        <i class="fa-solid fa-eye"></i> Preview
+                    </a>
+                    <a href="/uploads/{{ file.filename }}" class="btn btn-primary text-sm">
+                        <i class="fa-solid fa-download"></i> Download
+                    </a>
+                    <button class="move-btn btn btn-secondary text-sm" data-file-id="{{ file.id }}" title="Move to different category">
+                        <i class="fa-solid fa-arrow-right-arrow-left"></i> Move
+                    </button>
+                    <form method="POST" action="/upload/delete/{{ file.id }}" class="delete-form inline" data-creator="{{ file.creator }}">
+                        <input type="hidden" name="user">
+                        <button type="submit" class="btn btn-danger text-sm">
+                            <i class="fa-solid fa-trash"></i> Delete
+                        </button>
+                    </form>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+    
+    {% if not files %}
+    <div class="card p-8 text-center">
+        <i class="fa-solid fa-cloud text-5xl text-m3-on-surface-variant opacity-30 mb-4"></i>
+        <p class="text-m3-on-surface-variant font-medium">No files uploaded yet. Upload files to get started!</p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Move File Modal -->
+<div id="moveModal" class="fixed inset-0 bg-black/50 backdrop-blur-md hidden items-center justify-center z-50">
+    <div class="glass-lg bg-opacity-95 w-full max-w-sm p-8 rounded-3xl shadow-2xl">
+        <h3 class="text-2xl font-bold mb-4 text-m3-on-surface">Move File</h3>
+        <p class="text-sm text-m3-on-surface-variant mb-6">Select a new category for this file:</p>
+        <select id="moveCategory" class="w-full glass-sm rounded-xl p-3 font-medium cursor-pointer mb-6">
+            <option value="photos_videos">📷 Photos & Videos</option>
+            <option value="documents">📄 Documents</option>
+            <option value="audio">🎵 Audio</option>
+            <option value="archives">📦 Archives</option>
+            <option value="other">📁 Other</option>
+        </select>
+        <div class="flex justify-end gap-3">
+            <button id="moveCancel" class="btn btn-secondary px-6 py-3 rounded-xl font-semibold">Cancel</button>
+            <button id="moveConfirm" class="btn btn-primary px-6 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl">Move</button>
+        </div>
+    </div>
+</div>
+
+<!-- Media Lightbox Modal -->
+<div id="mediaLightbox" class="hidden fixed inset-0 bg-black/95 z-[60] flex flex-col items-center justify-center">
+    <!-- Header -->
+    <div class="absolute top-0 left-0 right-0 bg-gradient-to-b from-black/80 to-transparent p-4 flex justify-between items-center">
+        <div class="text-white">
+            <h3 id="lightboxTitle" class="font-bold text-lg">Media Viewer</h3>
+            <p id="lightboxSubtitle" class="text-xs text-gray-300"></p>
+        </div>
+        <button onclick="closeLightbox()" class="text-white hover:text-gray-300 text-2xl">
+            <i class="fa-solid fa-times"></i>
+        </button>
+    </div>
+    
+    <!-- Media Container -->
+    <div class="w-full h-full flex items-center justify-center p-4">
+        <img id="lightboxImage" class="max-w-full max-h-full object-contain rounded-lg" style="display: none;">
+        <video id="lightboxVideo" class="max-w-full max-h-full rounded-lg" style="display: none;" controls>
+            <source id="lightboxVideoSource" type="video/mp4">
+        </video>
+    </div>
+    
+    <!-- Navigation -->
+    <div class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4 flex justify-between items-center">
+        <button onclick="previousMedia()" class="text-white hover:text-gray-300 text-xl p-2">
+            <i class="fa-solid fa-chevron-left"></i>
+        </button>
+        <div class="text-white text-sm">
+            <span id="lightboxCounter">1 / 1</span>
+        </div>
+        <button onclick="nextMedia()" class="text-white hover:text-gray-300 text-xl p-2">
+            <i class="fa-solid fa-chevron-right"></i>
+        </button>
+    </div>
+</div>
+
+<script>
+document.getElementById('creator').value = localStorage.getItem('username');
+document.querySelectorAll('input[name="user"]').forEach(i=> i.value = localStorage.getItem('username'));
+
+// Category filtering
+let currentCategory = 'all';
+const categoryTabs = document.querySelectorAll('.category-tab');
+const fileItems = document.querySelectorAll('.file-item');
+const photosVideosGrid = document.getElementById('photosVideosGrid');
+const otherFilesList = document.getElementById('otherFilesList');
+
+function filterFiles(category) {
+    currentCategory = category;
+    
+    // Show/hide grid view for photos & videos
+    if (category === 'photos_videos') {
+        photosVideosGrid.style.display = 'block';
+        otherFilesList.style.display = 'none';
+    } else {
+        photosVideosGrid.style.display = 'none';
+        otherFilesList.style.display = 'block';
+    }
+    
+    // Filter items in the displayed view
+    fileItems.forEach(item => {
+        if (category === 'all' || item.dataset.category === category) {
+            item.style.display = '';
+        } else {
+            item.style.display = 'none';
+        }
+    });
+    
+    // Update active tab
+    categoryTabs.forEach(tab => {
+        if (tab.dataset.category === category) {
+            tab.classList.add('bg-m3-primary', 'shadow-lg');
+            tab.classList.remove('hover:shadow-md');
+            tab.style.color = 'white';
+            tab.style.backgroundColor = 'var(--m3-primary)';
+        } else {
+            tab.classList.remove('bg-m3-primary', 'shadow-lg');
+            tab.classList.add('hover:shadow-md');
+            tab.style.color = 'inherit';
+            tab.style.backgroundColor = '';
+        }
+    });
+}
+
+categoryTabs.forEach(tab => {
+    tab.addEventListener('click', () => filterFiles(tab.dataset.category));
+});
+
+// Initialize first tab as active
+filterFiles('all');
+
+// Hide delete for non-owners
+(function(){
+    const adminName='{{ config.admin_name }}';
+    const current=localStorage.getItem('username');
+    document.querySelectorAll('.delete-form').forEach(f=>{
+        const c=f.closest('.file-item').querySelector('[data-creator]')?.parentElement.querySelector('.file-item')?.getAttribute('data-creator') || '';
+        const item = f.closest('.file-item');
+        const creator = item.querySelector('span.font-medium')?.textContent?.trim() || '';
+        if(creator && !(current===creator||current===adminName||current==='Administrator'||current==='admin')) f.style.display='none';
+    });
+})();
+
+// Move file functionality
+let selectedFileId = null;
+const moveModal = document.getElementById('moveModal');
+const moveCategory = document.getElementById('moveCategory');
+const moveCancel = document.getElementById('moveCancel');
+const moveConfirm = document.getElementById('moveConfirm');
+
+document.querySelectorAll('.move-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        selectedFileId = btn.dataset.fileId;
+        moveModal.classList.remove('hidden');
+        moveModal.classList.add('flex');
+    });
+});
+
+moveCancel.addEventListener('click', () => {
+    moveModal.classList.add('hidden');
+    moveModal.classList.remove('flex');
+});
+
+moveConfirm.addEventListener('click', () => {
+    if (!selectedFileId) return;
+    
+    fetch(`/api/files/move/${selectedFileId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category: moveCategory.value })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok) {
+            const fileItem = document.querySelector(`[data-file-id="${selectedFileId}"]`)?.closest('.file-item');
+            if (fileItem) {
+                fileItem.dataset.category = moveCategory.value;
+                globalToast('File moved successfully!', 'success');
+            }
+            moveModal.classList.add('hidden');
+            moveModal.classList.remove('flex');
+        } else {
+            globalToast('Failed to move file', 'error');
+        }
+    })
+    .catch(e => {
+        console.error(e);
+        globalToast('Error moving file', 'error');
+    });
+});
+
+// Close modal on backdrop click
+moveModal.addEventListener('click', (e) => {
+    if (e.target === moveModal) {
+        moveModal.classList.add('hidden');
+        moveModal.classList.remove('flex');
+    }
+});
+
+// ===== LIGHTBOX FUNCTIONALITY =====
+let mediaGallery = [];
+let currentMediaIndex = 0;
+
+// Initialize gallery on load
+function initializeGallery() {
+    mediaGallery = [];
+    document.querySelectorAll('.media-thumbnail').forEach(thumb => {
+        mediaGallery.push({
+            filename: thumb.dataset.filename,
+            isVideo: thumb.dataset.isVideo === 'true'
+        });
+    });
+}
+
+initializeGallery();
+
+function openMediaPreview(filename, isVideo) {
+    initializeGallery();
+    
+    // Find index in gallery
+    currentMediaIndex = mediaGallery.findIndex(m => m.filename === filename);
+    if (currentMediaIndex === -1) currentMediaIndex = 0;
+    
+    displayMedia();
+    document.getElementById('mediaLightbox').classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+}
+
+function closeLightbox() {
+    document.getElementById('mediaLightbox').classList.add('hidden');
+    document.body.style.overflow = '';
+}
+
+function displayMedia() {
+    if (mediaGallery.length === 0) return;
+    
+    const media = mediaGallery[currentMediaIndex];
+    const image = document.getElementById('lightboxImage');
+    const video = document.getElementById('lightboxVideo');
+    const videoSource = document.getElementById('lightboxVideoSource');
+    
+    // Reset both
+    image.style.display = 'none';
+    video.style.display = 'none';
+    
+    // Update title and counter
+    document.getElementById('lightboxTitle').textContent = media.filename;
+    document.getElementById('lightboxCounter').textContent = `${currentMediaIndex + 1} / ${mediaGallery.length}`;
+    
+    if (media.isVideo) {
+        videoSource.src = `/uploads/${media.filename}`;
+        video.load();
+        video.style.display = 'block';
+    } else {
+        image.src = `/uploads/${media.filename}`;
+        image.style.display = 'block';
+    }
+}
+
+function nextMedia() {
+    if (mediaGallery.length === 0) return;
+    currentMediaIndex = (currentMediaIndex + 1) % mediaGallery.length;
+    displayMedia();
+}
+
+function previousMedia() {
+    if (mediaGallery.length === 0) return;
+    currentMediaIndex = (currentMediaIndex - 1 + mediaGallery.length) % mediaGallery.length;
+    displayMedia();
+}
+
+// Keyboard navigation
+document.addEventListener('keydown', (e) => {
+    const lightbox = document.getElementById('mediaLightbox');
+    if (lightbox.classList.contains('hidden')) return;
+    
+    if (e.key === 'Escape') closeLightbox();
+    if (e.key === 'ArrowRight') nextMedia();
+    if (e.key === 'ArrowLeft') previousMedia();
+});
+
+// Close lightbox on backdrop click
+document.getElementById('mediaLightbox').addEventListener('click', (e) => {
+    if (e.target === document.getElementById('mediaLightbox')) {
+        closeLightbox();
+    }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,540 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="mx-auto max-w-2xl">
+    <h2 class="text-2xl font-bold mb-6">Hub Settings</h2>
+    
+    <div class="card p-6 mb-6">
+        <h3 class="text-lg font-semibold mb-4">Hub Name</h3>
+        <form method="POST" id="settingsForm">
+            <div class="mb-4">
+                <label class="block text-sm text-gray-600 dark:text-gray-300 mb-2">Hub Name</label>
+                <input type="text" name="hub_name" value="{{ hub_settings.hub_name }}" class="w-full p-3 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-white" placeholder="e.g., My Family Hub" required>
+                <p class="text-xs text-gray-500 mt-2">This name will appear at the top of the page and in browser titles.</p>
+            </div>
+            <button type="submit" class="btn btn-primary">Save Changes</button>
+        </form>
+    </div>
+    
+    <div class="card p-6 mb-6">
+        <h3 class="text-lg font-semibold mb-4 flex items-center gap-2"><i class="fa-solid fa-users text-blue-600"></i> Family Members</h3>
+        
+        <!-- Add new family member -->
+        <div class="mb-6 pb-6 border-b border-gray-200 dark:border-gray-700">
+            <label class="block text-sm text-gray-600 dark:text-gray-300 mb-2">Add New Member</label>
+            <form id="addMemberForm" class="flex gap-2">
+                <input type="text" id="newMemberInput" class="flex-1 p-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-white" placeholder="Family member name" required>
+                <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition">
+                    <i class="fa-solid fa-plus mr-1"></i>Add
+                </button>
+            </form>
+        </div>
+        
+        <!-- Family members list -->
+        <div id="membersList" class="space-y-3">
+            {% for member in family_members %}
+            <div class="p-4 bg-gray-50 dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 member-item" data-member-id="{{ member.id }}">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="font-medium text-gray-800 dark:text-gray-200 member-name">{{ member.name }}</span>
+                    <div class="flex gap-2">
+                        <button type="button" class="edit-btn px-3 py-1 text-sm bg-yellow-600 text-white rounded hover:bg-yellow-700 transition">
+                            <i class="fa-solid fa-pen mr-1"></i>Edit
+                        </button>
+                        <button type="button" class="delete-btn px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700 transition">
+                            <i class="fa-solid fa-trash mr-1"></i>Delete
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- PIN Management -->
+                <div class="mt-3 pt-3 border-t border-gray-300 dark:border-gray-600">
+                    <div class="flex items-center justify-between">
+                        <div class="text-sm">
+                            <span class="text-gray-600 dark:text-gray-400">PIN Status:</span>
+                            <span class="pin-status font-medium {% if member.pin %}text-green-600 dark:text-green-400{% else %}text-gray-500{% endif %}">
+                                {% if member.pin %}✓ Set{% else %}Not Set{% endif %}
+                            </span>
+                        </div>
+                        <div class="flex gap-2">
+                            {% if member.pin %}
+                            <button type="button" class="reset-pin-btn px-3 py-1 text-xs bg-orange-600 text-white rounded hover:bg-orange-700 transition" data-member-id="{{ member.id }}">
+                                <i class="fa-solid fa-refresh mr-1"></i>Reset PIN
+                            </button>
+                            {% else %}
+                            <button type="button" class="set-pin-btn px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 transition" data-member-id="{{ member.id }}">
+                                <i class="fa-solid fa-lock mr-1"></i>Set PIN
+                            </button>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+            <div id="noMembers" class="text-gray-500 text-sm p-3 {% if family_members %}hidden{% endif %}">
+                No family members added yet. Add one above to get started!
+            </div>
+        </div>
+    </div>
+    
+    <!-- Menu Visibility Settings -->
+    <div class="card p-6 mb-6">
+        <h3 class="text-lg font-semibold mb-4 flex items-center gap-2"><i class="fa-solid fa-bars text-blue-600"></i> Menu Visibility</h3>
+        <p class="text-sm text-gray-600 dark:text-gray-300 mb-4">Toggle which menu items appear in the sidebar</p>
+        
+        <div id="menuItemsList" class="space-y-3">
+            <!-- Menu items will be loaded here -->
+        </div>
+    </div>
+
+    <div class="card p-6 mb-6">
+        <h3 class="text-lg font-semibold mb-4">About</h3>
+        <div class="text-sm text-gray-600 dark:text-gray-300">
+            <p><strong>Application:</strong> HomeHub</p>
+            <p><strong>Version:</strong> 1.0.0</p>
+            <p class="mt-3">HomeHub is a collaborative family home management application for shared notes, shopping lists, chores, recipes, and more.</p>
+        </div>
+    </div>
+</div>
+
+<!-- Edit modal -->
+<div id="editModal" class="fixed inset-0 bg-black/40 hidden items-center justify-center z-50">
+    <div class="bg-white dark:bg-gray-900 w-full max-w-sm p-6 rounded shadow-lg">
+        <h4 class="text-lg font-semibold mb-4">Edit Family Member</h4>
+        <form id="editMemberForm" class="space-y-4">
+            <input type="hidden" id="editMemberId">
+            <div>
+                <label class="block text-sm text-gray-600 dark:text-gray-300 mb-2">Name</label>
+                <input type="text" id="editMemberName" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-white" required>
+            </div>
+            <div class="flex justify-end gap-2">
+                <button type="button" id="editCancelBtn" class="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition">Cancel</button>
+                <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition">Save</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- PIN Management Modal -->
+<div id="pinManagementModal" class="fixed inset-0 bg-black/40 hidden items-center justify-center z-50">
+    <div class="bg-white dark:bg-gray-900 w-full max-w-sm p-6 rounded shadow-lg">
+        <h4 class="text-lg font-semibold mb-4" id="pinModalTitle">Set PIN</h4>
+        <form id="pinManagementForm" class="space-y-4">
+            <input type="hidden" id="pinMemberId">
+            <input type="hidden" id="pinAction" value="set"> <!-- 'set' or 'reset' -->
+            
+            <div id="pinSetupSection">
+                <div>
+                    <label class="block text-sm text-gray-600 dark:text-gray-300 mb-2">Create PIN</label>
+                    <input type="password" id="newPinForAdmin" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-white text-center text-4xl font-bold tracking-widest" placeholder="••••" maxlength="4" pattern="[0-9]{4}" required>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">4 digits (0-9)</p>
+                </div>
+                
+                <div>
+                    <label class="block text-sm text-gray-600 dark:text-gray-300 mb-2">Confirm PIN</label>
+                    <input type="password" id="confirmPinForAdmin" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-white text-center text-4xl font-bold tracking-widest" placeholder="••••" maxlength="4" pattern="[0-9]{4}" required>
+                </div>
+            </div>
+            
+            <div id="pinResetSection" class="hidden">
+                <p class="text-sm text-gray-600 dark:text-gray-300 mb-4">
+                    This will clear the member's current PIN. They can set a new PIN on their next login.
+                </p>
+            </div>
+            
+            <div id="pinError" class="text-red-600 dark:text-red-400 text-sm hidden"></div>
+            
+            <div class="flex justify-end gap-2">
+                <button type="button" id="pinCancelBtn" class="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition">Cancel</button>
+                <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition">Confirm</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const addForm = document.getElementById('addMemberForm');
+    const newMemberInput = document.getElementById('newMemberInput');
+    const membersList = document.getElementById('membersList');
+    const noMembers = document.getElementById('noMembers');
+    const editModal = document.getElementById('editModal');
+    const editForm = document.getElementById('editMemberForm');
+    const editMemberId = document.getElementById('editMemberId');
+    const editMemberName = document.getElementById('editMemberName');
+    const editCancelBtn = document.getElementById('editCancelBtn');
+    const pinManagementModal = document.getElementById('pinManagementModal');
+    const pinManagementForm = document.getElementById('pinManagementForm');
+    const pinMemberId = document.getElementById('pinMemberId');
+    const pinAction = document.getElementById('pinAction');
+    const pinModalTitle = document.getElementById('pinModalTitle');
+    const pinSetupSection = document.getElementById('pinSetupSection');
+    const pinResetSection = document.getElementById('pinResetSection');
+    const newPinForAdmin = document.getElementById('newPinForAdmin');
+    const confirmPinForAdmin = document.getElementById('confirmPinForAdmin');
+    const pinError = document.getElementById('pinError');
+    const pinCancelBtn = document.getElementById('pinCancelBtn');
+    
+    // Toast function
+    const toast = (msg, type = 'info') => {
+        if (window.globalToast) {
+            window.globalToast(msg, type);
+        } else {
+            alert(msg);
+        }
+    };
+    
+    // Add member
+    addForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const name = newMemberInput.value.trim();
+        if (!name) return;
+        
+        try {
+            const response = await fetch('/api/family-members', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name })
+            });
+            const data = await response.json();
+            
+            if (data.ok) {
+                newMemberInput.value = '';
+                renderMembers();
+                toast('Family member added successfully', 'success');
+            } else {
+                toast(data.error || 'Failed to add family member', 'error');
+            }
+        } catch (err) {
+            toast('Error adding family member: ' + err.message, 'error');
+        }
+    });
+    
+    // Edit button click
+    document.addEventListener('click', (e) => {
+        if (e.target.closest('.edit-btn')) {
+            const item = e.target.closest('.member-item');
+            const id = item.dataset.memberId;
+            const name = item.querySelector('.member-name').textContent;
+            editMemberId.value = id;
+            editMemberName.value = name;
+            editModal.classList.remove('hidden');
+            editModal.classList.add('flex');
+            editMemberName.focus();
+        }
+    });
+    
+    // Edit cancel
+    editCancelBtn.addEventListener('click', () => {
+        editModal.classList.add('hidden');
+        editModal.classList.remove('flex');
+    });
+    
+    // Edit submit
+    editForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const id = editMemberId.value;
+        const name = editMemberName.value.trim();
+        if (!name) return;
+        
+        try {
+            const response = await fetch(`/api/family-members/${id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name })
+            });
+            const data = await response.json();
+            
+            if (data.ok) {
+                editModal.classList.add('hidden');
+                editModal.classList.remove('flex');
+                renderMembers();
+                toast('Family member updated successfully', 'success');
+            } else {
+                toast(data.error || 'Failed to update family member', 'error');
+            }
+        } catch (err) {
+            toast('Error updating family member: ' + err.message, 'error');
+        }
+    });
+    
+    // Delete button click
+    document.addEventListener('click', (e) => {
+        if (e.target.closest('.delete-btn')) {
+            const item = e.target.closest('.member-item');
+            const name = item.querySelector('.member-name').textContent;
+            if (confirm(`Are you sure you want to delete "${name}"?`)) {
+                deleteMember(item.dataset.memberId);
+            }
+        }
+    });
+    
+    // Delete member
+    const deleteMember = async (id) => {
+        try {
+            const response = await fetch(`/api/family-members/${id}`, {
+                method: 'DELETE'
+            });
+            const data = await response.json();
+            
+            if (data.ok) {
+                renderMembers();
+                toast('Family member deleted successfully', 'success');
+            } else {
+                toast(data.error || 'Failed to delete family member', 'error');
+            }
+        } catch (err) {
+            toast('Error deleting family member: ' + err.message, 'error');
+        }
+    };
+    
+    // Render members
+    const renderMembers = async () => {
+        try {
+            const response = await fetch('/api/family-members');
+            const data = await response.json();
+            
+            if (data.ok) {
+                const members = data.members || [];
+                membersList.innerHTML = '';
+                
+                if (members.length === 0) {
+                    membersList.innerHTML = '<div id="noMembers" class="text-gray-500 text-sm p-3">No family members added yet. Add one above to get started!</div>';
+                    noMembers.classList.remove('hidden');
+                } else {
+                    members.forEach(member => {
+                        const div = document.createElement('div');
+                        div.className = 'flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 member-item';
+                        div.dataset.memberId = member.id;
+                        div.innerHTML = `
+                            <span class="font-medium text-gray-800 dark:text-gray-200 member-name">${escapeHtml(member.name)}</span>
+                            <div class="flex gap-2">
+                                <button type="button" class="edit-btn px-3 py-1 text-sm bg-yellow-600 text-white rounded hover:bg-yellow-700 transition">
+                                    <i class="fa-solid fa-pen mr-1"></i>Edit
+                                </button>
+                                <button type="button" class="delete-btn px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700 transition">
+                                    <i class="fa-solid fa-trash mr-1"></i>Delete
+                                </button>
+                            </div>
+                        `;
+                        membersList.appendChild(div);
+                    });
+                    noMembers.classList.add('hidden');
+                }
+            }
+        } catch (err) {
+            toast('Error loading family members: ' + err.message, 'error');
+        }
+    };
+    
+    // Helper to escape HTML
+    const escapeHtml = (text) => {
+        const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+        return text.replace(/[&<>"']/g, m => map[m]);
+    };
+
+    // Load and render menu visibility items
+    const loadMenuVisibility = async () => {
+        try {
+            const response = await fetch('/api/menu-visibility');
+            const data = await response.json();
+            
+            if (data.ok) {
+                const menuVisibility = data.menu_visibility || {};
+                const menuList = document.getElementById('menuItemsList');
+                
+                // Define menu items with readable labels and icons
+                const menuItems = [
+                    { key: 'welcome', label: 'Welcome', icon: 'fa-house' },
+                    { key: 'shared_notes', label: 'Shared Notes', icon: 'fa-note-sticky' },
+                    { key: 'shared_cloud', label: 'Shared Cloud', icon: 'fa-cloud' },
+                    { key: 'shopping_list', label: 'Shopping List', icon: 'fa-cart-shopping' },
+                    { key: 'chores', label: 'To-Do/Chores', icon: 'fa-list-check' },
+                    { key: 'recipes', label: 'Recipe Book', icon: 'fa-utensils' },
+                    { key: 'expiry_tracker', label: 'Expiry Tracker', icon: 'fa-hourglass-half' },
+                    { key: 'url_shortener', label: 'URL Shortener', icon: 'fa-link' },
+                    { key: 'media_downloader', label: 'Media Downloader', icon: 'fa-download' },
+                    { key: 'pdf_compressor', label: 'PDF Compressor', icon: 'fa-file-pdf' },
+                    { key: 'qr_generator', label: 'QR Generator', icon: 'fa-qrcode' },
+                    { key: 'expense_tracker', label: 'Expense & Money Tracker', icon: 'fa-wallet' },
+                    { key: 'settings', label: 'Settings', icon: 'fa-gear' }
+                ];
+                
+                menuList.innerHTML = '';
+                menuItems.forEach(item => {
+                    const isVisible = menuVisibility[item.key] !== false;
+                    const div = document.createElement('div');
+                    div.className = 'flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700';
+                    div.innerHTML = `
+                        <div class="flex items-center gap-3">
+                            <i class="fa-solid ${item.icon} text-gray-600 dark:text-gray-300 w-5"></i>
+                            <span class="font-medium text-gray-800 dark:text-gray-200">${item.label}</span>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" class="menu-toggle" data-menu="${item.key}" ${isVisible ? 'checked' : ''} class="sr-only peer">
+                            <div class="w-11 h-6 bg-gray-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-600 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+                        </label>
+                    `;
+                    menuList.appendChild(div);
+                });
+                
+                // Add toggle event listeners
+                document.querySelectorAll('.menu-toggle').forEach(toggle => {
+                    toggle.addEventListener('change', async (e) => {
+                        const menuItem = e.target.dataset.menu;
+                        const visible = e.target.checked;
+                        
+                        try {
+                            const response = await fetch(`/api/menu-visibility/${menuItem}`, {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ visible })
+                            });
+                            const data = await response.json();
+                            
+                            if (data.ok) {
+                                toast(data.message, 'success');
+                            } else {
+                                toast(data.error || 'Failed to update menu visibility', 'error');
+                                e.target.checked = !visible; // Revert toggle
+                            }
+                        } catch (err) {
+                            toast('Error updating menu visibility: ' + err.message, 'error');
+                            e.target.checked = !visible; // Revert toggle
+                        }
+                    });
+                });
+            }
+        } catch (err) {
+            toast('Error loading menu visibility: ' + err.message, 'error');
+        }
+    };
+    
+    // Load menu visibility on page load
+    loadMenuVisibility();
+    
+    // PIN Management Handlers
+    const showPinModal = (memberId, action = 'set', memberName = '') => {
+        pinMemberId.value = memberId;
+        pinAction.value = action;
+        newPinForAdmin.value = '';
+        confirmPinForAdmin.value = '';
+        pinError.classList.add('hidden');
+        
+        if (action === 'set') {
+            pinModalTitle.textContent = `Set PIN for ${memberName}`;
+            pinSetupSection.classList.remove('hidden');
+            pinResetSection.classList.add('hidden');
+            newPinForAdmin.required = true;
+            confirmPinForAdmin.required = true;
+        } else {
+            pinModalTitle.textContent = `Reset PIN for ${memberName}`;
+            pinSetupSection.classList.add('hidden');
+            pinResetSection.classList.remove('hidden');
+            newPinForAdmin.required = false;
+            confirmPinForAdmin.required = false;
+        }
+        
+        pinManagementModal.style.display = 'flex';
+    };
+    
+    const hidePinModal = () => {
+        pinManagementModal.style.display = 'none';
+    };
+    
+    // Set PIN button handlers
+    document.querySelectorAll('.set-pin-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const memberId = btn.dataset.memberId;
+            const memberName = btn.closest('.member-item').querySelector('.member-name').textContent;
+            showPinModal(memberId, 'set', memberName);
+        });
+    });
+    
+    // Reset PIN button handlers
+    document.querySelectorAll('.reset-pin-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const memberId = btn.dataset.memberId;
+            const memberName = btn.closest('.member-item').querySelector('.member-name').textContent;
+            showPinModal(memberId, 'reset', memberName);
+        });
+    });
+    
+    // PIN management form submission
+    pinManagementForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const memberId = pinMemberId.value;
+        const action = pinAction.value;
+        
+        if (action === 'set') {
+            const newPin = newPinForAdmin.value.trim();
+            const confirmPin = confirmPinForAdmin.value.trim();
+            
+            // Validate PIN format
+            if (!/^\d{4}$/.test(newPin)) {
+                pinError.textContent = 'PIN must be exactly 4 digits';
+                pinError.classList.remove('hidden');
+                return;
+            }
+            
+            // Check pins match
+            if (newPin !== confirmPin) {
+                pinError.textContent = 'PINs do not match';
+                pinError.classList.remove('hidden');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/family-members/${memberId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pin: newPin })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    toast('PIN set successfully', 'success');
+                    hidePinModal();
+                    location.reload();
+                } else {
+                    pinError.textContent = data.error || 'Failed to set PIN';
+                    pinError.classList.remove('hidden');
+                }
+            } catch (err) {
+                pinError.textContent = 'Error: ' + err.message;
+                pinError.classList.remove('hidden');
+            }
+        } else if (action === 'reset') {
+            try {
+                const response = await fetch(`/api/member/${memberId}/reset-pin`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    toast(data.message || 'PIN reset successfully', 'success');
+                    hidePinModal();
+                    location.reload();
+                } else {
+                    pinError.textContent = data.error || 'Failed to reset PIN';
+                    pinError.classList.remove('hidden');
+                }
+            } catch (err) {
+                pinError.textContent = 'Error: ' + err.message;
+                pinError.classList.remove('hidden');
+            }
+        }
+    });
+    
+    pinCancelBtn.addEventListener('click', hidePinModal);
+});
+</script>
+
+<style>
+    #editModal.flex, #pinManagementModal.flex {
+        display: flex;
+    }
+</style>
+{% endblock %}
