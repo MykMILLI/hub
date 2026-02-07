@@ -423,7 +423,7 @@
     <!-- First-visit user selection modal -->
     <div id="userSelectModal" class="fixed inset-0 bg-black/50 backdrop-blur-md hidden items-center justify-center z-50">
         <div class="glass-lg bg-opacity-95 w-full max-w-sm p-8 rounded-3xl shadow-2xl">
-            <h3 class="text-2xl font-bold mb-2 text-m3-on-surface">Welcome to HomeHub</h3>
+            <h3 class="text-2xl font-bold mb-2 text-m3-on-surface">Welcome to {% if g.hub_settings %}{{ g.hub_settings.hub_name }}{% else %}HomeHub{% endif %}</h3>
             <p class="text-sm font-medium text-m3-on-surface-variant mb-6">Select your user to personalize your experience.</p>
             <div class="mb-6">
                 <label class="block text-sm font-semibold text-m3-on-surface mb-3" for="userSelectInput">Your User</label>
