@@ -797,7 +797,23 @@ def get_analytics_summary():
         SharedExpense.date <= month_end
     ).all()
     
-    month_expense_total = sum(float(e.amount or 0) for e in month_expenses)
+    month_expense_charged_total = 0.0
+    month_expense_paid_total = 0.0
+    month_expense_due_total = 0.0
+    for entry in month_expenses:
+        amount = max(float(entry.amount or 0), 0.0)
+        paid_raw = max(float(getattr(entry, 'amount_paid', 0.0) or 0.0), 0.0)
+        month_expense_charged_total += amount
+        if entry.recurring_id:
+            paid_amount = min(paid_raw, amount)
+            due_amount = max(amount - paid_amount, 0.0)
+        else:
+            paid_amount = amount
+            due_amount = 0.0
+        month_expense_paid_total += paid_amount
+        month_expense_due_total += due_amount
+
+    month_expense_total = month_expense_paid_total
     shared_expense_total = sum(float(e.total_amount) for e in shared_expenses)
     total_debt = sum(float(d.current_balance) for d in active_debts)
     goal_total_target = sum(float(g.target_amount) for g in goals)
@@ -808,6 +824,9 @@ def get_analytics_summary():
         'budget': {
             'total': float(current_budget.total_amount) if current_budget else 0,
             'spent': month_expense_total + shared_expense_total,
+            'paid': month_expense_paid_total,
+            'due': month_expense_due_total,
+            'charged': month_expense_charged_total,
             'remaining': float(current_budget.total_amount) - (month_expense_total + shared_expense_total) if current_budget else 0,
         },
         'debts': {

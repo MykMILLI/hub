@@ -1,0 +1,618 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="max-w-7xl w-full mx-auto space-y-4 md:space-y-5 min-w-0">
+  <section class="card p-5 rounded-2xl border border-gray-200/70 dark:border-gray-700/70">
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+      <div>
+        <h1 class="text-3xl font-extrabold tracking-tight">Family Messages</h1>
+        <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">Private in-app family chat with encrypted message storage.</p>
+      </div>
+      <div class="flex items-center gap-2 text-xs text-gray-500">
+        <span id="messagesUnreadCount" class="px-2 py-1 rounded bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-200">Unread: 0</span>
+        <label class="inline-flex items-center gap-1">
+          <span>Mine</span>
+          <input id="mineBubbleColor" type="color" value="#3B82F6" class="w-7 h-7 p-0 border-0 bg-transparent cursor-pointer">
+        </label>
+        <label class="inline-flex items-center gap-1">
+          <span>Theirs</span>
+          <input id="theirBubbleColor" type="color" value="#E5E7EB" class="w-7 h-7 p-0 border-0 bg-transparent cursor-pointer">
+        </label>
+        <a href="/polls" class="btn btn-secondary text-xs">Open Polls</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="card p-0 rounded-2xl border border-gray-200/70 dark:border-gray-700/70 overflow-hidden min-w-0">
+    <div class="grid grid-cols-1 md:grid-cols-3 w-full min-w-0">
+      <aside class="md:col-span-1 border-b md:border-b-0 md:border-r border-gray-200/70 dark:border-gray-700/70 p-3 sm:p-4 bg-gray-50/50 dark:bg-gray-900/30 min-w-0">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-lg font-bold">Conversations</h2>
+          <button id="refreshThreads" class="btn btn-secondary text-xs">Refresh</button>
+        </div>
+        <div id="threadList" class="space-y-2 overflow-y-auto" style="max-height: 24rem;"></div>
+      </aside>
+
+      <div class="md:col-span-2 min-w-0 flex flex-col w-full">
+        <div class="px-3 sm:px-4 py-3 border-b border-gray-200/70 dark:border-gray-700/70 flex items-center justify-between gap-3">
+          <div id="chatHeader" class="text-sm font-semibold text-gray-700 dark:text-gray-200">Select a family member to start chatting.</div>
+          <button id="startVideoChatBtn" type="button" class="btn btn-secondary text-xs hidden">Video Chat</button>
+        </div>
+
+        <div id="chatMessages" class="overflow-y-auto px-3 sm:px-4 py-4 space-y-3 bg-gradient-to-b from-gray-50/40 to-transparent dark:from-gray-900/20 min-w-0" style="min-height: 16rem; max-height: 26rem;"></div>
+
+        <form id="chatForm" class="px-3 sm:px-4 py-3 border-t border-gray-200 dark:border-gray-700 space-y-2 min-w-0">
+          <textarea id="chatMessageInput" rows="2" class="w-full p-3 border rounded-2xl dark:bg-gray-800 dark:border-gray-600"></textarea>
+          <div class="flex flex-col sm:flex-row sm:items-center gap-2">
+            <input id="chatAttachmentInput" type="file" class="text-sm w-full sm:w-auto min-w-0">
+            <button type="submit" class="btn btn-primary sm:ml-auto">Send</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div id="videoChatModal" class="hidden fixed inset-0 bg-black/70 z-50 items-center justify-center p-4 sm:p-6">
+  <div class="card w-full max-w-5xl p-4 rounded-2xl border border-gray-200/70 dark:border-gray-700/70 max-h-[calc(100vh-4rem)] overflow-y-auto">
+    <div class="flex items-center justify-between gap-2 mb-3">
+      <h3 id="videoChatTitle" class="text-lg font-bold">Family Video Chat</h3>
+      <button id="closeVideoChatBtn" type="button" class="btn btn-secondary text-xs">Close</button>
+    </div>
+    <p id="videoChatStatus" class="text-sm text-gray-600 dark:text-gray-400 mb-3">Not connected</p>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div class="rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 bg-black/80 aspect-video">
+        <video id="localVideo" class="w-full h-full object-cover" autoplay muted playsinline></video>
+      </div>
+      <div class="rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 bg-black/80 aspect-video">
+        <video id="remoteVideo" class="w-full h-full object-cover" autoplay playsinline></video>
+      </div>
+    </div>
+    <div class="mt-3 flex items-center justify-end gap-2 flex-wrap">
+      <button id="muteAudioBtn" type="button" class="btn btn-secondary text-xs">Mute</button>
+      <button id="toggleCameraBtn" type="button" class="btn btn-secondary text-xs">Camera Off</button>
+      <button id="endVideoChatBtn" type="button" class="btn btn-danger text-xs">End Call</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const currentMember = localStorage.getItem('username') || '{{ current_member_name }}';
+  const threadList = document.getElementById('threadList');
+  const chatHeader = document.getElementById('chatHeader');
+  const chatMessages = document.getElementById('chatMessages');
+  const chatForm = document.getElementById('chatForm');
+  const chatMessageInput = document.getElementById('chatMessageInput');
+  const chatAttachmentInput = document.getElementById('chatAttachmentInput');
+  const startVideoChatBtn = document.getElementById('startVideoChatBtn');
+  const videoChatModal = document.getElementById('videoChatModal');
+  const videoChatTitle = document.getElementById('videoChatTitle');
+  const videoChatStatus = document.getElementById('videoChatStatus');
+  const localVideo = document.getElementById('localVideo');
+  const remoteVideo = document.getElementById('remoteVideo');
+  const muteAudioBtn = document.getElementById('muteAudioBtn');
+  const toggleCameraBtn = document.getElementById('toggleCameraBtn');
+  const endVideoChatBtn = document.getElementById('endVideoChatBtn');
+  const closeVideoChatBtn = document.getElementById('closeVideoChatBtn');
+  const unreadBadge = document.getElementById('messagesUnreadCount');
+  const mineBubbleColorInput = document.getElementById('mineBubbleColor');
+  const theirBubbleColorInput = document.getElementById('theirBubbleColor');
+  const rtcIceServers = JSON.parse('{{ (webrtc_ice_servers or [])|tojson|safe }}');
+
+  let selectedMember = '';
+  let lastSignalId = 0;
+  let signalPollTimer = null;
+  let messagePollTimer = null;
+  let messagePollBusy = false;
+  let eventsSource = null;
+  let eventsReconnectTimer = null;
+  let lastThreadSignature = '';
+  const callState = {
+    sessionId: '',
+    peer: '',
+    pc: null,
+    localStream: null,
+    remoteStream: null,
+  };
+
+  function toast(msg, type='info'){ if(window.globalToast) globalToast(msg, type); }
+  function esc(v){ return String(v || '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+  function fmt(iso){ try { return new Date(iso).toLocaleString(); } catch(_) { return iso || ''; } }
+  function colorKey(side){ return `homehub_chat_bubble_${currentMember}_${side}`; }
+  function readColor(side, fallback){
+    const raw = String(localStorage.getItem(colorKey(side)) || '').trim();
+    return /^#[0-9a-fA-F]{6}$/.test(raw) ? raw : fallback;
+  }
+  function writeColor(side, value){
+    if (!/^#[0-9a-fA-F]{6}$/.test(value)) return;
+    localStorage.setItem(colorKey(side), value);
+  }
+  function hexToRgb(hex){
+    const value = String(hex || '').replace('#', '');
+    if (value.length !== 6) return { r: 0, g: 0, b: 0 };
+    return {
+      r: parseInt(value.slice(0,2), 16),
+      g: parseInt(value.slice(2,4), 16),
+      b: parseInt(value.slice(4,6), 16),
+    };
+  }
+  function preferredTextColor(bgHex){
+    const { r, g, b } = hexToRgb(bgHex);
+    const luma = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+    return luma < 0.5 ? '#ffffff' : '#111827';
+  }
+  function initBubbleColorControls(){
+    mineBubbleColorInput.value = readColor('mine', '#3B82F6');
+    theirBubbleColorInput.value = readColor('theirs', '#E5E7EB');
+  }
+  function setupBubbleColorListeners(){
+    mineBubbleColorInput.addEventListener('input', () => {
+      writeColor('mine', mineBubbleColorInput.value);
+      loadThreadMessages(false, false).catch(() => {});
+    });
+    theirBubbleColorInput.addEventListener('input', () => {
+      writeColor('theirs', theirBubbleColorInput.value);
+      loadThreadMessages(false, false).catch(() => {});
+    });
+  }
+  function setVideoModal(show){
+    videoChatModal.classList.toggle('hidden', !show);
+    videoChatModal.classList.toggle('flex', show);
+  }
+
+  function setCallStatus(text){
+    videoChatStatus.textContent = text;
+  }
+
+  function resetCallUi(){
+    muteAudioBtn.textContent = 'Mute';
+    toggleCameraBtn.textContent = 'Camera Off';
+    setCallStatus('Not connected');
+  }
+
+  async function sendCallSignal(signalType, payload = {}){
+    if (!callState.sessionId || !callState.peer) return;
+    await fetch('/api/calls/signal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: callState.sessionId,
+        sender: currentMember,
+        recipient: callState.peer,
+        signal_type: signalType,
+        payload,
+      })
+    });
+  }
+
+  async function ensureLocalMedia(){
+    if (callState.localStream) return callState.localStream;
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    callState.localStream = stream;
+    localVideo.srcObject = stream;
+    return stream;
+  }
+
+  function destroyCallState(){
+    if (callState.pc) {
+      try { callState.pc.close(); } catch (_) {}
+    }
+    callState.pc = null;
+
+    if (callState.localStream) {
+      callState.localStream.getTracks().forEach(track => track.stop());
+    }
+    callState.localStream = null;
+
+    if (callState.remoteStream) {
+      callState.remoteStream.getTracks().forEach(track => track.stop());
+    }
+    callState.remoteStream = null;
+
+    localVideo.srcObject = null;
+    remoteVideo.srcObject = null;
+    callState.sessionId = '';
+    callState.peer = '';
+    resetCallUi();
+  }
+
+  async function buildPeerConnection(){
+    const pc = new RTCPeerConnection({ iceServers: rtcIceServers });
+    callState.pc = pc;
+    callState.remoteStream = new MediaStream();
+    remoteVideo.srcObject = callState.remoteStream;
+
+    const stream = await ensureLocalMedia();
+    stream.getTracks().forEach(track => pc.addTrack(track, stream));
+
+    pc.ontrack = (event) => {
+      event.streams[0].getTracks().forEach(track => callState.remoteStream.addTrack(track));
+    };
+
+    pc.onicecandidate = async (event) => {
+      if (!event.candidate) return;
+      await sendCallSignal('ice', { candidate: event.candidate });
+    };
+
+    pc.onconnectionstatechange = () => {
+      const state = pc.connectionState;
+      if (state === 'connected') setCallStatus(`Connected to ${callState.peer}`);
+      if (state === 'disconnected' || state === 'failed' || state === 'closed') {
+        setCallStatus('Call ended');
+      }
+    };
+    return pc;
+  }
+
+  async function startOutgoingCall(){
+    if (!selectedMember) return;
+    if (callState.sessionId) {
+      toast('A call is already active', 'info');
+      return;
+    }
+
+    const startRes = await fetch('/api/calls/session/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ caller: currentMember, callee: selectedMember })
+    });
+    const startData = await startRes.json();
+    if (!startRes.ok || !startData.ok) throw new Error(startData.error || 'Failed to start call');
+
+    callState.sessionId = String(startData.session_id || '');
+    callState.peer = selectedMember;
+    videoChatTitle.textContent = `Video chat with ${selectedMember}`;
+    setVideoModal(true);
+    setCallStatus('Calling...');
+
+    const pc = await buildPeerConnection();
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    await sendCallSignal('offer', { sdp: offer.sdp, type: offer.type });
+  }
+
+  async function acceptIncomingOffer(signal){
+    const payload = signal.payload || {};
+    const accepted = await (window.uiConfirm
+      ? uiConfirm(`${signal.sender} is calling you. Accept video call?`, { title: 'Incoming Call', confirmText: 'Accept', cancelText: 'Decline' })
+      : Promise.resolve(window.confirm(`${signal.sender} is calling you. Accept video call?`))
+    );
+
+    if (!accepted) {
+      callState.sessionId = signal.session_id;
+      callState.peer = signal.sender;
+      await sendCallSignal('reject', {});
+      destroyCallState();
+      return;
+    }
+
+    callState.sessionId = signal.session_id;
+    callState.peer = signal.sender;
+    videoChatTitle.textContent = `Video chat with ${signal.sender}`;
+    setVideoModal(true);
+    setCallStatus('Connecting...');
+
+    const pc = await buildPeerConnection();
+    await pc.setRemoteDescription(new RTCSessionDescription({ type: payload.type || 'offer', sdp: payload.sdp || '' }));
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    await sendCallSignal('answer', { sdp: answer.sdp, type: answer.type });
+  }
+
+  async function handleCallSignal(signal){
+    const type = String(signal.signal_type || '').toLowerCase();
+
+    if (type === 'offer') {
+      if (callState.sessionId && callState.sessionId !== signal.session_id) {
+        const busySession = callState.sessionId;
+        const busyPeer = callState.peer;
+        callState.sessionId = signal.session_id;
+        callState.peer = signal.sender;
+        await sendCallSignal('reject', { reason: 'busy' });
+        callState.sessionId = busySession;
+        callState.peer = busyPeer;
+        return;
+      }
+      await acceptIncomingOffer(signal);
+      return;
+    }
+
+    if (!callState.sessionId || signal.session_id !== callState.sessionId) return;
+
+    if (type === 'answer') {
+      if (!callState.pc) return;
+      const payload = signal.payload || {};
+      await callState.pc.setRemoteDescription(new RTCSessionDescription({ type: payload.type || 'answer', sdp: payload.sdp || '' }));
+      setCallStatus(`Connected to ${callState.peer}`);
+      return;
+    }
+
+    if (type === 'ice') {
+      const payload = signal.payload || {};
+      if (callState.pc && payload.candidate) {
+        try { await callState.pc.addIceCandidate(new RTCIceCandidate(payload.candidate)); } catch (_) {}
+      }
+      return;
+    }
+
+    if (type === 'reject') {
+      toast(`${signal.sender} declined the video call`, 'info');
+      destroyCallState();
+      setVideoModal(false);
+      return;
+    }
+
+    if (type === 'end') {
+      toast('Video call ended', 'info');
+      destroyCallState();
+      setVideoModal(false);
+    }
+  }
+
+  async function pollSignals(){
+    try {
+      const res = await fetch(`/api/calls/signals?member=${encodeURIComponent(currentMember)}&after_id=${lastSignalId}`);
+      const data = await res.json();
+      if (!res.ok || !data.ok) return;
+      const rows = Array.isArray(data.items) ? data.items : [];
+      for (const row of rows) {
+        lastSignalId = Math.max(lastSignalId, Number(row.id || 0));
+        await handleCallSignal(row);
+      }
+    } catch (_) {}
+  }
+
+  function renderThreadItem(item){
+    const active = item.member === selectedMember;
+    return `<button type="button" class="w-full text-left p-3 rounded-2xl border ${active ? 'border-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 shadow-sm' : 'border-gray-200 dark:border-gray-700'} thread-item" data-member="${esc(item.member)}">
+      <div class="flex items-center justify-between gap-2">
+        <div class="font-semibold truncate">${esc(item.member)}</div>
+        ${item.unread ? `<span class="text-xs px-2 py-0.5 rounded-full bg-red-500 text-white">${item.unread}</span>` : ''}
+      </div>
+      <div class="text-xs text-gray-500 truncate">${esc(item.last_message || '')}</div>
+      <div class="text-[10px] text-gray-400">${esc(item.last_at ? fmt(item.last_at) : '')}</div>
+    </button>`;
+  }
+
+  function renderMessageBubble(row){
+    const mine = row.sender === currentMember;
+    const align = mine ? 'justify-end' : 'justify-start';
+    const bubbleBg = mine ? readColor('mine', '#3B82F6') : readColor('theirs', '#E5E7EB');
+    const bubbleText = preferredTextColor(bubbleBg);
+    const bubbleRadius = mine ? 'rounded-2xl rounded-br-md' : 'rounded-2xl rounded-bl-md';
+    const attachment = row.attachment_url
+      ? (String(row.attachment_mime || '').startsWith('image/')
+          ? `<img src="${esc(row.attachment_url)}" class="max-w-xs rounded-lg border border-gray-200 dark:border-gray-700 mt-1" alt="chat attachment">`
+          : `<a href="${esc(row.attachment_url)}" target="_blank" rel="noopener" class="text-xs underline mt-1 inline-block">Attachment: ${esc(row.attachment_filename || 'file')}</a>`)
+      : '';
+
+    return `<div class="flex ${align}">
+      <div class="max-w-[80%] break-words px-3 py-2 ${bubbleRadius}" style="background:${esc(bubbleBg)};color:${esc(bubbleText)};">
+        ${row.message ? `<div class="whitespace-pre-wrap text-sm">${esc(row.message)}</div>` : ''}
+        ${attachment}
+        <div class="text-[10px] opacity-70 mt-1 text-right">${esc(fmt(row.created_at))}</div>
+      </div>
+    </div>`;
+  }
+
+  function connectLiveEvents(){
+    if (eventsSource) {
+      try { eventsSource.close(); } catch (_) {}
+    }
+    eventsSource = new EventSource(`/api/stream/events?member=${encodeURIComponent(currentMember)}`);
+    eventsSource.addEventListener('notifications', () => {
+      pollMessagesRealtime();
+    });
+    eventsSource.addEventListener('sync', () => {
+      pollMessagesRealtime();
+    });
+    eventsSource.onerror = () => {
+      try { eventsSource.close(); } catch (_) {}
+      if (eventsReconnectTimer) clearTimeout(eventsReconnectTimer);
+      eventsReconnectTimer = setTimeout(connectLiveEvents, 3000);
+    };
+  }
+
+  async function loadThreads(){
+    const res = await fetch(`/api/messages/threads?member=${encodeURIComponent(currentMember)}`);
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Failed loading threads');
+    const rows = data.threads || [];
+    threadList.innerHTML = rows.length ? rows.map(renderThreadItem).join('') : '<div class="text-sm text-gray-500">No conversations yet.</div>';
+
+    const unread = rows.reduce((sum, row) => sum + Number(row.unread || 0), 0);
+    unreadBadge.textContent = `Unread: ${unread}`;
+
+    if (!selectedMember && rows.length) {
+      selectedMember = rows[0].member;
+      await loadThreadMessages();
+    }
+  }
+
+  async function loadThreadMessages(markRead = true, autoScroll = true){
+    if (!selectedMember) {
+      chatHeader.textContent = 'Select a family member to start chatting.';
+      chatMessages.innerHTML = '';
+      startVideoChatBtn.classList.add('hidden');
+      lastThreadSignature = '';
+      return;
+    }
+    chatHeader.textContent = `Chat with ${selectedMember}`;
+    startVideoChatBtn.classList.remove('hidden');
+
+    const res = await fetch(`/api/messages/thread/${encodeURIComponent(selectedMember)}?member=${encodeURIComponent(currentMember)}`);
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Failed loading messages');
+
+    const rows = data.messages || [];
+    const signature = rows.map(row => `${row.id}:${row.created_at || ''}`).join('|');
+    if (!autoScroll && signature === lastThreadSignature) {
+      return;
+    }
+    lastThreadSignature = signature;
+
+    const wasNearBottom = (chatMessages.scrollHeight - chatMessages.scrollTop - chatMessages.clientHeight) < 60;
+    chatMessages.innerHTML = rows.length ? rows.map(renderMessageBubble).join('') : '<div class="text-sm text-gray-500">No messages yet.</div>';
+    if (autoScroll || wasNearBottom) {
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    if (markRead) {
+      await fetch(`/api/messages/thread/${encodeURIComponent(selectedMember)}/read`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ member: currentMember })
+      });
+    }
+  }
+
+  async function pollMessagesRealtime(){
+    if (messagePollBusy || document.hidden) return;
+    messagePollBusy = true;
+    try {
+      await loadThreads();
+      if (selectedMember) {
+        await loadThreadMessages(false, false);
+      }
+    } catch (_) {
+    } finally {
+      messagePollBusy = false;
+    }
+  }
+
+  async function sendMessage(){
+    if (!selectedMember) {
+      toast('Pick a recipient first', 'info');
+      return;
+    }
+
+    const message = String(chatMessageInput.value || '').trim();
+    const attachment = chatAttachmentInput.files[0];
+    if (!message && !attachment) {
+      toast('Type a message or select a file', 'info');
+      return;
+    }
+
+    const formData = new FormData();
+    formData.set('sender', currentMember);
+    formData.set('recipient', selectedMember);
+    formData.set('message', message);
+    if (attachment) formData.set('attachment', attachment);
+
+    const res = await fetch('/api/messages/send', { method: 'POST', body: formData });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to send message');
+
+    chatMessageInput.value = '';
+    chatAttachmentInput.value = '';
+    await loadThreadMessages();
+    await loadThreads();
+  }
+
+  threadList.addEventListener('click', async (event) => {
+    const btn = event.target.closest('.thread-item');
+    if (!btn) return;
+    selectedMember = btn.getAttribute('data-member') || '';
+    await loadThreads();
+    await loadThreadMessages();
+  });
+
+  chatForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    try {
+      await sendMessage();
+    } catch (err) {
+      toast(err.message || 'Failed to send message', 'error');
+    }
+  });
+
+  startVideoChatBtn.addEventListener('click', () => {
+    if (window.HomeHubRealtimeComms && typeof window.HomeHubRealtimeComms.startOutgoingCall === 'function') {
+      window.HomeHubRealtimeComms.startOutgoingCall(selectedMember).catch(err => toast(err.message || 'Failed to start video call', 'error'));
+      return;
+    }
+    startOutgoingCall().catch(err => toast(err.message || 'Failed to start video call', 'error'));
+  });
+
+  closeVideoChatBtn.addEventListener('click', async () => {
+    try { await sendCallSignal('end', {}); } catch (_) {}
+    destroyCallState();
+    setVideoModal(false);
+  });
+
+  endVideoChatBtn.addEventListener('click', async () => {
+    try { await sendCallSignal('end', {}); } catch (_) {}
+    destroyCallState();
+    setVideoModal(false);
+  });
+
+  muteAudioBtn.addEventListener('click', () => {
+    if (!callState.localStream) return;
+    const audioTracks = callState.localStream.getAudioTracks();
+    const enable = audioTracks.some(track => track.enabled);
+    audioTracks.forEach(track => { track.enabled = !enable; });
+    muteAudioBtn.textContent = enable ? 'Unmute' : 'Mute';
+  });
+
+  toggleCameraBtn.addEventListener('click', () => {
+    if (!callState.localStream) return;
+    const videoTracks = callState.localStream.getVideoTracks();
+    const enable = videoTracks.some(track => track.enabled);
+    videoTracks.forEach(track => { track.enabled = !enable; });
+    toggleCameraBtn.textContent = enable ? 'Camera On' : 'Camera Off';
+  });
+
+  videoChatModal.addEventListener('click', (event) => {
+    if (event.target === videoChatModal) {
+      sendCallSignal('end', {}).catch(() => {});
+      destroyCallState();
+      setVideoModal(false);
+    }
+  });
+
+  document.getElementById('refreshThreads').addEventListener('click', async () => {
+    try {
+      await loadThreads();
+      await loadThreadMessages();
+    } catch (err) {
+      toast(err.message || 'Failed to refresh threads', 'error');
+    }
+  });
+
+  (async function init(){
+    try {
+      initBubbleColorControls();
+      setupBubbleColorListeners();
+      await loadThreads();
+      if (!window.HomeHubRealtimeComms) {
+        await pollSignals();
+        signalPollTimer = setInterval(pollSignals, 1500);
+      }
+      connectLiveEvents();
+      messagePollTimer = setInterval(pollMessagesRealtime, 5000);
+    } catch (err) {
+      toast(err.message || 'Failed to load messages', 'error');
+    }
+  })();
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      pollMessagesRealtime();
+    }
+  });
+
+  window.addEventListener('beforeunload', () => {
+    if (signalPollTimer) clearInterval(signalPollTimer);
+    if (messagePollTimer) clearInterval(messagePollTimer);
+    if (eventsReconnectTimer) clearTimeout(eventsReconnectTimer);
+    if (eventsSource) {
+      try { eventsSource.close(); } catch (_) {}
+    }
+    if (callState.sessionId) {
+      sendCallSignal('end', {}).catch(() => {});
+    }
+    destroyCallState();
+  });
+})();
+</script>
+{% endblock %}

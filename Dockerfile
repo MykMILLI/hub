@@ -45,6 +45,9 @@ COPY . /app
 # Copy built Tailwind CSS from builder
 COPY --from=builder /app/static/output.css /app/static/output.css
 
+# Ensure runtime writable directories exist even when excluded from build context
+RUN mkdir -p /app/data /app/uploads /app/media /app/pdfs /app/temp
+
 EXPOSE 5000
 
-CMD ["gunicorn", "wsgi:app", "-w", "1", "-k", "sync", "-b", "0.0.0.0:5000", "--access-logfile", "-", "--error-logfile", "-"]
+CMD ["gunicorn", "wsgi:app", "-w", "1", "-k", "gthread", "--threads", "8", "--timeout", "120", "-b", "0.0.0.0:5000", "--access-logfile", "-", "--error-logfile", "-"]

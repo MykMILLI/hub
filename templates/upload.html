@@ -54,8 +54,7 @@
                         data-filename="{{ file.filename }}"
                         data-is-video="{% if is_video %}true{% else %}false{% endif %}"
                         onclick="openMediaPreview('{{ file.filename }}', {{ 'true' if is_video else 'false' }})">
-                        
-                        <!-- Thumbnail Image/Video Poster -->
+
                         {% if is_photo %}
                             <img src="/uploads/{{ file.filename }}" alt="{{ file.filename }}" class="w-full h-full object-cover">
                         {% elif is_video %}
@@ -66,8 +65,7 @@
                                 <i class="fa-solid fa-play text-white text-3xl drop-shadow-lg"></i>
                             </div>
                         {% endif %}
-                        
-                        <!-- Hover Overlay -->
+
                         <div class="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100">
                             <a href="/uploads/preview/{{ file.filename }}" target="_blank" rel="noopener noreferrer" class="btn btn-success text-xs p-2" title="Preview">
                                 <i class="fa-solid fa-eye"></i>
@@ -85,8 +83,7 @@
                                 </button>
                             </form>
                         </div>
-                        
-                        <!-- File Info on Hover -->
+
                         <div class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-2 text-white text-xs opacity-0 group-hover:opacity-100 transition-opacity">
                             {{ file.filename }}
                         </div>
@@ -190,6 +187,85 @@
     </div>
 </div>
 
+<section id="family-photos" class="mt-10 card p-6 space-y-5">
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+        <div>
+            <h3 class="text-2xl font-bold">Photos & Videos</h3>
+            <p class="text-sm text-m3-on-surface-variant">Shared Cloud now includes albums, photo/video uploads, and watched-folder sync opt-in.</p>
+        </div>
+        <div class="flex items-center gap-2">
+            <button id="cloudPhotosRefreshBtn" class="btn btn-secondary" type="button"><i class="fa-solid fa-rotate"></i> Refresh</button>
+        </div>
+    </div>
+
+    <div class="grid lg:grid-cols-2 gap-4">
+        <form id="cloudAlbumCreateForm" class="card p-4 space-y-3">
+            <h4 class="font-semibold">Create Album</h4>
+            <input id="cloudAlbumName" class="w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600" placeholder="Album name" required>
+            <div class="grid grid-cols-2 gap-2">
+                <select id="cloudAlbumVisibility" class="p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
+                    <option value="private">Private</option>
+                    <option value="family">Family</option>
+                </select>
+                <button class="btn btn-primary" type="submit"><i class="fa-solid fa-folder-plus"></i> Create</button>
+            </div>
+        </form>
+
+        <form id="cloudPhotoUploadForm" class="card p-4 space-y-3" enctype="multipart/form-data">
+            <h4 class="font-semibold">Upload Photos/Videos</h4>
+            <input id="cloudPhotoFiles" type="file" multiple accept="image/*,video/*" class="w-full" required>
+            <div class="grid grid-cols-3 gap-2">
+                <select id="cloudPhotoVisibility" class="p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
+                    <option value="private">Private</option>
+                    <option value="family">Family</option>
+                </select>
+                <select id="cloudPhotoAlbum" class="p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
+                    <option value="">No album</option>
+                </select>
+                <button class="btn btn-primary" type="submit"><i class="fa-solid fa-cloud-arrow-up"></i> Upload</button>
+            </div>
+        </form>
+    </div>
+
+    <div class="card p-4 space-y-3">
+        <div class="flex items-center justify-between gap-2">
+            <h4 class="font-semibold">Watched Folders</h4>
+            <span class="text-xs text-m3-on-surface-variant">Select a folder from this device, then choose sync scope and album.</span>
+        </div>
+        <form id="cloudWatchFolderForm" class="grid md:grid-cols-4 gap-2 items-end">
+            <div class="md:col-span-2 space-y-2">
+                <div class="flex gap-2">
+                    <input id="cloudWatchFolderUri" class="flex-1 p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600" placeholder="Choose a folder" readonly required>
+                    <button id="cloudWatchBrowseBtn" class="btn btn-secondary" type="button"><i class="fa-solid fa-folder-open"></i> Browse</button>
+                </div>
+                <input id="cloudWatchFolderPicker" type="file" webkitdirectory directory multiple class="hidden" aria-hidden="true">
+                <div id="cloudWatchBrowseMeta" class="text-xs text-m3-on-surface-variant">No folder selected.</div>
+            </div>
+            <select id="cloudWatchScope" class="p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
+                <option value="private">Private</option>
+                <option value="family">Family</option>
+            </select>
+            <div class="flex gap-2">
+                <select id="cloudWatchAlbum" class="flex-1 p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
+                    <option value="">No album</option>
+                </select>
+                <button class="btn btn-secondary" type="submit"><i class="fa-solid fa-folder-plus"></i> Add</button>
+            </div>
+        </form>
+        <div id="cloudWatchList" class="space-y-2"></div>
+    </div>
+
+    <div class="card p-4 space-y-3">
+        <h4 class="font-semibold">Albums</h4>
+        <div id="cloudAlbumList" class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3"></div>
+    </div>
+
+    <div class="card p-4 space-y-3">
+        <h4 class="font-semibold">Recent Photos/Videos</h4>
+        <div id="cloudPhotoGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3"></div>
+    </div>
+</section>
+
 <script>
 document.getElementById('creator').value = localStorage.getItem('username');
 document.querySelectorAll('input[name="user"]').forEach(i=> i.value = localStorage.getItem('username'));
@@ -200,20 +276,24 @@ const categoryTabs = document.querySelectorAll('.category-tab');
 const fileItems = document.querySelectorAll('.file-item');
 const photosVideosGrid = document.getElementById('photosVideosGrid');
 const otherFilesList = document.getElementById('otherFilesList');
+const photosHubSection = document.getElementById('family-photos');
 
 function filterFiles(category) {
     currentCategory = category;
-    
-    // Show/hide grid view for photos & videos
-    if (category === 'photos_videos') {
+    const inPhotosMode = category === 'photos_videos';
+
+    if (inPhotosMode) {
         photosVideosGrid.style.display = 'block';
         otherFilesList.style.display = 'none';
     } else {
         photosVideosGrid.style.display = 'none';
         otherFilesList.style.display = 'block';
     }
-    
-    // Filter items in the displayed view
+
+    if (photosHubSection) {
+        photosHubSection.style.display = inPhotosMode ? '' : 'none';
+    }
+
     fileItems.forEach(item => {
         if (category === 'all' || item.dataset.category === category) {
             item.style.display = '';
@@ -221,8 +301,7 @@ function filterFiles(category) {
             item.style.display = 'none';
         }
     });
-    
-    // Update active tab
+
     categoryTabs.forEach(tab => {
         if (tab.dataset.category === category) {
             tab.classList.add('bg-m3-primary', 'shadow-lg');
@@ -402,5 +481,425 @@ document.getElementById('mediaLightbox').addEventListener('click', (e) => {
         closeLightbox();
     }
 });
+</script>
+
+<script>
+(() => {
+    const currentMember = localStorage.getItem('username') || '{{ current_member_name }}';
+    const urlParams = new URLSearchParams(window.location.search);
+    const requestedAlbumRaw = Number(urlParams.get('photo_album') || 0);
+    const requestedAlbumId = Number.isFinite(requestedAlbumRaw) && requestedAlbumRaw > 0 ? requestedAlbumRaw : null;
+    const albumList = document.getElementById('cloudAlbumList');
+    const photoGrid = document.getElementById('cloudPhotoGrid');
+    const watchList = document.getElementById('cloudWatchList');
+    const photoAlbumSelect = document.getElementById('cloudPhotoAlbum');
+    const watchAlbumSelect = document.getElementById('cloudWatchAlbum');
+    const watchFolderUriInput = document.getElementById('cloudWatchFolderUri');
+    const watchFolderPicker = document.getElementById('cloudWatchFolderPicker');
+    const watchBrowseBtn = document.getElementById('cloudWatchBrowseBtn');
+    const watchBrowseMeta = document.getElementById('cloudWatchBrowseMeta');
+    const watchProgressBar = document.getElementById('cloudWatchProgressBar');
+    const watchProgressText = document.getElementById('cloudWatchProgressText');
+    const watchProgressStats = document.getElementById('cloudWatchProgressStats');
+    const watchNoticeList = document.getElementById('cloudWatchNoticeList');
+
+    const subButtons = {
+        library: document.getElementById('cloudSubNavLibrary'),
+        albums: document.getElementById('cloudSubNavAlbums'),
+        watched: document.getElementById('cloudSubNavWatched'),
+    };
+    const subPanels = {
+        library: document.getElementById('cloudSubPanelLibrary'),
+        albums: document.getElementById('cloudSubPanelAlbums'),
+        watched: document.getElementById('cloudSubPanelWatched'),
+    };
+
+    const albumModal = document.getElementById('cloudAlbumModal');
+    const uploadModal = document.getElementById('cloudUploadModal');
+    const syncSuccessModal = document.getElementById('cloudSyncSuccessModal');
+    const syncSuccessText = document.getElementById('cloudSyncSuccessText');
+
+    const openAlbumButtons = [
+        document.getElementById('cloudOpenAlbumModalBtn'),
+        document.getElementById('cloudOpenAlbumModalBtnSecondary'),
+    ].filter(Boolean);
+    const openUploadButtons = [document.getElementById('cloudOpenUploadModalBtn')].filter(Boolean);
+    const closeAlbumButtons = [
+        document.getElementById('cloudAlbumModalClose'),
+        document.getElementById('cloudAlbumModalCancel'),
+    ].filter(Boolean);
+    const closeUploadButtons = [
+        document.getElementById('cloudUploadModalClose'),
+        document.getElementById('cloudUploadModalCancel'),
+    ].filter(Boolean);
+    const closeSyncSuccessBtn = document.getElementById('cloudSyncSuccessClose');
+
+    let albums = [];
+    let photos = [];
+    let watchFolders = [];
+    let refreshTimer = null;
+    let currentSubView = 'library';
+    let selectedFolder = null;
+    let watchNotices = [];
+
+    function esc(v){ return String(v || '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+    function fmt(iso){ try { return new Date(iso).toLocaleString(); } catch(_) { return iso || ''; } }
+    function toast(msg, type='info'){ if (window.globalToast) globalToast(msg, type); }
+
+    function setSubView(view){
+        currentSubView = view;
+        ['library', 'albums', 'watched'].forEach((name) => {
+            const btn = subButtons[name];
+            const panel = subPanels[name];
+            const active = name === view;
+            if (panel) panel.classList.toggle('hidden', !active);
+            if (!btn) return;
+            btn.classList.toggle('btn-primary', active);
+            btn.classList.toggle('btn-secondary', !active);
+        });
+    }
+
+    function openModal(el){
+        if (!el) return;
+        el.classList.remove('hidden');
+        el.classList.add('flex');
+        document.body.style.overflow = 'hidden';
+    }
+
+    function closeModal(el){
+        if (!el) return;
+        el.classList.add('hidden');
+        el.classList.remove('flex');
+        if (![albumModal, uploadModal, syncSuccessModal].some((m) => m && !m.classList.contains('hidden'))) {
+            document.body.style.overflow = '';
+        }
+    }
+
+    function updateWatchProgress(percent, text, stats){
+        const value = Math.max(0, Math.min(100, Number(percent) || 0));
+        if (watchProgressBar) watchProgressBar.style.width = `${value}%`;
+        if (watchProgressText && text) watchProgressText.textContent = text;
+        if (watchProgressStats && typeof stats === 'string' && stats.trim().length) watchProgressStats.textContent = stats;
+    }
+
+    function renderWatchNotices(){
+        if (!watchNoticeList) return;
+        if (!watchNotices.length) {
+            watchNoticeList.innerHTML = '<div>No notifications yet.</div>';
+            return;
+        }
+        watchNoticeList.innerHTML = watchNotices.slice(0, 6).map((row) => `
+            <div class="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2">
+                <div class="font-medium">${esc(row.message)}</div>
+                <div class="text-[11px] text-m3-on-surface-variant mt-1">${esc(row.time)}</div>
+            </div>
+        `).join('');
+    }
+
+    function addWatchNotice(message){
+        watchNotices = [{ message, time: new Date().toLocaleTimeString() }, ...watchNotices];
+        renderWatchNotices();
+    }
+
+    function showSyncSuccessModal(message){
+        if (syncSuccessText) syncSuccessText.textContent = message;
+        openModal(syncSuccessModal);
+    }
+
+    async function jget(url){
+        const res = await fetch(url);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) throw new Error(data.error || 'Request failed');
+        return data;
+    }
+
+    async function jsend(url, method, payload){
+        const res = await fetch(url, {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload || {}),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) throw new Error(data.error || 'Request failed');
+        return data;
+    }
+
+    function renderAlbumSelects(){
+        const options = ['<option value="">No album</option>']
+            .concat(albums.map(a => `<option value="${Number(a.id)}">${esc(a.name)}</option>`));
+        photoAlbumSelect.innerHTML = options.join('');
+        watchAlbumSelect.innerHTML = options.join('');
+    }
+
+    function renderAlbums(){
+        if (!albums.length) {
+            albumList.innerHTML = '<div class="text-sm text-m3-on-surface-variant">No albums yet.</div>';
+            return;
+        }
+        albumList.innerHTML = albums.map(a => `
+            <article class="rounded-xl border border-gray-200 dark:border-gray-700 p-3">
+                <div class="font-semibold truncate">${esc(a.name)}</div>
+                <div class="text-xs text-m3-on-surface-variant mt-1">${esc(a.visibility)} • ${Number(a.asset_count || 0)} items</div>
+                ${a.cover_url ? `<img src="${esc(a.cover_url)}" class="mt-2 w-full h-32 object-cover rounded-lg" alt="album cover">` : ''}
+            </article>
+        `).join('');
+    }
+
+    function renderPhotos(){
+        const rows = photos.slice(0, 50);
+        if (!rows.length) {
+            photoGrid.innerHTML = '<div class="text-sm text-m3-on-surface-variant">No photos yet.</div>';
+            return;
+        }
+        photoGrid.innerHTML = rows.map(p => `
+            <article class="rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
+                ${p.is_video
+                    ? `<video src="${esc(p.preview_url)}" class="w-full h-32 object-cover" controls preload="metadata"></video>`
+                    : `<img src="${esc(p.preview_url)}" class="w-full h-32 object-cover" alt="${esc(p.original_filename || '')}">`}
+                <div class="p-2 text-xs space-y-1">
+                    <div class="truncate font-medium">${esc(p.original_filename || p.filename || '')}</div>
+                    <div class="text-m3-on-surface-variant">${esc(p.uploader || '')} • ${esc(p.visibility || '')}</div>
+                    <div class="flex items-center gap-1">
+                        <a class="btn btn-secondary text-xs" href="${esc(p.download_url)}"><i class="fa-solid fa-download"></i></a>
+                        <button class="btn btn-danger text-xs cloud-photo-delete" data-id="${Number(p.id)}"><i class="fa-solid fa-trash"></i></button>
+                    </div>
+                </div>
+            </article>
+        `).join('');
+    }
+
+    function renderWatchFolders(){
+        if (!watchFolders.length) {
+            watchList.innerHTML = '<div class="text-sm text-m3-on-surface-variant">No watched folders added on this device/member yet.</div>';
+            return;
+        }
+        watchList.innerHTML = watchFolders.map(w => `
+            <article class="rounded-xl border border-gray-200 dark:border-gray-700 p-3 flex items-start justify-between gap-2">
+                <div class="min-w-0">
+                    <div class="font-medium text-sm">${esc(w.scope)} • ${w.is_active ? 'Active' : 'Paused'}</div>
+                    <div class="text-xs text-m3-on-surface-variant break-all">${esc(w.folder_uri)}</div>
+                    <div class="text-[11px] text-m3-on-surface-variant">Last sync: ${esc(w.last_synced_at ? fmt(w.last_synced_at) : 'Never')}</div>
+                </div>
+                <div class="flex items-center gap-1">
+                    <button class="btn btn-secondary text-xs cloud-watch-toggle" data-id="${Number(w.id)}" data-active="${w.is_active ? '1' : '0'}">${w.is_active ? 'Pause' : 'Resume'}</button>
+                    <button class="btn btn-danger text-xs cloud-watch-delete" data-id="${Number(w.id)}"><i class="fa-solid fa-trash"></i></button>
+                </div>
+            </article>
+        `).join('');
+    }
+
+    async function loadAll(){
+        const assetsUrl = `/api/photos/assets?member=${encodeURIComponent(currentMember)}${requestedAlbumId ? `&album_id=${requestedAlbumId}` : ''}`;
+        const [albumData, photoData, watchData] = await Promise.all([
+            jget(`/api/photos/albums?member=${encodeURIComponent(currentMember)}`),
+            jget(assetsUrl),
+            jget(`/api/photos/watch-folders?member=${encodeURIComponent(currentMember)}`),
+        ]);
+        albums = albumData.items || [];
+        photos = photoData.items || [];
+        watchFolders = watchData.items || [];
+        renderAlbumSelects();
+        renderAlbums();
+        renderPhotos();
+        renderWatchFolders();
+        const activeCount = watchFolders.filter((w) => w && w.is_active).length;
+        updateWatchProgress(
+            activeCount ? 100 : 0,
+            activeCount ? 'Watched folder sync is active.' : 'Waiting for folder selection.',
+            activeCount ? `${activeCount} watched folder${activeCount === 1 ? '' : 's'} active.` : 'No sync activity yet.',
+        );
+    }
+
+    function parseFolderSelection(files){
+        if (!files || !files.length) return null;
+        const first = files[0];
+        const rel = String(first.webkitRelativePath || '').trim();
+        const folderName = rel.includes('/') ? rel.split('/')[0] : '';
+        const root = folderName || first.name;
+        return {
+            folderUri: `folder://${root}`,
+            label: root,
+            count: files.length,
+        };
+    }
+
+    if (watchBrowseBtn && watchFolderPicker) {
+        watchBrowseBtn.addEventListener('click', () => watchFolderPicker.click());
+        watchFolderPicker.addEventListener('change', () => {
+            const selected = parseFolderSelection(watchFolderPicker.files);
+            if (!selected) {
+                selectedFolder = null;
+                watchFolderUriInput.value = '';
+                if (watchBrowseMeta) watchBrowseMeta.textContent = 'No folder selected.';
+                updateWatchProgress(0, 'Waiting for folder selection.', 'No sync activity yet.');
+                return;
+            }
+            selectedFolder = selected;
+            watchFolderUriInput.value = selected.folderUri;
+            if (watchBrowseMeta) {
+                watchBrowseMeta.textContent = `${selected.label} selected (${selected.count} files visible in browser picker).`;
+            }
+            updateWatchProgress(15, `Ready to sync ${selected.label}.`, `${selected.count} item${selected.count === 1 ? '' : 's'} detected in this folder.`);
+            addWatchNotice(`Folder selected: ${selected.label}`);
+        });
+    }
+
+    Object.entries(subButtons).forEach(([view, btn]) => {
+        if (!btn) return;
+        btn.addEventListener('click', () => setSubView(view));
+    });
+
+    openAlbumButtons.forEach((btn) => btn.addEventListener('click', () => openModal(albumModal)));
+    openUploadButtons.forEach((btn) => btn.addEventListener('click', () => openModal(uploadModal)));
+    closeAlbumButtons.forEach((btn) => btn.addEventListener('click', () => closeModal(albumModal)));
+    closeUploadButtons.forEach((btn) => btn.addEventListener('click', () => closeModal(uploadModal)));
+    if (closeSyncSuccessBtn) closeSyncSuccessBtn.addEventListener('click', () => closeModal(syncSuccessModal));
+
+    [albumModal, uploadModal, syncSuccessModal].forEach((modal) => {
+        if (!modal) return;
+        modal.addEventListener('click', (event) => {
+            if (event.target === modal) closeModal(modal);
+        });
+    });
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        closeModal(albumModal);
+        closeModal(uploadModal);
+        closeModal(syncSuccessModal);
+    });
+
+    document.getElementById('cloudAlbumCreateForm').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        try {
+            const name = document.getElementById('cloudAlbumName').value.trim();
+            const visibility = document.getElementById('cloudAlbumVisibility').value;
+            if (!name) throw new Error('Album name is required');
+            await jsend('/api/photos/albums', 'POST', { creator: currentMember, name, visibility });
+            document.getElementById('cloudAlbumName').value = '';
+            toast('Album created', 'success');
+            await loadAll();
+            closeModal(albumModal);
+            setSubView('albums');
+        } catch (err) {
+            toast(err.message || 'Failed to create album', 'error');
+        }
+    });
+
+    document.getElementById('cloudPhotoUploadForm').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        try {
+            const files = document.getElementById('cloudPhotoFiles').files;
+            if (!files || !files.length) throw new Error('Select files first');
+            const fd = new FormData();
+            for (const f of files) fd.append('files', f);
+            fd.append('creator', currentMember);
+            fd.append('visibility', document.getElementById('cloudPhotoVisibility').value);
+            const albumId = document.getElementById('cloudPhotoAlbum').value;
+            if (albumId) fd.append('album_id', albumId);
+            const res = await fetch('/api/photos/upload', { method: 'POST', body: fd });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || !data.ok) throw new Error(data.error || 'Upload failed');
+            document.getElementById('cloudPhotoUploadForm').reset();
+            toast('Photos uploaded', 'success');
+            await loadAll();
+            closeModal(uploadModal);
+            setSubView('library');
+        } catch (err) {
+            toast(err.message || 'Upload failed', 'error');
+        }
+    });
+
+    document.getElementById('cloudWatchFolderForm').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        try {
+            const folderUri = watchFolderUriInput.value.trim();
+            if (!folderUri) throw new Error('Choose a folder first');
+            const selectedCount = selectedFolder?.count || 0;
+            const selectedLabel = selectedFolder?.label || folderUri;
+            updateWatchProgress(30, `Starting sync for ${selectedLabel}...`, `${selectedCount} item${selectedCount === 1 ? '' : 's'} queued.`);
+            addWatchNotice(`Sync started for ${selectedLabel}`);
+            const scope = document.getElementById('cloudWatchScope').value;
+            const albumRaw = document.getElementById('cloudWatchAlbum').value;
+            await jsend('/api/photos/watch-folders', 'POST', {
+                member: currentMember,
+                folder_uri: folderUri,
+                scope,
+                platform: 'web',
+                target_album_id: albumRaw ? Number(albumRaw) : null,
+            });
+            updateWatchProgress(75, 'Folder registered. Finalizing sync...', `Tracking ${selectedCount} selected item${selectedCount === 1 ? '' : 's'}.`);
+            watchFolderUriInput.value = '';
+            if (watchBrowseMeta) watchBrowseMeta.textContent = 'No folder selected.';
+            if (watchFolderPicker) watchFolderPicker.value = '';
+            selectedFolder = null;
+            toast('Watched folder saved', 'success');
+            await loadAll();
+            addWatchNotice('Watched folder is active and syncing.');
+            showSyncSuccessModal('Your watched folder is successfully synced and now active. Great job keeping family memories flowing.');
+            setSubView('watched');
+        } catch (err) {
+            toast(err.message || 'Failed to save watched folder', 'error');
+            addWatchNotice('Sync setup failed. Please check folder selection and try again.');
+        }
+    });
+
+    photoGrid.addEventListener('click', async (event) => {
+        const btn = event.target.closest('.cloud-photo-delete');
+        if (!btn) return;
+        const assetId = Number(btn.getAttribute('data-id') || 0);
+        if (!assetId) return;
+        try {
+            await jsend('/api/photos/assets/batch', 'POST', { action: 'delete', asset_ids: [assetId] });
+            toast('Photo deleted', 'success');
+            await loadAll();
+        } catch (err) {
+            toast(err.message || 'Delete failed', 'error');
+        }
+    });
+
+    watchList.addEventListener('click', async (event) => {
+        const toggleBtn = event.target.closest('.cloud-watch-toggle');
+        const delBtn = event.target.closest('.cloud-watch-delete');
+        try {
+            if (toggleBtn) {
+                const id = Number(toggleBtn.getAttribute('data-id') || 0);
+                const active = toggleBtn.getAttribute('data-active') === '1';
+                if (!id) return;
+                await jsend(`/api/photos/watch-folders/${id}`, 'PATCH', { is_active: !active });
+                toast(!active ? 'Watch folder resumed' : 'Watch folder paused', 'success');
+                await loadAll();
+                return;
+            }
+            if (delBtn) {
+                const id = Number(delBtn.getAttribute('data-id') || 0);
+                if (!id) return;
+                const res = await fetch(`/api/photos/watch-folders/${id}`, { method: 'DELETE' });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok || !data.ok) throw new Error(data.error || 'Delete failed');
+                toast('Watch folder removed', 'success');
+                await loadAll();
+            }
+        } catch (err) {
+            toast(err.message || 'Operation failed', 'error');
+        }
+    });
+
+    document.getElementById('cloudPhotosRefreshBtn').addEventListener('click', () => {
+        loadAll().catch((err) => toast(err.message || 'Refresh failed', 'error'));
+    });
+
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) loadAll().catch(() => {});
+    });
+
+    setSubView(currentSubView);
+    renderWatchNotices();
+    loadAll().catch((err) => toast(err.message || 'Failed to load integrated photos', 'error'));
+    refreshTimer = setInterval(() => loadAll().catch(() => {}), 10000);
+    window.addEventListener('beforeunload', () => {
+        if (refreshTimer) clearInterval(refreshTimer);
+    });
+})();
 </script>
 {% endblock %}

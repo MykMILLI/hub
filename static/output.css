@@ -2171,6 +2171,24 @@ textarea::placeholder {
   cursor: pointer;
 }
 
+/* Global modal spacing + overflow safety rule
+   Ensures centered modal overlays have breathing room and don't clip at viewport edges. */
+
+.fixed.inset-0.items-center.justify-center {
+  padding: clamp(12px, 2.5vw, 28px);
+}
+
+.fixed.inset-0.items-center.justify-center > .card,
+.fixed.inset-0.items-center.justify-center > .glass,
+.fixed.inset-0.items-center.justify-center > .glass-lg,
+.fixed.inset-0.items-center.justify-center > .modal-content,
+.fixed.inset-0.items-center.justify-center > [class*="max-w-"] {
+  width: min(100%, 1100px);
+  max-height: calc(100dvh - clamp(24px, 5vw, 56px));
+  overflow-y: auto;
+  margin: 0 auto;
+}
+
 /* Modern Material 3 Buttons */
 
 .btn {

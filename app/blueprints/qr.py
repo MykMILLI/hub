@@ -2,7 +2,7 @@ import base64
 import os
 from io import BytesIO
 
-from flask import render_template, request, redirect, url_for, current_app
+from flask import render_template, request, redirect, url_for, current_app, jsonify
 import qrcode
 
 from ..models import db, QRCode
@@ -90,3 +90,85 @@ def qr_delete(qr_id: int):
         db.session.delete(rec)
         db.session.commit()
     return redirect(url_for('main.qr_view'))
+
+
+@main_bp.route('/api/qr', methods=['GET'])
+def api_get_qr_history():
+    history = QRCode.query.order_by(QRCode.timestamp.desc()).limit(100).all()
+    return jsonify({
+        'ok': True,
+        'items': [
+            {
+                'id': row.id,
+                'text': row.text,
+                'original_input': row.original_input,
+                'filename': row.filename,
+                'creator': row.creator,
+                'timestamp': row.timestamp.isoformat() if row.timestamp else None,
+                'image_url': f"/static/{row.filename}" if row.filename else None,
+            }
+            for row in history
+        ],
+    })
+
+
+@main_bp.route('/api/qr', methods=['POST'])
+def api_create_qr():
+    data = request.get_json(silent=True) or {}
+    text = sanitize_text(data.get('text') or '').strip()
+    creator = sanitize_text(data.get('creator') or '').strip()
+    if not text:
+        return jsonify({'ok': False, 'error': 'text is required'}), 400
+
+    wifi_text = _wifi_to_qrtext(text)
+    payload = wifi_text or text
+
+    img = qrcode.make(payload)
+    buf = BytesIO()
+    img.save(buf, format='PNG')
+    b64 = base64.b64encode(buf.getvalue()).decode('ascii')
+
+    os.makedirs(STATIC_DIR, exist_ok=True)
+    filename = f"qr_{len(text)}_{abs(hash(payload)) % (10**8)}.png"
+    out_path = os.path.join(STATIC_DIR, filename)
+    img.save(out_path)
+
+    rec = QRCode(text=payload, original_input=text, filename=filename, creator=creator)
+    db.session.add(rec)
+    db.session.commit()
+
+    return jsonify({
+        'ok': True,
+        'item': {
+            'id': rec.id,
+            'text': rec.text,
+            'original_input': rec.original_input,
+            'filename': rec.filename,
+            'creator': rec.creator,
+            'timestamp': rec.timestamp.isoformat() if rec.timestamp else None,
+            'image_url': f"/static/{rec.filename}" if rec.filename else None,
+            'image_base64': b64,
+        },
+    })
+
+
+@main_bp.route('/api/qr/<int:qr_id>', methods=['DELETE'])
+def api_delete_qr(qr_id: int):
+    rec = QRCode.query.get_or_404(qr_id)
+    user = sanitize_text((request.args.get('user') or (request.get_json(silent=True) or {}).get('user') or '').strip())
+    admin_name = current_app.config['HOMEHUB_CONFIG'].get('admin_name', 'Administrator')
+    admin_aliases = {admin_name, 'Administrator', 'admin'}
+
+    if user not in admin_aliases and user != rec.creator:
+        return jsonify({'ok': False, 'error': 'Permission denied'}), 403
+
+    try:
+        path = os.path.join(STATIC_DIR, rec.filename)
+        if os.path.exists(path):
+            os.remove(path)
+    except Exception:
+        pass
+
+    db.session.delete(rec)
+    db.session.commit()
+    return jsonify({'ok': True})

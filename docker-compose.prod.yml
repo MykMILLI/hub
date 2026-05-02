@@ -1,0 +1,89 @@
+services:
+  homehub:
+    container_name: homehub-prod
+    build:
+      context: .
+    restart: unless-stopped
+    labels:
+      - autoheal=true
+    init: true
+    ports:
+      - "${HOMEHUB_PORT:-5001}:5000"
+    env_file:
+      - .env
+    environment:
+      - FLASK_ENV=production
+      - SECRET_KEY=${SECRET_KEY}
+      - PLAID_CLIENT_ID=${PLAID_CLIENT_ID:-}
+      - PLAID_SECRET=${PLAID_SECRET:-}
+      - PLAID_ENV=${PLAID_ENV:-sandbox}
+      - SMTP_ENABLED=${SMTP_ENABLED:-false}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_SECURE=${SMTP_SECURE:-false}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - SMTP_FROM=${SMTP_FROM:-}
+      - TZ=${TZ:-UTC}
+    volumes:
+      - ./uploads:/app/uploads
+      - ./media:/app/media
+      - ./pdfs:/app/pdfs
+      - ./data:/app/data
+      - ./config.yml:/app/config.yml
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  turn:
+    image: coturn/coturn:4.6.3
+    container_name: homehub-turn
+    restart: unless-stopped
+    command: >
+      -n
+      --log-file=stdout
+      --fingerprint
+      --lt-cred-mech
+      --stale-nonce
+      --no-rfc5780
+      --realm=${TURN_REALM:-homehub.local}
+      --user=${TURN_USERNAME:-homehub}:${TURN_PASSWORD:-change-me}
+      --listening-port=${TURN_PORT:-3478}
+      --min-port=${TURN_MIN_PORT:-49160}
+      --max-port=${TURN_MAX_PORT:-49200}
+      --no-cli
+    ports:
+      - "${TURN_PORT:-3478}:${TURN_PORT:-3478}/udp"
+      - "${TURN_PORT:-3478}:${TURN_PORT:-3478}/tcp"
+      - "${TURN_MIN_PORT:-49160}-${TURN_MAX_PORT:-49200}:${TURN_MIN_PORT:-49160}-${TURN_MAX_PORT:-49200}/udp"
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  autoheal:
+    image: willfarrell/autoheal:1.2.0
+    container_name: homehub-autoheal
+    restart: unless-stopped
+    environment:
+      - AUTOHEAL_CONTAINER_LABEL=autoheal
+      - AUTOHEAL_INTERVAL=30
+      - AUTOHEAL_START_PERIOD=120
+      - CURL_TIMEOUT=10
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock

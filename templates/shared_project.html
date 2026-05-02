@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="glass p-4 rounded-2xl space-y-3">
+  <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100">{{ project.name }} ({{ project.key }})</h1>
+  <p class="text-sm text-gray-500">Shared Project View</p>
+  <div class="overflow-x-auto pb-2">
+    <div class="flex gap-3 min-w-max">
+      {% for col in columns %}
+      <section class="w-[320px] shrink-0 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-2 space-y-2">
+        <div class="flex items-center justify-between">
+          <h3 class="font-semibold text-sm">{{ col.name }}</h3>
+          <span class="text-xs text-gray-500">{{ cards|selectattr('column_id', 'equalto', col.id)|list|length }}</span>
+        </div>
+        {% for card in cards if card.column_id == col.id %}
+        <article class="rounded-lg border border-gray-200 dark:border-gray-700 p-2 bg-gray-50 dark:bg-gray-800/60">
+          <div class="text-[10px] uppercase text-gray-500">{{ card.priority }}</div>
+          <div class="font-semibold text-sm">{{ card.title }}</div>
+          <div class="text-xs mt-1 whitespace-pre-wrap">{{ card.description }}</div>
+        </article>
+        {% endfor %}
+      </section>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">HomeHub</string>
+    <string name="loading">Loading HomeHub…</string>
+    <string name="offline">Can’t reach HomeHub right now.</string>
+    <string name="menu_welcome_home">Welcome Home</string>
+    <string name="menu_welcome_weather">Welcome Weather</string>
+    <string name="menu_welcome_post_update">Welcome Post Update</string>
+    <string name="menu_welcome_switch_user">Welcome Switch User</string>
+    <string name="menu_welcome_profile_settings">Welcome Profile Settings</string>
+    <string name="sync_saved">Photo sync settings saved.</string>
+    <string name="sync_needs_setup">Set member, visibility, and watched folder first.</string>
+    <string name="sync_folder_saved">Watched folder saved.</string>
+    <string name="sync_started">Photo sync queued.</string>
+    <string name="welcome_update_posted">Timeline update posted.</string>
+    <string name="welcome_update_failed">Failed to post timeline update.</string>
+    <string name="welcome_switch_failed">Failed to switch user.</string>
+    <string name="welcome_no_members">No family members found.</string>
+    <string name="welcome_choose_user">Switch to member</string>
+    <string name="welcome_post_title">Post Welcome Update</string>
+    <string name="welcome_post_hint">What update should be posted to Timeline?</string>
+    <string name="welcome_post_save">Post</string>
+    <string name="welcome_post_cancel">Cancel</string>
+</resources>

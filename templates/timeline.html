@@ -1,0 +1,604 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="bg-gradient-to-br from-violet-50 via-fuchsia-50 to-indigo-50 dark:from-gray-950 dark:via-slate-950 dark:to-indigo-950 min-h-screen py-8">
+  <div class="max-w-5xl mx-auto px-4 space-y-6">
+    <section class="rounded-2xl border border-white/60 dark:border-gray-700 bg-white/75 dark:bg-gray-900/70 backdrop-blur p-5 shadow-sm">
+      <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div>
+          <h1 class="text-3xl md:text-4xl font-black text-gray-900 dark:text-white tracking-tight">Family Timeline</h1>
+          <p class="text-sm md:text-base text-gray-600 dark:text-gray-400 mt-1">A social-style feed for updates, milestones, and day-to-day family activity.</p>
+        </div>
+        <div class="grid grid-cols-2 gap-2 text-xs md:text-sm w-full md:w-auto">
+          <div class="rounded-xl px-3 py-2 bg-violet-100/80 dark:bg-violet-900/40 text-violet-800 dark:text-violet-200 text-center">
+            <div id="timeline-post-count" class="font-bold text-lg leading-none">{{ posts|length }}</div>
+            <div class="uppercase tracking-wide">Posts</div>
+          </div>
+          <div class="rounded-xl px-3 py-2 bg-cyan-100/80 dark:bg-cyan-900/40 text-cyan-800 dark:text-cyan-200 text-center">
+            <div class="font-bold text-lg leading-none">{{ actors|length }}</div>
+            <div class="uppercase tracking-wide">Members</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    {% if actors %}
+    <section class="rounded-2xl border border-white/60 dark:border-gray-700 bg-white/75 dark:bg-gray-900/70 backdrop-blur p-4 shadow-sm">
+      <div class="flex items-center gap-3 overflow-x-auto pb-1">
+        {% for actor in actors %}
+        {% set actor_avatar = avatar_map.get(actor, '') if avatar_map else '' %}
+        <a href="/timeline?actor={{ actor | urlencode }}{% if active_start %}&start={{ active_start | urlencode }}{% endif %}{% if active_end %}&end={{ active_end | urlencode }}{% endif %}" class="group shrink-0 text-center">
+          <div class="w-14 h-14 rounded-full p-[2px] bg-gradient-to-br from-fuchsia-500 via-violet-500 to-sky-500">
+            <div class="w-full h-full rounded-full bg-white dark:bg-gray-900 flex items-center justify-center text-sm font-bold text-gray-700 dark:text-gray-200 overflow-hidden">
+              {% if actor_avatar %}
+              <img src="{{ actor_avatar }}" alt="{{ actor }} avatar" class="w-full h-full object-cover">
+              {% else %}
+              {{ actor[:1].upper() }}
+              {% endif %}
+            </div>
+          </div>
+          <div class="mt-1 text-xs font-medium text-gray-600 dark:text-gray-400 group-hover:text-violet-600 dark:group-hover:text-violet-300">{{ actor }}</div>
+        </a>
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
+
+    <form method="GET" action="/timeline" class="rounded-2xl border border-white/60 dark:border-gray-700 bg-white/80 dark:bg-gray-900/70 backdrop-blur p-4 md:p-5 shadow-sm">
+      <div class="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
+        <div class="md:col-span-2">
+          <label class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Family member</label>
+          <div class="mt-1 relative">
+            <i class="fa-solid fa-user-group absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
+            <select name="actor" class="w-full pl-8 pr-2 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-800 text-sm text-gray-800 dark:text-gray-100 focus:ring-2 focus:ring-violet-500 focus:outline-none">
+              <option value="">All members</option>
+              {% for actor in actors %}
+                <option value="{{ actor }}" {% if active_actor == actor %}selected{% endif %}>{{ actor }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div>
+          <label class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Start date</label>
+          <input type="date" name="start" value="{{ active_start or '' }}" class="w-full mt-1 py-2.5 px-3 border border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-800 text-sm text-gray-800 dark:text-gray-100 focus:ring-2 focus:ring-violet-500 focus:outline-none">
+        </div>
+        <div>
+          <label class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">End date</label>
+          <input type="date" name="end" value="{{ active_end or '' }}" class="w-full mt-1 py-2.5 px-3 border border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-800 text-sm text-gray-800 dark:text-gray-100 focus:ring-2 focus:ring-violet-500 focus:outline-none">
+        </div>
+        <div class="flex gap-2">
+          <button type="submit" class="btn btn-primary flex-1 rounded-xl">Apply</button>
+          <a href="/timeline" class="btn btn-secondary rounded-xl">Clear</a>
+        </div>
+      </div>
+
+      {% if active_actor or active_start or active_end %}
+      <div class="mt-3 flex flex-wrap items-center gap-2 text-xs">
+        <span class="text-gray-500 dark:text-gray-400 font-semibold uppercase tracking-wide">Active filters:</span>
+        {% if active_actor %}<span class="px-2.5 py-1 rounded-full bg-violet-100 dark:bg-violet-900/50 text-violet-700 dark:text-violet-200">Member: {{ active_actor }}</span>{% endif %}
+        {% if active_start %}<span class="px-2.5 py-1 rounded-full bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-200">From: {{ active_start }}</span>{% endif %}
+        {% if active_end %}<span class="px-2.5 py-1 rounded-full bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-200">To: {{ active_end }}</span>{% endif %}
+      </div>
+      {% endif %}
+    </form>
+
+    <section class="rounded-2xl border border-white/60 dark:border-gray-700 bg-white/80 dark:bg-gray-900/70 backdrop-blur p-4 md:p-5 shadow-sm">
+      <form id="timeline-compose-form" class="space-y-3">
+        <div>
+          <label class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Share an update</label>
+          <textarea id="timeline-compose-summary" rows="3" maxlength="500" placeholder="Post a family update…" class="mt-1 w-full py-2.5 px-3 border border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-800 text-sm text-gray-800 dark:text-gray-100 focus:ring-2 focus:ring-violet-500 focus:outline-none"></textarea>
+        </div>
+        <div class="flex justify-end">
+          <button type="submit" class="btn btn-primary rounded-xl">Post to Timeline</button>
+        </div>
+      </form>
+    </section>
+
+    <div class="max-w-2xl mx-auto space-y-5" id="timelineFeed" data-active-actor="{{ active_actor or '' }}" data-active-start="{{ active_start or '' }}" data-active-end="{{ active_end or '' }}">
+      {% if posts %}
+        {% for p in posts %}
+          {% set post_avatar = avatar_map.get(p.actor, '') if avatar_map else '' %}
+          {% set a = (p.action or '') %}
+          {% if a.startswith('shopping.') %}
+            {% set icon = 'fa-cart-shopping' %}
+            {% set icon_color = 'from-blue-500 to-cyan-500' %}
+            {% set action_label = 'Shopping' %}
+            {% set emoji = '🛒' %}
+          {% elif a.startswith('money.income') %}
+            {% set icon = 'fa-arrow-up' %}
+            {% set icon_color = 'from-emerald-500 to-green-500' %}
+            {% set action_label = 'Income' %}
+            {% set emoji = '💸' %}
+          {% elif a.startswith('money.expense') %}
+            {% set icon = 'fa-arrow-down' %}
+            {% set icon_color = 'from-red-500 to-rose-500' %}
+            {% set action_label = 'Expense' %}
+            {% set emoji = '🧾' %}
+          {% elif a.startswith('money.bill') %}
+            {% set icon = 'fa-receipt' %}
+            {% set icon_color = 'from-amber-500 to-orange-500' %}
+            {% set action_label = 'Bills' %}
+            {% set emoji = '🏠' %}
+          {% elif a.startswith('meal.plan.') %}
+            {% set icon = 'fa-utensils' %}
+            {% set icon_color = 'from-orange-500 to-amber-500' %}
+            {% set action_label = 'Meal Plan' %}
+            {% set emoji = '' %}
+          {% else %}
+            {% set icon = 'fa-bolt' %}
+            {% set icon_color = 'from-gray-500 to-slate-500' %}
+            {% set action_label = 'Activity' %}
+            {% set emoji = '📣' %}
+          {% endif %}
+
+          {% set inter = post_meta_map.get(p.id, {}) if post_meta_map else {} %}
+          {% set likes_count = inter.get('likes_count', 0) %}
+          {% set comments_count = inter.get('comments_count', 0) %}
+          {% set shares_count = inter.get('shares_count', 0) %}
+          {% set liked_by_me = inter.get('liked_by_me', False) %}
+          {% set comments_list = inter.get('comments', []) %}
+          <article class="overflow-hidden rounded-3xl border border-white/70 dark:border-gray-700 bg-white/95 dark:bg-gray-900/90 shadow-sm relative" data-post-id="{{ p.id }}" data-post-actor="{{ p.actor }}">
+            <div class="h-1.5 -mx-px bg-gradient-to-r {{ icon_color }}"></div>
+
+            <header class="px-4 pt-4 pb-3 flex items-start justify-between border-b border-gray-100 dark:border-gray-800">
+              <div class="flex items-center gap-3 min-w-0">
+                <div class="w-11 h-11 rounded-full p-[2px] bg-gradient-to-br {{ icon_color }}">
+                  <div class="w-full h-full rounded-full bg-white dark:bg-gray-900 flex items-center justify-center text-xs font-bold text-gray-700 dark:text-gray-200 overflow-hidden">
+                    {% if post_avatar %}
+                    <img src="{{ post_avatar }}" alt="{{ p.actor }} avatar" class="w-full h-full object-cover">
+                    {% else %}
+                    {{ p.actor[:1].upper() }}
+                    {% endif %}
+                  </div>
+                </div>
+                <div class="min-w-0">
+                  <p class="font-semibold text-gray-900 dark:text-white truncate">{{ p.actor }} {% if emoji %}<span class="ml-1">{{ emoji }}</span>{% else %}<i class="fa-solid fa-utensils ml-1 text-[11px] text-orange-500" aria-hidden="true"></i>{% endif %}</p>
+                  <p class="text-xs text-gray-500 dark:text-gray-400">{{ p.timestamp.strftime('%b %d, %Y').lstrip('0').replace(' 0', ' ') }} • {{ p.timestamp.strftime('%I:%M %p').lstrip('0').replace(' 0', ' ') if p.timestamp else '' }}</p>
+                </div>
+              </div>
+              <div class="flex items-center gap-2 shrink-0">
+                <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300">
+                  <i class="fa-solid {{ icon }} text-[10px]"></i>
+                  <span>{{ action_label }}</span>
+                </span>
+                <span class="w-7 h-7 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 inline-flex items-center justify-center">
+                  <i class="fa-solid fa-ellipsis"></i>
+                </span>
+              </div>
+            </header>
+
+            <div class="px-4 py-4 space-y-3">
+              <p class="text-[15px] leading-relaxed text-gray-800 dark:text-gray-100">{{ p.summary }}</p>
+              <div class="rounded-2xl border border-gray-200/80 dark:border-gray-700 bg-gradient-to-br from-gray-50 to-white dark:from-gray-800 dark:to-gray-900 px-3 py-2.5">
+                <div class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Family Update</div>
+                <div class="mt-1 text-sm font-medium text-gray-700 dark:text-gray-200">Shared on your HomeHub timeline</div>
+              </div>
+            </div>
+
+            <footer class="px-4 py-3 border-t border-gray-100 dark:border-gray-800 space-y-3">
+              <div class="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+                <div class="inline-flex items-center gap-1.5">
+                  <span class="w-5 h-5 rounded-full bg-rose-500 text-white inline-flex items-center justify-center"><i class="fa-solid fa-heart text-[10px]"></i></span>
+                  <span class="w-5 h-5 rounded-full bg-blue-500 text-white inline-flex items-center justify-center"><i class="fa-solid fa-thumbs-up text-[10px]"></i></span>
+                  <span><span data-role="likes-count">{{ likes_count }}</span> likes</span>
+                </div>
+                <span><span data-role="comments-count">{{ comments_count }}</span> comments • <span data-role="shares-count">{{ shares_count }}</span> shares</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <button type="button" class="timeline-like-btn flex-1 inline-flex items-center justify-center gap-2 py-2 rounded-xl transition-colors text-sm font-medium {{ 'bg-rose-100 dark:bg-rose-900/35 text-rose-800 dark:text-rose-200' if liked_by_me else 'bg-rose-50 dark:bg-rose-900/20 text-rose-700 dark:text-rose-300 hover:bg-rose-100 dark:hover:bg-rose-900/30' }}" data-id="{{ p.id }}" data-liked="{{ 'true' if liked_by_me else 'false' }}">
+                  <i class="{{ 'fa-solid' if liked_by_me else 'fa-regular' }} fa-heart"></i>
+                  <span>{{ 'Liked' if liked_by_me else 'Like' }}</span>
+                </button>
+                <button type="button" class="timeline-comment-btn flex-1 inline-flex items-center justify-center gap-2 py-2 rounded-xl bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors text-sm font-medium" data-id="{{ p.id }}">
+                  <i class="fa-regular fa-comment"></i>
+                  <span>Comment</span>
+                </button>
+                <button type="button" class="timeline-share-btn flex-1 inline-flex items-center justify-center gap-2 py-2 rounded-xl bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/30 transition-colors text-sm font-medium" data-id="{{ p.id }}">
+                  <i class="fa-solid fa-share-nodes"></i>
+                  <span>Share</span>
+                </button>
+              </div>
+              <div class="space-y-2" data-role="comments-list">
+                {% for c in comments_list[-3:] %}
+                <div class="rounded-lg bg-gray-50 dark:bg-gray-800/60 px-3 py-2 text-xs">
+                  <span class="font-semibold text-gray-700 dark:text-gray-200">{{ c.author }}:</span>
+                  <span class="text-gray-600 dark:text-gray-300"> {{ c.text }}</span>
+                </div>
+                {% endfor %}
+              </div>
+              <button class="timeline-delete-btn inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-800/40 transition-colors text-sm font-medium hidden" data-id="{{ p.id }}" data-actor="{{ p.actor }}">
+                <i class="fa-regular fa-trash-can"></i>
+                <span>Delete</span>
+              </button>
+            </footer>
+          </article>
+        {% endfor %}
+      {% else %}
+        <div id="timeline-empty-state" class="rounded-2xl border border-white/60 dark:border-gray-700 bg-white/85 dark:bg-gray-900/75 p-12 text-center shadow-sm">
+          <div class="w-16 h-16 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center mx-auto mb-4">
+            <i class="fa-regular fa-inbox text-2xl text-gray-400"></i>
+          </div>
+          <p class="text-gray-700 dark:text-gray-300 text-lg font-semibold">No activity yet</p>
+          <p class="text-gray-500 dark:text-gray-500 text-sm mt-1">Start adding items across the app and this feed will populate automatically.</p>
+        </div>
+      {% endif %}
+    </div>
+    <div class="max-w-2xl mx-auto">
+      <button id="timeline-load-more" type="button" class="btn btn-secondary w-full hidden">Load older posts</button>
+      <div id="timeline-load-sentinel" class="h-1"></div>
+    </div>
+  </div>
+</div>
+<script>
+document.addEventListener('DOMContentLoaded', ()=>{
+  const currentUser = localStorage.getItem('username') || '';
+  const adminName = '{{ config.admin_name }}';
+  const adminAliases = new Set([adminName, 'Administrator', 'admin']);
+  const timelineFeed = document.getElementById('timelineFeed');
+  const timelineEmptyState = document.getElementById('timeline-empty-state');
+  const timelinePostCount = document.getElementById('timeline-post-count');
+  const loadMoreBtn = document.getElementById('timeline-load-more');
+  const loadSentinel = document.getElementById('timeline-load-sentinel');
+  const composeForm = document.getElementById('timeline-compose-form');
+  const composeSummary = document.getElementById('timeline-compose-summary');
+  const activeActor = timelineFeed?.getAttribute('data-active-actor') || '';
+  const activeStart = timelineFeed?.getAttribute('data-active-start') || '';
+  const activeEnd = timelineFeed?.getAttribute('data-active-end') || '';
+
+  let loadingOlder = false;
+  let hasMore = true;
+
+  function escapeHtml(value){
+    return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function canDelete(actor){
+    return !!(currentUser && (currentUser === actor || adminAliases.has(currentUser)));
+  }
+
+  function iconMeta(action){
+    const a = String(action || '');
+    if (a.startsWith('shopping.')) return { icon: 'fa-cart-shopping', iconColor: 'from-blue-500 to-cyan-500', actionLabel: 'Shopping', emoji: '🛒' };
+    if (a.startsWith('money.income')) return { icon: 'fa-arrow-up', iconColor: 'from-emerald-500 to-green-500', actionLabel: 'Income', emoji: '💸' };
+    if (a.startsWith('money.expense')) return { icon: 'fa-arrow-down', iconColor: 'from-red-500 to-rose-500', actionLabel: 'Expense', emoji: '🧾' };
+    if (a.startsWith('money.bill')) return { icon: 'fa-receipt', iconColor: 'from-amber-500 to-orange-500', actionLabel: 'Bills', emoji: '🏠' };
+    if (a.startsWith('meal.plan.')) return { icon: 'fa-utensils', iconColor: 'from-orange-500 to-amber-500', actionLabel: 'Meal Plan', emoji: '<i class="fa-solid fa-utensils text-[11px] text-orange-500" aria-hidden="true"></i>' };
+    if (a.startsWith('timeline.manual')) return { icon: 'fa-pen', iconColor: 'from-violet-500 to-fuchsia-500', actionLabel: 'Post', emoji: '📝' };
+    return { icon: 'fa-bolt', iconColor: 'from-gray-500 to-slate-500', actionLabel: 'Activity', emoji: '📣' };
+  }
+
+  function formatTimestamp(ts){
+    if (!ts) return '';
+    const d = new Date(ts);
+    if (Number.isNaN(d.getTime())) return '';
+    return d.toLocaleString();
+  }
+
+  function updatePostCount(){
+    if (!timelinePostCount || !timelineFeed) return;
+    const count = timelineFeed.querySelectorAll('[data-post-id]').length;
+    timelinePostCount.textContent = String(count);
+    if (count > 0 && timelineEmptyState) timelineEmptyState.remove();
+  }
+
+  function buildPostHtml(post){
+    const meta = iconMeta(post.action);
+    const actor = escapeHtml(post.actor || 'Family');
+    const summary = escapeHtml(post.summary || '');
+    const canDeletePost = canDelete(post.actor || '');
+    const likesCount = Number(post.likes_count || 0);
+    const commentsCount = Number(post.comments_count || 0);
+    const sharesCount = Number(post.shares_count || 0);
+    const likedByMe = !!post.liked_by_me;
+    const comments = Array.isArray(post.comments) ? post.comments.slice(-3) : [];
+    const commentsHtml = comments.map((c) => {
+      const author = escapeHtml(c?.author || 'Family');
+      const text = escapeHtml(c?.text || '');
+      return `<div class="rounded-lg bg-gray-50 dark:bg-gray-800/60 px-3 py-2 text-xs"><span class="font-semibold text-gray-700 dark:text-gray-200">${author}:</span><span class="text-gray-600 dark:text-gray-300"> ${text}</span></div>`;
+    }).join('');
+    return `
+      <article class="overflow-hidden rounded-3xl border border-white/70 dark:border-gray-700 bg-white/95 dark:bg-gray-900/90 shadow-sm relative" data-post-id="${post.id}" data-post-actor="${actor}">
+        <div class="h-1.5 -mx-px bg-gradient-to-r ${meta.iconColor}"></div>
+        <header class="px-4 pt-4 pb-3 flex items-start justify-between border-b border-gray-100 dark:border-gray-800">
+          <div class="flex items-center gap-3 min-w-0">
+            <div class="w-11 h-11 rounded-full p-[2px] bg-gradient-to-br ${meta.iconColor}">
+              <div class="w-full h-full rounded-full bg-white dark:bg-gray-900 flex items-center justify-center text-sm font-bold text-gray-700 dark:text-gray-200 overflow-hidden">
+                ${(actor || 'F').slice(0, 1).toUpperCase()}
+              </div>
+            </div>
+            <div class="min-w-0">
+              <p class="font-semibold text-gray-900 dark:text-white truncate">${actor} <span class="ml-1">${meta.emoji}</span></p>
+              <p class="text-xs text-gray-500 dark:text-gray-400">${formatTimestamp(post.timestamp)}</p>
+            </div>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300">
+              <i class="fa-solid ${meta.icon} text-[10px]"></i>
+              <span>${meta.actionLabel}</span>
+            </span>
+            <span class="w-7 h-7 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 inline-flex items-center justify-center">
+              <i class="fa-solid fa-ellipsis"></i>
+            </span>
+          </div>
+        </header>
+        <div class="px-4 py-4 space-y-3">
+          <p class="text-[15px] leading-relaxed text-gray-800 dark:text-gray-100">${summary}</p>
+          <div class="rounded-2xl border border-gray-200/80 dark:border-gray-700 bg-gradient-to-br from-gray-50 to-white dark:from-gray-800 dark:to-gray-900 px-3 py-2.5">
+            <div class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Family Update</div>
+            <div class="mt-1 text-sm font-medium text-gray-700 dark:text-gray-200">Shared on your HomeHub timeline</div>
+          </div>
+        </div>
+        <footer class="px-4 py-3 border-t border-gray-100 dark:border-gray-800 space-y-3">
+          <div class="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+            <div class="inline-flex items-center gap-1.5">
+              <span class="w-5 h-5 rounded-full bg-rose-500 text-white inline-flex items-center justify-center"><i class="fa-solid fa-heart text-[10px]"></i></span>
+              <span class="w-5 h-5 rounded-full bg-blue-500 text-white inline-flex items-center justify-center"><i class="fa-solid fa-thumbs-up text-[10px]"></i></span>
+              <span><span data-role="likes-count">${likesCount}</span> likes</span>
+            </div>
+            <span><span data-role="comments-count">${commentsCount}</span> comments • <span data-role="shares-count">${sharesCount}</span> shares</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <button type="button" class="timeline-like-btn flex-1 inline-flex items-center justify-center gap-2 py-2 rounded-xl transition-colors text-sm font-medium ${likedByMe ? 'bg-rose-100 dark:bg-rose-900/35 text-rose-800 dark:text-rose-200' : 'bg-rose-50 dark:bg-rose-900/20 text-rose-700 dark:text-rose-300 hover:bg-rose-100 dark:hover:bg-rose-900/30'}" data-id="${post.id}" data-liked="${likedByMe ? 'true' : 'false'}">
+              <i class="${likedByMe ? 'fa-solid' : 'fa-regular'} fa-heart"></i>
+              <span>${likedByMe ? 'Liked' : 'Like'}</span>
+            </button>
+            <button type="button" class="timeline-comment-btn flex-1 inline-flex items-center justify-center gap-2 py-2 rounded-xl bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors text-sm font-medium" data-id="${post.id}">
+              <i class="fa-regular fa-comment"></i>
+              <span>Comment</span>
+            </button>
+            <button type="button" class="timeline-share-btn flex-1 inline-flex items-center justify-center gap-2 py-2 rounded-xl bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/30 transition-colors text-sm font-medium" data-id="${post.id}">
+              <i class="fa-solid fa-share-nodes"></i>
+              <span>Share</span>
+            </button>
+          </div>
+          <div class="space-y-2" data-role="comments-list">${commentsHtml}</div>
+          <button class="timeline-delete-btn inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-800/40 transition-colors text-sm font-medium ${canDeletePost ? '' : 'hidden'}" data-id="${post.id}" data-actor="${actor}">
+            <i class="fa-regular fa-trash-can"></i>
+            <span>Delete</span>
+          </button>
+        </footer>
+      </article>
+    `;
+  }
+
+  function renderComments(card, comments){
+    const list = card?.querySelector('[data-role="comments-list"]');
+    if (!list) return;
+    const rows = Array.isArray(comments) ? comments.slice(-3) : [];
+    list.innerHTML = rows.map((c) => {
+      const author = escapeHtml(c?.author || 'Family');
+      const text = escapeHtml(c?.text || '');
+      return `<div class="rounded-lg bg-gray-50 dark:bg-gray-800/60 px-3 py-2 text-xs"><span class="font-semibold text-gray-700 dark:text-gray-200">${author}:</span><span class="text-gray-600 dark:text-gray-300"> ${text}</span></div>`;
+    }).join('');
+  }
+
+  function applyInteractionsToCard(card, interactions){
+    if (!card || !interactions) return;
+    const likes = Number(interactions.likes_count || 0);
+    const comments = Number(interactions.comments_count || 0);
+    const shares = Number(interactions.shares_count || 0);
+    const liked = !!interactions.liked_by_me;
+    const likesEl = card.querySelector('[data-role="likes-count"]');
+    const commentsEl = card.querySelector('[data-role="comments-count"]');
+    const sharesEl = card.querySelector('[data-role="shares-count"]');
+    if (likesEl) likesEl.textContent = String(likes);
+    if (commentsEl) commentsEl.textContent = String(comments);
+    if (sharesEl) sharesEl.textContent = String(shares);
+
+    const likeBtn = card.querySelector('.timeline-like-btn');
+    if (likeBtn) {
+      likeBtn.setAttribute('data-liked', liked ? 'true' : 'false');
+      likeBtn.classList.toggle('bg-rose-100', liked);
+      likeBtn.classList.toggle('dark:bg-rose-900/35', liked);
+      likeBtn.classList.toggle('text-rose-800', liked);
+      likeBtn.classList.toggle('dark:text-rose-200', liked);
+      likeBtn.classList.toggle('bg-rose-50', !liked);
+      likeBtn.classList.toggle('dark:bg-rose-900/20', !liked);
+      likeBtn.classList.toggle('text-rose-700', !liked);
+      likeBtn.classList.toggle('dark:text-rose-300', !liked);
+      const icon = likeBtn.querySelector('i');
+      const text = likeBtn.querySelector('span');
+      if (icon) {
+        icon.classList.toggle('fa-solid', liked);
+        icon.classList.toggle('fa-regular', !liked);
+      }
+      if (text) text.textContent = liked ? 'Liked' : 'Like';
+    }
+    renderComments(card, interactions.comments || []);
+  }
+
+  async function postInteraction(postId, action, payload){
+    const res = await fetch(`/api/timeline/${postId}/${action}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    });
+    const data = await res.json();
+    if (!res.ok || !data?.ok) throw new Error(data?.error || `Failed to ${action}`);
+    return data?.interactions || null;
+  }
+
+  function oldestPostId(){
+    if (!timelineFeed) return null;
+    const posts = Array.from(timelineFeed.querySelectorAll('[data-post-id]'));
+    if (!posts.length) return null;
+    return posts.reduce((min, el)=>{
+      const id = Number(el.getAttribute('data-post-id') || 0);
+      return (min === null || (id > 0 && id < min)) ? id : min;
+    }, null);
+  }
+
+  function renderDeleteVisibility(){
+    document.querySelectorAll('.timeline-delete-btn').forEach(btn => {
+      const actor = btn.getAttribute('data-actor') || '';
+      btn.classList.toggle('hidden', !canDelete(actor));
+    });
+  }
+
+  async function loadOlderPosts(){
+    if (loadingOlder || !hasMore || !timelineFeed) return;
+    loadingOlder = true;
+    if (loadMoreBtn) loadMoreBtn.textContent = 'Loading…';
+    try {
+      const params = new URLSearchParams({ limit: '50' });
+      const before = oldestPostId();
+      if (before) params.set('before_id', String(before));
+      if (activeActor) params.set('actor', activeActor);
+      if (activeStart) params.set('start', activeStart);
+      if (activeEnd) params.set('end', activeEnd);
+      if (currentUser) params.set('member', currentUser);
+      const res = await fetch(`/api/timeline?${params.toString()}`);
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data?.error || 'Failed to load posts');
+
+      const existingIds = new Set(Array.from(timelineFeed.querySelectorAll('[data-post-id]')).map(el => el.getAttribute('data-post-id')));
+      const rows = (data.posts || []).filter(post => !existingIds.has(String(post.id)));
+      if (rows.length) {
+        timelineFeed.insertAdjacentHTML('beforeend', rows.map(buildPostHtml).join(''));
+      }
+      hasMore = !!data.has_more && (data.posts || []).length > 0;
+      if (loadMoreBtn) loadMoreBtn.classList.toggle('hidden', !hasMore);
+      updatePostCount();
+      renderDeleteVisibility();
+    } catch (err){
+      if (window.globalToast) globalToast(err.message || 'Failed to load older posts', 'error');
+    } finally {
+      loadingOlder = false;
+      if (loadMoreBtn) loadMoreBtn.textContent = 'Load older posts';
+    }
+  }
+
+  if (composeForm){
+    composeForm.addEventListener('submit', async (e)=>{
+      e.preventDefault();
+      const summary = (composeSummary?.value || '').trim();
+      if (!currentUser){
+        if (window.globalToast) globalToast('Sign in to post to timeline', 'error');
+        return;
+      }
+      if (!summary){
+        if (window.globalToast) globalToast('Write a short update first', 'error');
+        return;
+      }
+      try {
+        const res = await fetch('/api/timeline', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ actor: currentUser, summary, action: 'timeline.manual' })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data?.error || 'Failed to create post');
+        if (timelineEmptyState) timelineEmptyState.remove();
+        timelineFeed?.insertAdjacentHTML('afterbegin', buildPostHtml(data.post));
+        if (composeSummary) composeSummary.value = '';
+        updatePostCount();
+        renderDeleteVisibility();
+        if (window.globalToast) globalToast('Posted to timeline', 'success');
+      } catch(err){
+        if (window.globalToast) globalToast(err.message || 'Failed to create timeline post', 'error');
+      }
+    });
+  }
+
+  if (loadMoreBtn) {
+    loadMoreBtn.classList.remove('hidden');
+    loadMoreBtn.addEventListener('click', loadOlderPosts);
+  }
+
+  if (loadSentinel && 'IntersectionObserver' in window){
+    const observer = new IntersectionObserver((entries)=>{
+      entries.forEach(entry => {
+        if (entry.isIntersecting) loadOlderPosts();
+      });
+    }, { rootMargin: '400px 0px 400px 0px' });
+    observer.observe(loadSentinel);
+  }
+
+  document.addEventListener('click', async (e)=>{
+    const likeBtn = e.target.closest('.timeline-like-btn');
+    if (likeBtn) {
+      const postId = likeBtn.getAttribute('data-id');
+      if (!postId) return;
+      if (!currentUser) {
+        if (window.globalToast) globalToast('Sign in to like posts', 'error');
+        return;
+      }
+      try {
+        const interactions = await postInteraction(postId, 'like', { user: currentUser });
+        applyInteractionsToCard(likeBtn.closest('[data-post-id]'), interactions);
+      } catch (err) {
+        if (window.globalToast) globalToast(err.message || 'Failed to like post', 'error');
+      }
+      return;
+    }
+
+    const commentBtn = e.target.closest('.timeline-comment-btn');
+    if (commentBtn) {
+      const postId = commentBtn.getAttribute('data-id');
+      if (!postId) return;
+      if (!currentUser) {
+        if (window.globalToast) globalToast('Sign in to comment', 'error');
+        return;
+      }
+      const text = (window.prompt('Write a comment:') || '').trim();
+      if (!text) return;
+      try {
+        const interactions = await postInteraction(postId, 'comment', { user: currentUser, text });
+        applyInteractionsToCard(commentBtn.closest('[data-post-id]'), interactions);
+      } catch (err) {
+        if (window.globalToast) globalToast(err.message || 'Failed to add comment', 'error');
+      }
+      return;
+    }
+
+    const shareBtn = e.target.closest('.timeline-share-btn');
+    if (shareBtn) {
+      const postId = shareBtn.getAttribute('data-id');
+      if (!postId) return;
+      const shareUrl = `${window.location.origin}/timeline`;
+      try {
+        const interactions = await postInteraction(postId, 'share', { user: currentUser || 'guest', channel: 'web' });
+        applyInteractionsToCard(shareBtn.closest('[data-post-id]'), interactions);
+        if (navigator.share) {
+          await navigator.share({ title: 'HomeHub Timeline', text: 'Check out this family timeline update', url: shareUrl });
+        } else if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(shareUrl);
+          if (window.globalToast) globalToast('Timeline link copied', 'success');
+        }
+      } catch (err) {
+        if (window.globalToast) globalToast(err.message || 'Failed to share post', 'error');
+      }
+      return;
+    }
+
+    const btn = e.target.closest('.timeline-delete-btn');
+    if (!btn) return;
+    if (!confirm('Delete this timeline entry?')) return;
+    const postId = btn.getAttribute('data-id');
+    if (!postId) return;
+    try {
+      const res = await fetch(`/api/timeline/${postId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user: currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data?.error || 'Failed to delete');
+      const card = btn.closest('[data-post-id]');
+      if (card) card.remove();
+      updatePostCount();
+      if (window.globalToast) globalToast('Timeline entry deleted', 'success');
+    } catch(err) {
+      if (window.globalToast) globalToast(err.message || 'Failed to delete timeline entry', 'error');
+    }
+  });
+
+  renderDeleteVisibility();
+  updatePostCount();
+});
+</script>
+{% endblock %}

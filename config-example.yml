@@ -15,6 +15,7 @@ feature_toggles:
   expiry_tracker: true
   url_shortener: true
   expense_tracker: true
+  notifications: true
 
 family_members:
   - Mom
@@ -56,6 +57,30 @@ weather:
   units: metric # metric or imperial (default: metric)
   view: compact # compact or detailed (detailed also shows today's forecast: sunrise, sunset, UV, rain %, highs/lows)
 
+smtp:
+  enabled: false
+  host: "smtp.example.com"
+  port: 587
+  secure: false
+  username: ""
+  password: ""
+  sender_email: "homehub@example.com"
+  sender: "Family Hub <homehub@example.com>"
+
+notifications:
+  email_enabled: false
+  # HomeHub custom mobile delivery (realtime stream + periodic polling)
+  mobile_enabled: true
+  member_emails:
+    # map family member names to email addresses
+    Administrator: "admin@example.com"
+  categories:
+    expiry: true
+    meal_today: true
+    shopping_add: true
+    shared_cloud_add: true
+    calendar_new_event: true
+
 #Optional
 theme:
   primary_color: "#1d4ed8"
@@ -83,4 +108,5 @@ menu_visibility:
   pdf_compressor: true
   qr_generator: true
   expense_tracker: true
+  notifications: true
   settings: true

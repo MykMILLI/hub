@@ -1,16 +1,19 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="mx-auto">
-    <h2 class="text-xl font-bold mb-4">Expiry Tracker</h2>
-    <form method="POST" class="mb-4 grid grid-cols-1 md:grid-cols-12 gap-2 items-end">
-        <input type="text" name="name" class="md:col-span-5 w-full p-2 border rounded" placeholder="Item name..." required>
-        <input type="date" name="expiry_date" class="md:col-span-4 w-full p-2 border rounded" required>
-        <input type="hidden" name="creator" id="creator">
-        <button type="submit" class="md:col-span-3 btn btn-primary">Add Item</button>
-    </form>
+    <div class="flex items-center justify-between mb-4">
+        <h2 class="text-xl font-bold">Expiry Tracker</h2>
+        <button id="addExpiryBtn" type="button" class="btn btn-primary"><i class="fa-solid fa-plus"></i> Add Item</button>
+    </div>
     <ul>
-        {% for item, days_left in items %}
-        <li class="card p-4 mb-2 flex flex-wrap gap-2 items-center">
+        {% for item, days_left, invited, offsets, channels in items %}
+        <li class="card p-4 mb-2 flex flex-wrap gap-2 items-center expiry-row"
+            data-id="{{ item.id }}"
+            data-name="{{ item.name|e }}"
+            data-expiry-date="{{ item.expiry_date.strftime('%Y-%m-%d') if item.expiry_date else '' }}"
+            data-invited='{{ invited|tojson|safe }}'
+            data-offsets='{{ offsets|tojson|safe }}'
+            data-channels='{{ channels|tojson|safe }}'>
             <span class="flex-1">{{ item.name }}</span>
             {% set badge = 'bg-gray-100 text-gray-700 border-gray-300' %}
             {% if days_left is not none %}
@@ -30,26 +33,333 @@
                     <span class="ml-2 text-xs">({{ 'Expired' if days_left < 0 else days_left ~ ' days left' }})</span>
                 {% endif %}
             </span>
-            <div class="text-xs text-gray-500">By {{ item.creator }} at {{ item.timestamp.strftime('%Y-%m-%d %H:%M') }}</div>
-            <form method="POST" action="/expiry/delete/{{ item.id }}" class="delete-form" data-creator="{{ item.creator }}">
-                <input type="hidden" name="user">
-                <button type="submit" class="btn btn-danger">Delete</button>
-            </form>
+            <div class="w-full text-xs text-gray-500">By {{ item.creator }} at {{ item.timestamp.strftime('%Y-%m-%d %H:%M') }}</div>
+            <div class="w-full text-xs text-gray-500">Invited: {% if invited %}{{ invited|join(', ') }}{% else %}None{% endif %}</div>
+            <div class="w-full text-xs text-gray-500">Reminders: {{ offsets|join(', ') }} day(s) before | Channels: {{ channels|join(', ') }}</div>
+            <button type="button" class="btn btn-secondary edit-expiry-btn">Edit</button>
+            <button type="button" class="btn btn-danger delete-expiry-btn" data-creator="{{ item.creator }}">Delete</button>
         </li>
         {% endfor %}
     </ul>
+    <div class="text-xs text-gray-500 mt-2">* Mobile channel is future-ready and can be connected by registering device tokens via API.</div>
+</div>
+
+<div id="expiryModal" class="fixed inset-0 bg-black/60 hidden items-center justify-center z-50 p-4">
+    <div class="glass-lg w-full max-w-xl p-5 rounded-2xl border border-white/20">
+        <div class="flex items-center justify-between mb-4">
+            <h3 id="expiryModalTitle" class="text-lg font-bold text-m3-on-surface">Add Expiry Item</h3>
+            <button id="closeExpiryModal" type="button" class="btn btn-secondary">Close</button>
+        </div>
+        <form id="expiryForm" class="space-y-4">
+            <input type="hidden" id="expiryItemId">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Item name</label>
+                    <input type="text" id="expiryName" class="w-full p-2 border rounded" placeholder="Item name..." required>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Expiry date</label>
+                    <input type="date" id="expiryDate" class="w-full p-2 border rounded" required>
+                </div>
+            </div>
+
+            <div class="w-full p-3 border rounded bg-white dark:bg-gray-800">
+                <div class="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Invite members</div>
+                <div class="relative">
+                    <input type="text" id="expiryInviteSearch" class="w-full p-2 border rounded" placeholder="Search members to invite...">
+                    <div id="expiryInviteResults" class="hidden absolute left-0 right-0 mt-1 z-10 max-h-40 overflow-auto border rounded bg-white dark:bg-gray-800 shadow"></div>
+                </div>
+                <div id="expiryInviteSelected" class="mt-2 flex flex-wrap gap-2"></div>
+            </div>
+
+            <div class="w-full p-3 border rounded bg-white dark:bg-gray-800">
+                <div class="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Notification options</div>
+                <div class="flex flex-wrap gap-2" id="expiryChannelsToggle">
+                    <button type="button" class="expiry-channel-btn btn btn-secondary text-xs" data-channel="in_app">In-App</button>
+                    <button type="button" class="expiry-channel-btn btn btn-secondary text-xs" data-channel="email">Email</button>
+                    <button type="button" class="expiry-channel-btn btn btn-secondary text-xs" data-channel="mobile">Mobile*</button>
+                </div>
+            </div>
+
+            <div class="relative w-full p-3 pb-8 border rounded bg-white dark:bg-gray-800">
+                <div class="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Set reminders</div>
+                <div id="expiryReminderRows" class="space-y-2"></div>
+                <button type="button" id="addReminderOffsetFab" class="absolute right-3 bottom-2 w-7 h-7 rounded-full bg-purple-600 hover:bg-purple-700 text-white text-sm shadow" title="Add reminder">
+                    <i class="fa-solid fa-plus"></i>
+                </button>
+            </div>
+
+            <div class="flex justify-end gap-2">
+                <button type="submit" class="btn btn-primary">Save Item</button>
+            </div>
+        </form>
+    </div>
 </div>
 <script>
-document.getElementById('creator').value = localStorage.getItem('username');
-document.querySelectorAll('input[name="user"]').forEach(i=> i.value = localStorage.getItem('username'));
-// Hide delete for non-owners
 (function(){
-    const adminName='{{ config.admin_name }}';
-    const current=localStorage.getItem('username');
-    document.querySelectorAll('.delete-form').forEach(f=>{
-        const c=f.getAttribute('data-creator');
-        if(!(current===c||current===adminName||current==='Administrator'||current==='admin')) f.style.display='none';
+    const current = localStorage.getItem('username') || '{{ current_member_name }}';
+    const familyMembers = {{ family_members|tojson|safe }};
+    const adminName = '{{ config.admin_name }}';
+    const adminAliases = new Set([adminName, 'Administrator', 'admin']);
+    const modal = document.getElementById('expiryModal');
+    const modalTitle = document.getElementById('expiryModalTitle');
+    const closeBtn = document.getElementById('closeExpiryModal');
+    const addBtn = document.getElementById('addExpiryBtn');
+    const form = document.getElementById('expiryForm');
+    const idInput = document.getElementById('expiryItemId');
+    const nameInput = document.getElementById('expiryName');
+    const dateInput = document.getElementById('expiryDate');
+    const inviteSearchInput = document.getElementById('expiryInviteSearch');
+    const inviteResults = document.getElementById('expiryInviteResults');
+    const inviteSelected = document.getElementById('expiryInviteSelected');
+    const reminderRows = document.getElementById('expiryReminderRows');
+    const addReminderFab = document.getElementById('addReminderOffsetFab');
+    const channelButtons = Array.from(document.querySelectorAll('.expiry-channel-btn'));
+
+    let selectedInvites = new Set();
+    let selectedChannels = new Set(['in_app']);
+    let reminderOffsets = [30, 14, 7, 3, 1, 0];
+
+    function toast(msg, type='info'){ if(window.globalToast) globalToast(msg, type); }
+    function openModal(){ modal.classList.remove('hidden'); modal.classList.add('flex'); }
+    function closeModal(){ modal.classList.add('hidden'); modal.classList.remove('flex'); }
+
+    function normalizeOffsets(values){
+        const parsed = [];
+        (values || []).forEach(v => {
+            const n = Number(v);
+            if (Number.isFinite(n) && n >= 0 && n <= 365) parsed.push(Math.round(n));
+        });
+        if (!parsed.length) return [0];
+        return Array.from(new Set(parsed)).sort((a,b)=>b-a);
+    }
+
+    function renderChannels(){
+        if (!selectedChannels.size) selectedChannels.add('in_app');
+        channelButtons.forEach(btn => {
+            const key = btn.dataset.channel;
+            const active = selectedChannels.has(key);
+            btn.classList.toggle('btn-primary', active);
+            btn.classList.toggle('btn-secondary', !active);
+        });
+    }
+
+    function renderReminderRows(){
+        reminderRows.innerHTML = '';
+        reminderOffsets.forEach((offset, idx) => {
+            const row = document.createElement('div');
+            row.className = 'flex items-center gap-2';
+
+            const label = document.createElement('span');
+            label.className = 'text-xs text-gray-500 min-w-[78px]';
+            label.textContent = 'Set reminder';
+
+            const input = document.createElement('input');
+            input.type = 'number';
+            input.min = '0';
+            input.max = '365';
+            input.step = '1';
+            input.value = String(offset);
+            input.className = 'w-20 p-1.5 border rounded text-sm';
+            input.addEventListener('change', () => {
+                reminderOffsets[idx] = Number(input.value || 0);
+                reminderOffsets = normalizeOffsets(reminderOffsets);
+                renderReminderRows();
+            });
+
+            const suffix = document.createElement('span');
+            suffix.className = 'text-sm';
+            suffix.textContent = offset === 0 ? 'on expiry day' : 'days before';
+
+            const removeBtn = document.createElement('button');
+            removeBtn.type = 'button';
+            removeBtn.className = 'ml-auto text-xs text-blue-600 hover:underline';
+            removeBtn.textContent = 'Remove';
+            removeBtn.addEventListener('click', () => {
+                reminderOffsets.splice(idx, 1);
+                reminderOffsets = normalizeOffsets(reminderOffsets);
+                renderReminderRows();
+            });
+
+            row.appendChild(label);
+            row.appendChild(input);
+            row.appendChild(suffix);
+            row.appendChild(removeBtn);
+            reminderRows.appendChild(row);
+        });
+    }
+
+    function renderInviteSelected(){
+        inviteSelected.innerHTML = '';
+        Array.from(selectedInvites).forEach(name => {
+            const chip = document.createElement('span');
+            chip.className = 'inline-flex items-center gap-1 px-2 py-1 rounded-full bg-blue-100 text-blue-700 text-xs';
+            chip.innerHTML = `<span>${name}</span>`;
+            const remove = document.createElement('button');
+            remove.type = 'button';
+            remove.className = 'text-blue-700 hover:text-blue-900';
+            remove.innerHTML = '&times;';
+            remove.addEventListener('click', () => {
+                selectedInvites.delete(name);
+                renderInviteSelected();
+                renderInviteResults(inviteSearchInput.value || '');
+            });
+            chip.appendChild(remove);
+            inviteSelected.appendChild(chip);
+        });
+    }
+
+    function renderInviteResults(query){
+        const q = String(query || '').trim().toLowerCase();
+        const names = familyMembers.filter(n => n && n !== current && !selectedInvites.has(n));
+        const filtered = q ? names.filter(n => n.toLowerCase().includes(q)) : names.slice(0, 8);
+        inviteResults.innerHTML = '';
+        if (!filtered.length) {
+            inviteResults.classList.add('hidden');
+            return;
+        }
+        filtered.forEach(name => {
+            const row = document.createElement('button');
+            row.type = 'button';
+            row.className = 'w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700';
+            row.textContent = name;
+            row.addEventListener('click', () => {
+                selectedInvites.add(name);
+                inviteSearchInput.value = '';
+                inviteResults.classList.add('hidden');
+                renderInviteSelected();
+            });
+            inviteResults.appendChild(row);
+        });
+        inviteResults.classList.remove('hidden');
+    }
+
+    function resetForm(){
+        idInput.value = '';
+        nameInput.value = '';
+        dateInput.value = '';
+        selectedInvites = new Set();
+        selectedChannels = new Set(['in_app']);
+        reminderOffsets = [30, 14, 7, 3, 1, 0];
+        inviteSearchInput.value = '';
+        inviteResults.classList.add('hidden');
+        renderInviteSelected();
+        renderChannels();
+        renderReminderRows();
+        modalTitle.textContent = 'Add Expiry Item';
+    }
+
+    function fillFromRow(row){
+        const invited = JSON.parse(row.dataset.invited || '[]');
+        const offsets = JSON.parse(row.dataset.offsets || '[]');
+        const channels = JSON.parse(row.dataset.channels || '[]');
+        idInput.value = row.dataset.id || '';
+        nameInput.value = row.dataset.name || '';
+        dateInput.value = row.dataset.expiryDate || '';
+        selectedInvites = new Set((invited || []).filter(Boolean));
+        selectedChannels = new Set((channels || []).filter(Boolean));
+        reminderOffsets = normalizeOffsets(offsets || []);
+        renderInviteSelected();
+        renderChannels();
+        renderReminderRows();
+        modalTitle.textContent = 'Edit Expiry Item';
+    }
+
+    channelButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const channel = btn.dataset.channel;
+            if (selectedChannels.has(channel)) {
+                selectedChannels.delete(channel);
+            } else {
+                selectedChannels.add(channel);
+            }
+            if (!selectedChannels.size) selectedChannels.add('in_app');
+            renderChannels();
+        });
     });
+
+    addReminderFab?.addEventListener('click', () => {
+        reminderOffsets.push(1);
+        reminderOffsets = normalizeOffsets(reminderOffsets);
+        renderReminderRows();
+    });
+
+    inviteSearchInput?.addEventListener('focus', () => renderInviteResults(inviteSearchInput.value || ''));
+    inviteSearchInput?.addEventListener('input', () => renderInviteResults(inviteSearchInput.value || ''));
+
+    addBtn?.addEventListener('click', () => { resetForm(); openModal(); });
+    closeBtn?.addEventListener('click', closeModal);
+    modal?.addEventListener('click', (e) => {
+        if (e.target === modal) closeModal();
+        if (!inviteResults.contains(e.target) && e.target !== inviteSearchInput) inviteResults.classList.add('hidden');
+    });
+
+    document.querySelectorAll('.edit-expiry-btn').forEach(btn => btn.addEventListener('click', () => {
+        const row = btn.closest('.expiry-row');
+        if (!row) return;
+        resetForm();
+        fillFromRow(row);
+        openModal();
+    }));
+
+    document.querySelectorAll('.delete-expiry-btn').forEach(btn => {
+        const row = btn.closest('.expiry-row');
+        const creator = btn.dataset.creator || '';
+        if (!(current === creator || adminAliases.has(current))) {
+            btn.style.display = 'none';
+            row?.querySelector('.edit-expiry-btn')?.classList.add('hidden');
+            return;
+        }
+        btn.addEventListener('click', async () => {
+            const ok = window.uiConfirm
+                ? await window.uiConfirm('Delete this expiry item?', { title: 'Delete Expiry Item', confirmText: 'Delete', danger: true })
+                : confirm('Delete this expiry item?');
+            if (!ok) return;
+            const id = Number(row?.dataset.id || 0);
+            if (!id) return;
+            try {
+                const res = await fetch(`/api/expiry/items/${id}`, {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ member: current })
+                });
+                const data = await res.json();
+                if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to delete item');
+                location.reload();
+            } catch (err) {
+                toast(err.message || 'Delete failed', 'error');
+            }
+        });
+    });
+
+    form?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        try {
+            const payload = {
+                id: idInput.value ? Number(idInput.value) : null,
+                member: current,
+                name: nameInput.value.trim(),
+                expiry_date: dateInput.value,
+                invited_members: Array.from(selectedInvites),
+                reminder_offsets: normalizeOffsets(reminderOffsets),
+                notify_channels: Array.from(selectedChannels),
+            };
+            const res = await fetch('/api/expiry/items', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to save item');
+            closeModal();
+            location.reload();
+        } catch (err) {
+            toast(err.message || 'Save failed', 'error');
+        }
+    });
+
+    renderChannels();
+    renderReminderRows();
 })();
 </script>
 {% endblock %}

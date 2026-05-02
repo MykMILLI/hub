@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="mx-auto max-w-2xl">
+<div class="mx-auto w-full max-w-full lg:max-w-[1700px]">
     <h2 class="text-2xl font-bold mb-6">Hub Settings</h2>
     
     <div class="card p-6 mb-6">
@@ -21,8 +21,12 @@
         <!-- Add new family member -->
         <div class="mb-6 pb-6 border-b border-gray-200 dark:border-gray-700">
             <label class="block text-sm text-gray-600 dark:text-gray-300 mb-2">Add New Member</label>
-            <form id="addMemberForm" class="flex gap-2">
+            <form id="addMemberForm" class="flex gap-2 items-center">
                 <input type="text" id="newMemberInput" class="flex-1 p-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-white" placeholder="Family member name" required>
+                <select id="newMemberRole" class="p-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-white">
+                    <option value="standard" selected>Standard</option>
+                    <option value="admin">Admin</option>
+                </select>
                 <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition">
                     <i class="fa-solid fa-plus mr-1"></i>Add
                 </button>
@@ -34,8 +38,15 @@
             {% for member in family_members %}
             <div class="p-4 bg-gray-50 dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 member-item" data-member-id="{{ member.id }}">
                 <div class="flex items-center justify-between mb-2">
-                    <span class="font-medium text-gray-800 dark:text-gray-200 member-name">{{ member.name }}</span>
-                    <div class="flex gap-2">
+                    <div class="flex items-center gap-2">
+                        <span class="font-medium text-gray-800 dark:text-gray-200 member-name">{{ member.name }}</span>
+                        {% set member_role = member.role if member.role else 'standard' %}
+                        <span class="member-role-badge px-2 py-0.5 rounded text-xs font-semibold {% if member_role == 'admin' %}bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300{% else %}bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300{% endif %}">
+                            {{ 'Admin' if member_role == 'admin' else 'Standard' }}
+                        </span>
+                    </div>
+                    {% if current_is_admin %}
+                    <div class="flex gap-2 items-center">
                         <button type="button" class="edit-btn px-3 py-1 text-sm bg-yellow-600 text-white rounded hover:bg-yellow-700 transition">
                             <i class="fa-solid fa-pen mr-1"></i>Edit
                         </button>
@@ -43,6 +54,7 @@
                             <i class="fa-solid fa-trash mr-1"></i>Delete
                         </button>
                     </div>
+                    {% endif %}
                 </div>
                 
                 <!-- PIN Management -->
@@ -55,13 +67,12 @@
                             </span>
                         </div>
                         <div class="flex gap-2">
-                            {% if member.pin %}
-                            <button type="button" class="reset-pin-btn px-3 py-1 text-xs bg-orange-600 text-white rounded hover:bg-orange-700 transition" data-member-id="{{ member.id }}">
-                                <i class="fa-solid fa-refresh mr-1"></i>Reset PIN
-                            </button>
-                            {% else %}
+                            {% if current_is_admin %}
                             <button type="button" class="set-pin-btn px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 transition" data-member-id="{{ member.id }}">
-                                <i class="fa-solid fa-lock mr-1"></i>Set PIN
+                                <i class="fa-solid fa-lock mr-1"></i>{% if member.pin %}Change PIN{% else %}Set PIN{% endif %}
+                            </button>
+                            <button type="button" class="reset-pin-btn px-3 py-1 text-xs bg-orange-600 text-white rounded hover:bg-orange-700 transition" data-member-id="{{ member.id }}">
+                                <i class="fa-solid fa-rotate-left mr-1"></i>Reset PIN
                             </button>
                             {% endif %}
                         </div>
@@ -86,6 +97,54 @@
     </div>
 
     <div class="card p-6 mb-6">
+        <h3 class="text-lg font-semibold mb-2 flex items-center gap-2"><i class="fa-solid fa-shield-halved text-blue-600"></i> Permission Schemes</h3>
+        <p class="text-sm text-gray-600 dark:text-gray-300 mb-4">Atlassian-style centralized permissions with Groups and per-resource Read / Write / Admin grants.</p>
+
+        <div class="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden mb-4">
+            <div class="p-3 bg-gray-50 dark:bg-gray-800/70 text-sm font-semibold">Permission Context</div>
+            <div class="p-3 grid grid-cols-1 md:grid-cols-12 gap-2 items-end">
+                <div class="md:col-span-5">
+                    <label class="block text-xs text-gray-500 mb-1">Editing Member</label>
+                    <select id="permissionSubjectSelect" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-800 dark:text-white"></select>
+                </div>
+                <div class="md:col-span-3">
+                    <label class="block text-xs text-gray-500 mb-1">Role</label>
+                    <select id="permissionSubjectRole" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-800 dark:text-white">
+                        <option value="standard">Standard</option>
+                        <option value="admin">Admin</option>
+                    </select>
+                </div>
+                <div class="md:col-span-2">
+                    <button type="button" id="permissionSubjectRoleSave" class="btn btn-secondary w-full">Save Role</button>
+                </div>
+                <div class="md:col-span-2">
+                    <div id="permissionSubjectBadge" class="px-2 py-2 text-xs rounded bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-center">No member selected</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden mb-4">
+            <div class="p-3 bg-gray-50 dark:bg-gray-800/70 text-sm font-semibold">Permission Schemes: App Module Access</div>
+            <div class="px-3 pt-3 text-xs text-gray-500 dark:text-gray-400">Jira-style direct access grid. Each checkbox grants or revokes member Read access for that app module and controls both menu and route access.</div>
+            <div id="moduleAccessMatrixWrap" class="p-3 overflow-x-auto"></div>
+        </div>
+
+        <div class="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden mb-4">
+            <div class="p-3 bg-gray-50 dark:bg-gray-800/70 text-sm font-semibold">Permission Groups</div>
+            <div class="p-3 border-b border-gray-200 dark:border-gray-700">
+                <form id="permissionGroupCreateForm" class="grid grid-cols-1 md:grid-cols-12 gap-2">
+                    <input id="permissionGroupName" class="md:col-span-4 p-2 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-800 dark:text-white" placeholder="Group name (e.g., Editors)">
+                    <input id="permissionGroupDescription" class="md:col-span-6 p-2 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-800 dark:text-white" placeholder="Description">
+                    <button type="submit" class="md:col-span-2 btn btn-secondary">Create Group</button>
+                </form>
+            </div>
+            <div id="permissionGroupsList" class="divide-y divide-gray-200 dark:divide-gray-700"></div>
+        </div>
+
+        <div id="permissionMatrices" class="space-y-4"></div>
+    </div>
+
+    <div class="card p-6 mb-6">
         <h3 class="text-lg font-semibold mb-4">About</h3>
         <div class="text-sm text-gray-600 dark:text-gray-300">
             <p><strong>Application:</strong> HomeHub</p>
@@ -97,8 +156,8 @@
 
 <!-- Edit modal -->
 <div id="editModal" class="fixed inset-0 bg-black/40 hidden items-center justify-center z-50">
-    <div class="bg-white dark:bg-gray-900 w-full max-w-sm p-6 rounded shadow-lg">
-        <h4 class="text-lg font-semibold mb-4">Edit Family Member</h4>
+    <div class="glass-lg w-full max-w-sm p-6 rounded-2xl border border-white/20 shadow-2xl">
+        <h4 class="text-lg font-semibold mb-4 text-gray-900 dark:text-gray-100">Edit Family Member</h4>
         <form id="editMemberForm" class="space-y-4">
             <input type="hidden" id="editMemberId">
             <div>
@@ -106,8 +165,8 @@
                 <input type="text" id="editMemberName" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-white" required>
             </div>
             <div class="flex justify-end gap-2">
-                <button type="button" id="editCancelBtn" class="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition">Cancel</button>
-                <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition">Save</button>
+                <button type="button" id="editCancelBtn" class="btn btn-secondary">Cancel</button>
+                <button type="submit" class="btn btn-primary">Save</button>
             </div>
         </form>
     </div>
@@ -115,8 +174,8 @@
 
 <!-- PIN Management Modal -->
 <div id="pinManagementModal" class="fixed inset-0 bg-black/40 hidden items-center justify-center z-50">
-    <div class="bg-white dark:bg-gray-900 w-full max-w-sm p-6 rounded shadow-lg">
-        <h4 class="text-lg font-semibold mb-4" id="pinModalTitle">Set PIN</h4>
+    <div class="glass-lg w-full max-w-sm p-6 rounded-2xl border border-white/20 shadow-2xl">
+        <h4 class="text-lg font-semibold mb-4 text-gray-900 dark:text-gray-100" id="pinModalTitle">Set PIN</h4>
         <form id="pinManagementForm" class="space-y-4">
             <input type="hidden" id="pinMemberId">
             <input type="hidden" id="pinAction" value="set"> <!-- 'set' or 'reset' -->
@@ -143,10 +202,27 @@
             <div id="pinError" class="text-red-600 dark:text-red-400 text-sm hidden"></div>
             
             <div class="flex justify-end gap-2">
-                <button type="button" id="pinCancelBtn" class="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition">Cancel</button>
-                <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition">Confirm</button>
+                <button type="button" id="pinCancelBtn" class="btn btn-secondary">Cancel</button>
+                <button type="submit" class="btn btn-primary">Confirm</button>
             </div>
         </form>
+    </div>
+</div>
+
+<div id="settingsConfirmModal" class="fixed inset-0 hidden z-[60] flex items-center justify-center p-2 md:p-6">
+    <div class="absolute inset-0 bg-black/50" id="settingsConfirmBackdrop"></div>
+    <div class="relative w-full max-w-xl glass-lg rounded-2xl overflow-hidden border border-white/20">
+        <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+            <h4 id="settingsConfirmTitle" class="text-lg font-semibold text-gray-900 dark:text-gray-100">Confirm Action</h4>
+            <button type="button" id="settingsConfirmClose" class="btn btn-secondary">Close</button>
+        </div>
+        <div class="p-4 space-y-3">
+            <p id="settingsConfirmMessage" class="text-sm text-gray-600 dark:text-gray-300"></p>
+            <div class="flex justify-end gap-2">
+                <button type="button" id="settingsConfirmCancel" class="btn btn-secondary">Cancel</button>
+                <button type="button" id="settingsConfirmOk" class="btn btn-primary">Confirm</button>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -154,13 +230,19 @@
 document.addEventListener('DOMContentLoaded', () => {
     const addForm = document.getElementById('addMemberForm');
     const newMemberInput = document.getElementById('newMemberInput');
+    const newMemberRole = document.getElementById('newMemberRole');
     const membersList = document.getElementById('membersList');
     const noMembers = document.getElementById('noMembers');
+    const canAdminManage = {{ 'true' if current_is_admin else 'false' }};
     const editModal = document.getElementById('editModal');
     const editForm = document.getElementById('editMemberForm');
     const editMemberId = document.getElementById('editMemberId');
     const editMemberName = document.getElementById('editMemberName');
     const editCancelBtn = document.getElementById('editCancelBtn');
+    const permissionSubjectSelect = document.getElementById('permissionSubjectSelect');
+    const permissionSubjectRole = document.getElementById('permissionSubjectRole');
+    const permissionSubjectRoleSave = document.getElementById('permissionSubjectRoleSave');
+    const permissionSubjectBadge = document.getElementById('permissionSubjectBadge');
     const pinManagementModal = document.getElementById('pinManagementModal');
     const pinManagementForm = document.getElementById('pinManagementForm');
     const pinMemberId = document.getElementById('pinMemberId');
@@ -172,6 +254,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const confirmPinForAdmin = document.getElementById('confirmPinForAdmin');
     const pinError = document.getElementById('pinError');
     const pinCancelBtn = document.getElementById('pinCancelBtn');
+    const settingsConfirmModal = document.getElementById('settingsConfirmModal');
+    const settingsConfirmTitle = document.getElementById('settingsConfirmTitle');
+    const settingsConfirmMessage = document.getElementById('settingsConfirmMessage');
+    const settingsConfirmClose = document.getElementById('settingsConfirmClose');
+    const settingsConfirmCancel = document.getElementById('settingsConfirmCancel');
+    const settingsConfirmOk = document.getElementById('settingsConfirmOk');
+    const settingsConfirmBackdrop = document.getElementById('settingsConfirmBackdrop');
     
     // Toast function
     const toast = (msg, type = 'info') => {
@@ -181,18 +270,46 @@ document.addEventListener('DOMContentLoaded', () => {
             alert(msg);
         }
     };
+
+    const showSettingsConfirm = ({ title, message, confirmText = 'Confirm', danger = false }) => {
+        return new Promise((resolve) => {
+            settingsConfirmTitle.textContent = title || 'Confirm Action';
+            settingsConfirmMessage.textContent = message || '';
+            settingsConfirmOk.textContent = confirmText;
+            settingsConfirmOk.className = danger ? 'btn btn-danger' : 'btn btn-primary';
+            settingsConfirmModal.classList.remove('hidden');
+
+            const done = (result) => {
+                settingsConfirmModal.classList.add('hidden');
+                settingsConfirmOk.removeEventListener('click', onOk);
+                settingsConfirmCancel.removeEventListener('click', onCancel);
+                settingsConfirmClose.removeEventListener('click', onCancel);
+                settingsConfirmBackdrop.removeEventListener('click', onCancel);
+                resolve(result);
+            };
+
+            const onOk = () => done(true);
+            const onCancel = () => done(false);
+
+            settingsConfirmOk.addEventListener('click', onOk);
+            settingsConfirmCancel.addEventListener('click', onCancel);
+            settingsConfirmClose.addEventListener('click', onCancel);
+            settingsConfirmBackdrop.addEventListener('click', onCancel);
+        });
+    };
     
     // Add member
     addForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const name = newMemberInput.value.trim();
+        const role = newMemberRole.value;
         if (!name) return;
         
         try {
             const response = await fetch('/api/family-members', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name })
+                body: JSON.stringify({ name, role })
             });
             const data = await response.json();
             
@@ -257,16 +374,22 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     
     // Delete button click
-    document.addEventListener('click', (e) => {
+    document.addEventListener('click', async (e) => {
         if (e.target.closest('.delete-btn')) {
             const item = e.target.closest('.member-item');
             const name = item.querySelector('.member-name').textContent;
-            if (confirm(`Are you sure you want to delete "${name}"?`)) {
+            const yes = await showSettingsConfirm({
+                title: 'Delete Family Member',
+                message: `Are you sure you want to delete "${name}"?`,
+                confirmText: 'Delete',
+                danger: true,
+            });
+            if (yes) {
                 deleteMember(item.dataset.memberId);
             }
         }
     });
-    
+
     // Delete member
     const deleteMember = async (id) => {
         try {
@@ -294,6 +417,7 @@ document.addEventListener('DOMContentLoaded', () => {
             
             if (data.ok) {
                 const members = data.members || [];
+                const currentIsAdmin = !!data.current_is_admin;
                 membersList.innerHTML = '';
                 
                 if (members.length === 0) {
@@ -302,17 +426,50 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else {
                     members.forEach(member => {
                         const div = document.createElement('div');
-                        div.className = 'flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 member-item';
+                        div.className = 'p-4 bg-gray-50 dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 member-item';
                         div.dataset.memberId = member.id;
-                        div.innerHTML = `
-                            <span class="font-medium text-gray-800 dark:text-gray-200 member-name">${escapeHtml(member.name)}</span>
-                            <div class="flex gap-2">
+                        const roleLabel = member.role === 'admin' ? 'Admin' : 'Standard';
+                        const roleBadgeClass = member.role === 'admin'
+                            ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
+                            : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300';
+                        const actionsHtml = currentIsAdmin ? `
+                            <div class="flex gap-2 items-center">
                                 <button type="button" class="edit-btn px-3 py-1 text-sm bg-yellow-600 text-white rounded hover:bg-yellow-700 transition">
                                     <i class="fa-solid fa-pen mr-1"></i>Edit
                                 </button>
                                 <button type="button" class="delete-btn px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700 transition">
                                     <i class="fa-solid fa-trash mr-1"></i>Delete
                                 </button>
+                            </div>
+                        ` : '';
+                        const pinActionsHtml = currentIsAdmin ? `
+                            <button type="button" class="set-pin-btn px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 transition" data-member-id="${member.id}">
+                                <i class="fa-solid fa-lock mr-1"></i>${member.pin ? 'Change PIN' : 'Set PIN'}
+                            </button>
+                            <button type="button" class="reset-pin-btn px-3 py-1 text-xs bg-orange-600 text-white rounded hover:bg-orange-700 transition" data-member-id="${member.id}">
+                                <i class="fa-solid fa-rotate-left mr-1"></i>Reset PIN
+                            </button>
+                        ` : '';
+                        div.innerHTML = `
+                            <div class="flex items-center justify-between mb-2">
+                                <div class="flex items-center gap-2">
+                                    <span class="font-medium text-gray-800 dark:text-gray-200 member-name">${escapeHtml(member.name)}</span>
+                                    <span class="member-role-badge px-2 py-0.5 rounded text-xs font-semibold ${roleBadgeClass}">${roleLabel}</span>
+                                </div>
+                                ${actionsHtml}
+                            </div>
+                            <div class="mt-3 pt-3 border-t border-gray-300 dark:border-gray-600">
+                                <div class="flex items-center justify-between">
+                                    <div class="text-sm">
+                                        <span class="text-gray-600 dark:text-gray-400">PIN Status:</span>
+                                        <span class="pin-status font-medium ${member.pin ? 'text-green-600 dark:text-green-400' : 'text-gray-500'}">
+                                            ${member.pin ? '✓ Set' : 'Not Set'}
+                                        </span>
+                                    </div>
+                                    <div class="flex gap-2">
+                                        ${pinActionsHtml}
+                                    </div>
+                                </div>
                             </div>
                         `;
                         membersList.appendChild(div);
@@ -344,6 +501,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Define menu items with readable labels and icons
                 const menuItems = [
                     { key: 'welcome', label: 'Welcome', icon: 'fa-house' },
+                    { key: 'timeline', label: 'Timeline', icon: 'fa-timeline' },
                     { key: 'shared_notes', label: 'Shared Notes', icon: 'fa-note-sticky' },
                     { key: 'shared_cloud', label: 'Shared Cloud', icon: 'fa-cloud' },
                     { key: 'shopping_list', label: 'Shopping List', icon: 'fa-cart-shopping' },
@@ -355,6 +513,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     { key: 'pdf_compressor', label: 'PDF Compressor', icon: 'fa-file-pdf' },
                     { key: 'qr_generator', label: 'QR Generator', icon: 'fa-qrcode' },
                     { key: 'expense_tracker', label: 'Expense & Money Tracker', icon: 'fa-wallet' },
+                    { key: 'shared_calendar', label: 'Family Calendar', icon: 'fa-calendar-days' },
+                    { key: 'meal_planner', label: 'Meal Planner', icon: 'fa-bowl-food' },
+                    { key: 'notifications', label: 'Messages, Polls & Notifications', icon: 'fa-bell' },
                     { key: 'settings', label: 'Settings', icon: 'fa-gear' }
                 ];
                 
@@ -362,15 +523,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 menuItems.forEach(item => {
                     const isVisible = menuVisibility[item.key] !== false;
                     const div = document.createElement('div');
-                    div.className = 'flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700';
+                    div.className = 'menu-visibility-row flex items-center justify-between gap-4 p-4 bg-gray-50 dark:bg-gray-800/80 rounded-lg border border-gray-200 dark:border-gray-700';
                     div.innerHTML = `
-                        <div class="flex items-center gap-3">
-                            <i class="fa-solid ${item.icon} text-gray-600 dark:text-gray-300 w-5"></i>
-                            <span class="font-medium text-gray-800 dark:text-gray-200">${item.label}</span>
+                        <div class="flex items-center gap-3 min-w-0">
+                            <i class="fa-solid ${item.icon} text-gray-600 dark:text-gray-300 w-6 text-center shrink-0"></i>
+                            <span class="font-medium text-gray-800 dark:text-gray-200 truncate">${item.label}</span>
                         </div>
-                        <label class="relative inline-flex items-center cursor-pointer">
-                            <input type="checkbox" class="menu-toggle" data-menu="${item.key}" ${isVisible ? 'checked' : ''} class="sr-only peer">
-                            <div class="w-11 h-6 bg-gray-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-600 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+                        <label class="relative inline-flex items-center cursor-pointer shrink-0">
+                            <input type="checkbox" class="menu-toggle sr-only peer" data-menu="${item.key}" ${isVisible ? 'checked' : ''} aria-label="Toggle ${item.label}">
+                            <span class="w-14 h-7 bg-gray-300 dark:bg-gray-600 rounded-full transition-colors peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 peer-checked:bg-blue-600"></span>
+                            <span class="absolute left-1 top-1 w-5 h-5 bg-white rounded-full shadow transition-transform peer-checked:translate-x-7"></span>
                         </label>
                     `;
                     menuList.appendChild(div);
@@ -410,6 +572,642 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Load menu visibility on page load
     loadMenuVisibility();
+
+    const moduleLabels = {
+        welcome: 'Welcome', timeline: 'Timeline', shared_notes: 'Projects & Spaces', shared_cloud: 'Shared Cloud',
+        shopping_list: 'Shopping List', chores: 'To-Do/Chores', recipes: 'Recipe Book', expiry_tracker: 'Expiry Tracker',
+        url_shortener: 'URL Shortener', media_downloader: 'Media Downloader', pdf_compressor: 'PDF Compressor',
+        qr_generator: 'QR Generator', expense_tracker: 'Expense & Money Tracker', shared_calendar: 'Family Calendar',
+        meal_planner: 'Meal Planner', notifications: 'Notifications', settings: 'Settings'
+    };
+
+    let permissionState = { members: [], member_details: [], groups: [], resources: { app_modules: [], projects: [], spaces: [] }, grants: [] };
+    let permissionSubject = '';
+
+    const getMemberDetails = () => {
+        const details = Array.isArray(permissionState.member_details) ? permissionState.member_details : [];
+        return details
+            .map(d => ({
+                id: d?.id,
+                name: String(d?.name || '').trim(),
+                role: String(d?.role || 'standard').trim(),
+                is_admin: !!d?.is_admin,
+            }))
+            .filter(d => d.name);
+    };
+
+    const syncPermissionSubjectControls = () => {
+        if (!permissionSubjectSelect || !permissionSubjectRole || !permissionSubjectBadge) return;
+        const details = getMemberDetails();
+        if (!details.length) {
+            permissionSubjectSelect.innerHTML = '';
+            permissionSubjectRole.value = 'standard';
+            permissionSubjectBadge.textContent = 'No member selected';
+            return;
+        }
+
+        if (!permissionSubject || !details.some(d => d.name === permissionSubject)) {
+            permissionSubject = details[0].name;
+        }
+
+        permissionSubjectSelect.innerHTML = details
+            .map(d => `<option value="${escapeHtml(d.name)}" ${d.name === permissionSubject ? 'selected' : ''}>${escapeHtml(d.name)}</option>`)
+            .join('');
+
+        const selected = details.find(d => d.name === permissionSubject) || details[0];
+        permissionSubjectRole.value = selected.role === 'admin' ? 'admin' : 'standard';
+        permissionSubjectBadge.textContent = `Editing ${selected.name} (${selected.role === 'admin' ? 'Admin' : 'Standard'})`;
+        permissionSubjectBadge.className = selected.role === 'admin'
+            ? 'px-2 py-2 text-xs rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 text-center'
+            : 'px-2 py-2 text-xs rounded bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-center';
+    };
+
+    const getModuleMemberGrants = (moduleKey, memberName) => {
+        const key = String(moduleKey || '').trim();
+        const member = String(memberName || '').trim();
+        return (permissionState.grants || []).filter(g =>
+            g.resource_type === 'app_module' &&
+            String(g.resource_key || '') === key &&
+            g.subject_type === 'member' &&
+            String(g.subject_value || '') === member
+        );
+    };
+
+    const hasModuleMemberRead = (moduleKey, memberName) => {
+        return getModuleMemberGrants(moduleKey, memberName).some(g => !!(g.can_read || g.can_write || g.can_admin));
+    };
+
+    const renderModuleAccessMatrix = () => {
+        const wrap = document.getElementById('moduleAccessMatrixWrap');
+        if (!wrap) return;
+
+        const members = (permissionState.members || []).map(m => String(m || '').trim()).filter(Boolean);
+        const appModules = (permissionState.resources?.app_modules || [])
+            .map(r => ({
+                key: String(r.resource_key || '').trim(),
+                label: String(moduleLabels[r.resource_key] || r.label || r.resource_key || '').trim(),
+            }))
+            .filter(r => r.key);
+
+        if (!members.length) {
+            wrap.innerHTML = '<div class="text-sm text-gray-500">No members found. Add a family member first.</div>';
+            return;
+        }
+        if (!appModules.length) {
+            wrap.innerHTML = '<div class="text-sm text-gray-500">No app modules available.</div>';
+            return;
+        }
+
+        const disabledAttr = canAdminManage ? '' : 'disabled';
+        const memberHeaders = members.map(member => {
+            const focused = permissionSubject && permissionSubject === member;
+            return `<th class="text-left p-2 text-xs font-semibold whitespace-nowrap ${focused ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300' : ''}">${escapeHtml(member)}</th>`;
+        }).join('');
+        const moduleOptions = appModules.map(mod => `<option value="${escapeHtml(mod.key)}">${escapeHtml(mod.label)}</option>`).join('');
+        const memberOptions = members.map(member => `<option value="${escapeHtml(member)}">${escapeHtml(member)}</option>`).join('');
+        const rows = appModules.map(mod => {
+            const cells = members.map(member => {
+                const checked = hasModuleMemberRead(mod.key, member) ? 'checked' : '';
+                const focused = permissionSubject && permissionSubject === member;
+                return `
+                    <td class="p-2 align-middle ${focused ? 'bg-blue-50/60 dark:bg-blue-900/10' : ''}">
+                        <label class="inline-flex items-center justify-center w-full">
+                            <input type="checkbox" class="module-access-check" data-module-key="${escapeHtml(mod.key)}" data-member="${escapeHtml(member)}" ${checked} ${disabledAttr}>
+                        </label>
+                    </td>
+                `;
+            }).join('');
+            return `
+                <tr class="border-t border-gray-200 dark:border-gray-700">
+                    <td class="p-2 text-sm font-medium whitespace-nowrap">${escapeHtml(mod.label)}</td>
+                    ${cells}
+                </tr>
+            `;
+        }).join('');
+
+        wrap.innerHTML = `
+            <div class="mb-3 space-y-3">
+                <div class="rounded-lg border border-gray-200 dark:border-gray-700 p-3 bg-gray-50 dark:bg-gray-900/30">
+                    <div class="text-xs uppercase tracking-wide text-gray-500 mb-2">Module Bulk Actions</div>
+                    <div class="grid grid-cols-1 md:grid-cols-12 gap-2 items-end">
+                        <div class="md:col-span-5">
+                            <label class="block text-xs text-gray-500 mb-1">Module</label>
+                            <select id="moduleBulkSelect" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-800 dark:text-white" ${disabledAttr}>
+                                ${moduleOptions}
+                            </select>
+                        </div>
+                        <div class="md:col-span-3">
+                            <button type="button" id="moduleGrantAllBtn" class="btn btn-secondary w-full" ${disabledAttr}>Grant Module To All</button>
+                        </div>
+                        <div class="md:col-span-4">
+                            <button type="button" id="moduleRevokeAllBtn" class="btn btn-danger w-full" ${disabledAttr}>Revoke Module From All</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="rounded-lg border border-gray-200 dark:border-gray-700 p-3 bg-gray-50 dark:bg-gray-900/30">
+                    <div class="text-xs uppercase tracking-wide text-gray-500 mb-2">Clone Member Access</div>
+                    <div class="grid grid-cols-1 md:grid-cols-12 gap-2 items-end">
+                        <div class="md:col-span-4">
+                            <label class="block text-xs text-gray-500 mb-1">From Member</label>
+                            <select id="moduleCloneSource" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-800 dark:text-white" ${disabledAttr}>
+                                ${memberOptions}
+                            </select>
+                        </div>
+                        <div class="md:col-span-4">
+                            <label class="block text-xs text-gray-500 mb-1">To Member</label>
+                            <select id="moduleCloneTarget" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-800 dark:text-white" ${disabledAttr}>
+                                ${memberOptions}
+                            </select>
+                        </div>
+                        <div class="md:col-span-4">
+                            <button type="button" id="moduleCloneApplyBtn" class="btn btn-secondary w-full" ${disabledAttr}>Clone Access</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <table class="w-full min-w-[680px] border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                <thead>
+                    <tr class="bg-gray-50 dark:bg-gray-800/70">
+                        <th class="text-left p-2 text-xs font-semibold whitespace-nowrap">Module</th>
+                        ${memberHeaders}
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+
+        wrap.querySelectorAll('.module-access-check').forEach((checkbox) => {
+            checkbox.addEventListener('change', async (e) => {
+                const input = e.currentTarget;
+                const moduleKey = String(input.dataset.moduleKey || '').trim();
+                const member = String(input.dataset.member || '').trim();
+                const checked = !!input.checked;
+                if (!moduleKey || !member) return;
+
+                input.disabled = true;
+                try {
+                    if (checked) {
+                        await upsertGrant({
+                            resource_type: 'app_module',
+                            resource_key: moduleKey,
+                            resource_id: null,
+                            subject_type: 'member',
+                            subject_value: member,
+                            can_read: true,
+                            can_write: false,
+                            can_admin: false,
+                        });
+                    } else {
+                        const grants = getModuleMemberGrants(moduleKey, member);
+                        for (const grant of grants) {
+                            await deleteGrant(grant.id);
+                        }
+                    }
+                    await loadPermissionSchemes();
+                    toast(`Module access ${checked ? 'granted' : 'revoked'} for ${member}`, 'success');
+                } catch (err) {
+                    input.checked = !checked;
+                    input.disabled = false;
+                    toast(err.message || 'Failed to update module access', 'error');
+                }
+            });
+        });
+
+        const grantAllBtn = document.getElementById('moduleGrantAllBtn');
+        const revokeAllBtn = document.getElementById('moduleRevokeAllBtn');
+        const cloneApplyBtn = document.getElementById('moduleCloneApplyBtn');
+        const moduleBulkSelect = document.getElementById('moduleBulkSelect');
+        const cloneSourceSelect = document.getElementById('moduleCloneSource');
+        const cloneTargetSelect = document.getElementById('moduleCloneTarget');
+
+        grantAllBtn?.addEventListener('click', async () => {
+            const moduleKey = String(moduleBulkSelect?.value || '').trim();
+            if (!moduleKey) { toast('Select a module first', 'error'); return; }
+            const yes = await showSettingsConfirm({
+                title: 'Grant Module To All Members',
+                message: `Grant ${moduleLabels[moduleKey] || moduleKey} access to every member?`,
+                confirmText: 'Grant To All',
+                danger: false,
+            });
+            if (!yes) return;
+
+            grantAllBtn.disabled = true;
+            try {
+                for (const member of members) {
+                    if (hasModuleMemberRead(moduleKey, member)) continue;
+                    await upsertGrant({
+                        resource_type: 'app_module',
+                        resource_key: moduleKey,
+                        resource_id: null,
+                        subject_type: 'member',
+                        subject_value: member,
+                        can_read: true,
+                        can_write: false,
+                        can_admin: false,
+                    });
+                }
+                await loadPermissionSchemes();
+                toast('Module granted to all members', 'success');
+            } catch (err) {
+                grantAllBtn.disabled = false;
+                toast(err.message || 'Failed to grant module to all', 'error');
+            }
+        });
+
+        revokeAllBtn?.addEventListener('click', async () => {
+            const moduleKey = String(moduleBulkSelect?.value || '').trim();
+            if (!moduleKey) { toast('Select a module first', 'error'); return; }
+            const yes = await showSettingsConfirm({
+                title: 'Revoke Module From All Members',
+                message: `Remove ${moduleLabels[moduleKey] || moduleKey} access from every member?`,
+                confirmText: 'Revoke From All',
+                danger: true,
+            });
+            if (!yes) return;
+
+            revokeAllBtn.disabled = true;
+            try {
+                for (const member of members) {
+                    const grants = getModuleMemberGrants(moduleKey, member);
+                    for (const grant of grants) {
+                        await deleteGrant(grant.id);
+                    }
+                }
+                await loadPermissionSchemes();
+                toast('Module revoked from all members', 'success');
+            } catch (err) {
+                revokeAllBtn.disabled = false;
+                toast(err.message || 'Failed to revoke module from all', 'error');
+            }
+        });
+
+        cloneApplyBtn?.addEventListener('click', async () => {
+            const source = String(cloneSourceSelect?.value || '').trim();
+            const target = String(cloneTargetSelect?.value || '').trim();
+            if (!source || !target) {
+                toast('Select both source and target members', 'error');
+                return;
+            }
+            if (source === target) {
+                toast('Choose different members for clone', 'error');
+                return;
+            }
+
+            const yes = await showSettingsConfirm({
+                title: 'Clone Module Access',
+                message: `Clone all module access from ${source} to ${target}? This will overwrite ${target}'s module access state.`,
+                confirmText: 'Clone Access',
+                danger: false,
+            });
+            if (!yes) return;
+
+            cloneApplyBtn.disabled = true;
+            try {
+                for (const mod of appModules) {
+                    const key = mod.key;
+                    const sourceHas = hasModuleMemberRead(key, source);
+
+                    const targetGrants = getModuleMemberGrants(key, target);
+                    for (const grant of targetGrants) {
+                        await deleteGrant(grant.id);
+                    }
+
+                    if (sourceHas) {
+                        await upsertGrant({
+                            resource_type: 'app_module',
+                            resource_key: key,
+                            resource_id: null,
+                            subject_type: 'member',
+                            subject_value: target,
+                            can_read: true,
+                            can_write: false,
+                            can_admin: false,
+                        });
+                    }
+                }
+                await loadPermissionSchemes();
+                toast(`Cloned module access from ${source} to ${target}`, 'success');
+            } catch (err) {
+                cloneApplyBtn.disabled = false;
+                toast(err.message || 'Failed to clone module access', 'error');
+            }
+        });
+    };
+
+    const upsertGrant = async (payload) => {
+        const res = await fetch('/api/permission-grants', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const out = await res.json();
+        if (!out.ok) throw new Error(out.error || 'Failed to save grant');
+    };
+
+    const deleteGrant = async (grantId) => {
+        const res = await fetch(`/api/permission-grants/${grantId}`, { method: 'DELETE' });
+        const out = await res.json();
+        if (!out.ok) throw new Error(out.error || 'Failed to delete grant');
+    };
+
+    const renderGroupManager = () => {
+        const wrap = document.getElementById('permissionGroupsList');
+        const members = permissionState.members || [];
+        const groups = permissionState.groups || [];
+        wrap.innerHTML = groups.length ? groups.map(group => {
+            const memberChecks = members.map(member => {
+                const checked = (group.members || []).includes(member) ? 'checked' : '';
+                return `<label class="text-xs p-1 rounded border border-gray-200 dark:border-gray-700"><input type="checkbox" class="group-member-check mr-1" data-member="${escapeHtml(member)}" ${checked}>${escapeHtml(member)}</label>`;
+            }).join('');
+            return `
+                <div class="p-3" data-group-id="${group.id}">
+                    <div class="grid grid-cols-1 md:grid-cols-12 gap-2 items-center">
+                        <input class="group-name md:col-span-3 p-2 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-800 dark:text-white" value="${escapeHtml(group.name)}">
+                        <input class="group-description md:col-span-5 p-2 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-800 dark:text-white" value="${escapeHtml(group.description || '')}" placeholder="Description">
+                        <button type="button" class="save-group-btn md:col-span-2 btn btn-secondary">Save Group</button>
+                        <button type="button" class="delete-group-btn md:col-span-2 btn btn-danger">Delete Group</button>
+                    </div>
+                    <div class="mt-2 text-xs text-gray-500">Members</div>
+                    <div class="mt-1 grid grid-cols-2 md:grid-cols-4 gap-1.5">${memberChecks || '<div class="text-xs text-gray-500">No members available.</div>'}</div>
+                    <div class="mt-2"><button type="button" class="save-group-members-btn btn btn-secondary">Save Group Members</button></div>
+                </div>
+            `;
+        }).join('') : '<div class="p-3 text-sm text-gray-500">No permission groups yet.</div>';
+
+        wrap.querySelectorAll('.save-group-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const row = btn.closest('[data-group-id]');
+                const id = row.dataset.groupId;
+                const name = row.querySelector('.group-name').value.trim();
+                const description = row.querySelector('.group-description').value.trim();
+                try {
+                    const res = await fetch(`/api/permission-groups/${id}`, {
+                        method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({name, description})
+                    });
+                    const out = await res.json();
+                    if(!out.ok) throw new Error(out.error || 'Unable to save group');
+                    await loadPermissionSchemes();
+                    toast('Group saved', 'success');
+                } catch(err){ toast(err.message, 'error'); }
+            });
+        });
+
+        wrap.querySelectorAll('.delete-group-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const row = btn.closest('[data-group-id]');
+                const id = row.dataset.groupId;
+                const yes = await showSettingsConfirm({
+                    title: 'Delete Permission Group',
+                    message: 'Delete this group?',
+                    confirmText: 'Delete Group',
+                    danger: true,
+                });
+                if(!yes) return;
+                try {
+                    const res = await fetch(`/api/permission-groups/${id}`, { method: 'DELETE' });
+                    const out = await res.json();
+                    if(!out.ok) throw new Error(out.error || 'Unable to delete group');
+                    await loadPermissionSchemes();
+                    toast('Group deleted', 'success');
+                } catch(err){ toast(err.message, 'error'); }
+            });
+        });
+
+        wrap.querySelectorAll('.save-group-members-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const row = btn.closest('[data-group-id]');
+                const id = row.dataset.groupId;
+                const members = Array.from(row.querySelectorAll('.group-member-check:checked')).map(i => i.dataset.member);
+                try {
+                    const res = await fetch(`/api/permission-groups/${id}/members`, {
+                        method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({members})
+                    });
+                    const out = await res.json();
+                    if(!out.ok) throw new Error(out.error || 'Unable to save group members');
+                    await loadPermissionSchemes();
+                    toast('Group members updated', 'success');
+                } catch(err){ toast(err.message, 'error'); }
+            });
+        });
+    };
+
+    const buildSubjectOptions = () => {
+        const memberOptions = (permissionState.members || []).map(m => `<option value="member:${escapeHtml(m)}">Member: ${escapeHtml(m)}</option>`).join('');
+        const groupOptions = (permissionState.groups || []).map(g => `<option value="group:${escapeHtml(g.name)}">Group: ${escapeHtml(g.name)}</option>`).join('');
+        return memberOptions + groupOptions;
+    };
+
+    const renderResourceMatrix = (title, resources) => {
+        const subjectOptions = buildSubjectOptions();
+        if (!resources.length) return `<div class="rounded-xl border border-gray-200 dark:border-gray-700"><div class="p-3 bg-gray-50 dark:bg-gray-800/70 text-sm font-semibold">${title}</div><div class="p-3 text-sm text-gray-500">No resources found.</div></div>`;
+        return `
+            <div class="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+                <div class="p-3 bg-gray-50 dark:bg-gray-800/70 text-sm font-semibold">${title}</div>
+                <div class="divide-y divide-gray-200 dark:divide-gray-700">
+                    ${resources.map(resource => {
+                        const grants = (permissionState.grants || []).filter(g => g.resource_type === resource.resource_type && String(g.resource_key || '') === String(resource.resource_key || '') && String(g.resource_id || '') === String(resource.resource_id || ''));
+                        return `
+                            <div class="p-3" data-resource-type="${resource.resource_type}" data-resource-key="${escapeHtml(resource.resource_key || '')}" data-resource-id="${resource.resource_id || ''}">
+                                <div class="flex items-center justify-between gap-2 mb-2">
+                                    <div class="font-semibold text-sm">${escapeHtml(resource.label || resource.resource_key || '')}${resource.archived ? ' <span class="text-[10px] text-gray-500">[ARCHIVED]</span>' : ''}</div>
+                                </div>
+                                <div class="overflow-x-auto">
+                                    <table class="w-full text-xs">
+                                        <thead>
+                                            <tr class="text-left text-gray-500"><th class="py-1 pr-2">Subject</th><th class="py-1 pr-2">Read</th><th class="py-1 pr-2">Write</th><th class="py-1 pr-2">Admin</th><th class="py-1 pr-2"></th></tr>
+                                        </thead>
+                                        <tbody>
+                                            ${grants.map(grant => `
+                                                <tr data-grant-id="${grant.id}">
+                                                    <td class="py-1 pr-2">${escapeHtml(grant.subject_type)}: ${escapeHtml(grant.subject_value)}</td>
+                                                    <td class="py-1 pr-2"><input type="checkbox" class="grant-read" ${grant.can_read ? 'checked' : ''}></td>
+                                                    <td class="py-1 pr-2"><input type="checkbox" class="grant-write" ${grant.can_write ? 'checked' : ''}></td>
+                                                    <td class="py-1 pr-2"><input type="checkbox" class="grant-admin" ${grant.can_admin ? 'checked' : ''}></td>
+                                                    <td class="py-1 pr-2"><button type="button" class="delete-grant-btn text-red-600">Delete</button></td>
+                                                </tr>
+                                            `).join('') || '<tr><td colspan="5" class="py-2 text-gray-500">No grants configured.</td></tr>'}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div class="mt-2 grid grid-cols-1 md:grid-cols-12 gap-2 items-center">
+                                    <select class="new-grant-subject md:col-span-6 p-2 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-800 dark:text-white">
+                                        <option value="">Add subject...</option>${subjectOptions}
+                                    </select>
+                                    <label class="md:col-span-1 text-xs"><input type="checkbox" class="new-grant-read" checked> Read</label>
+                                    <label class="md:col-span-1 text-xs"><input type="checkbox" class="new-grant-write"> Write</label>
+                                    <label class="md:col-span-1 text-xs"><input type="checkbox" class="new-grant-admin"> Admin</label>
+                                    <button type="button" class="add-grant-btn md:col-span-3 btn btn-secondary">Add Grant</button>
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            </div>
+        `;
+    };
+
+    const bindMatrixActions = () => {
+        document.querySelectorAll('.new-grant-subject').forEach(sel => {
+            if (!permissionSubject) return;
+            const desired = `member:${permissionSubject}`;
+            if (!sel.value && Array.from(sel.options).some(opt => opt.value === desired)) {
+                sel.value = desired;
+            }
+        });
+
+        document.querySelectorAll('.add-grant-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const row = btn.closest('[data-resource-type]');
+                const selected = row.querySelector('.new-grant-subject').value;
+                if(!selected){ toast('Select a member or group', 'error'); return; }
+                const [subject_type, subject_value] = selected.split(':');
+                const can_read = row.querySelector('.new-grant-read').checked;
+                const can_write = row.querySelector('.new-grant-write').checked;
+                const can_admin = row.querySelector('.new-grant-admin').checked;
+                try {
+                    await upsertGrant({
+                        resource_type: row.dataset.resourceType,
+                        resource_key: row.dataset.resourceKey || null,
+                        resource_id: row.dataset.resourceId || null,
+                        subject_type,
+                        subject_value,
+                        can_read,
+                        can_write,
+                        can_admin
+                    });
+                    await loadPermissionSchemes();
+                    toast('Grant added', 'success');
+                } catch(err){ toast(err.message, 'error'); }
+            });
+        });
+
+        document.querySelectorAll('.delete-grant-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const tr = btn.closest('[data-grant-id]');
+                const grantId = tr?.dataset.grantId;
+                if(!grantId) return;
+                try {
+                    await deleteGrant(grantId);
+                    await loadPermissionSchemes();
+                    toast('Grant removed', 'success');
+                } catch(err){ toast(err.message, 'error'); }
+            });
+        });
+
+        document.querySelectorAll('[data-grant-id]').forEach(tr => {
+            const save = async () => {
+                const grantId = Number(tr.dataset.grantId);
+                const grant = (permissionState.grants || []).find(g => Number(g.id) === grantId);
+                if(!grant) return;
+                const can_read = tr.querySelector('.grant-read').checked;
+                const can_write = tr.querySelector('.grant-write').checked;
+                const can_admin = tr.querySelector('.grant-admin').checked;
+                try {
+                    await upsertGrant({
+                        resource_type: grant.resource_type,
+                        resource_key: grant.resource_key,
+                        resource_id: grant.resource_id,
+                        subject_type: grant.subject_type,
+                        subject_value: grant.subject_value,
+                        can_read,
+                        can_write,
+                        can_admin
+                    });
+                    toast('Grant updated', 'success');
+                } catch(err){ toast(err.message, 'error'); }
+            };
+            ['.grant-read', '.grant-write', '.grant-admin'].forEach(sel => {
+                tr.querySelector(sel)?.addEventListener('change', save);
+            });
+        });
+    };
+
+    const renderPermissionMatrices = () => {
+        const wrap = document.getElementById('permissionMatrices');
+        const resources = permissionState.resources || { app_modules: [], projects: [], spaces: [] };
+        wrap.innerHTML = [
+            renderResourceMatrix('Projects', resources.projects || []),
+            renderResourceMatrix('Spaces', resources.spaces || []),
+        ].join('');
+        bindMatrixActions();
+    };
+
+    const loadPermissionSchemes = async () => {
+        try {
+            const response = await fetch('/api/permission-schemes');
+            const data = await response.json();
+            if (!data.ok) {
+                toast(data.error || 'Failed to load permission schemes', 'error');
+                return;
+            }
+            permissionState = {
+                members: data.members || [],
+                member_details: data.member_details || [],
+                groups: data.groups || [],
+                resources: data.resources || { app_modules: [], projects: [], spaces: [] },
+                grants: data.grants || []
+            };
+            syncPermissionSubjectControls();
+            renderModuleAccessMatrix();
+            renderGroupManager();
+            renderPermissionMatrices();
+        } catch (err) {
+            toast('Error loading permission schemes: ' + err.message, 'error');
+        }
+    };
+
+    permissionSubjectSelect?.addEventListener('change', () => {
+        permissionSubject = String(permissionSubjectSelect.value || '').trim();
+        syncPermissionSubjectControls();
+        renderModuleAccessMatrix();
+        renderPermissionMatrices();
+    });
+
+    permissionSubjectRoleSave?.addEventListener('click', async () => {
+        const details = getMemberDetails();
+        const selected = details.find(d => d.name === permissionSubject);
+        if (!selected || !selected.id) {
+            toast('Selected member role cannot be edited here', 'error');
+            return;
+        }
+        const role = String(permissionSubjectRole?.value || 'standard').trim();
+        try {
+            const response = await fetch(`/api/family-members/${selected.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: selected.name, role })
+            });
+            const out = await response.json();
+            if (!out.ok) throw new Error(out.error || 'Failed to update role');
+            await renderMembers();
+            await loadPermissionSchemes();
+            toast('Role updated in permission schemes', 'success');
+        } catch (err) {
+            toast(err.message || 'Failed to update role', 'error');
+        }
+    });
+
+    document.getElementById('permissionGroupCreateForm')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const name = document.getElementById('permissionGroupName').value.trim();
+        const description = document.getElementById('permissionGroupDescription').value.trim();
+        if(!name){ toast('Group name is required', 'error'); return; }
+        try {
+            const response = await fetch('/api/permission-groups', {
+                method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name, description})
+            });
+            const out = await response.json();
+            if(!out.ok) throw new Error(out.error || 'Unable to create group');
+            document.getElementById('permissionGroupName').value = '';
+            document.getElementById('permissionGroupDescription').value = '';
+            await loadPermissionSchemes();
+            toast('Group created', 'success');
+        } catch(err){ toast(err.message, 'error'); }
+    });
+
+    loadPermissionSchemes();
     
     // PIN Management Handlers
     const showPinModal = (memberId, action = 'set', memberName = '') => {
@@ -440,22 +1238,30 @@ document.addEventListener('DOMContentLoaded', () => {
         pinManagementModal.style.display = 'none';
     };
     
-    // Set PIN button handlers
-    document.querySelectorAll('.set-pin-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const memberId = btn.dataset.memberId;
-            const memberName = btn.closest('.member-item').querySelector('.member-name').textContent;
+    // PIN button handlers (event delegation supports dynamic list rerender)
+    document.addEventListener('click', async (e) => {
+        const setBtn = e.target.closest('.set-pin-btn');
+        if (setBtn) {
+            const memberId = setBtn.dataset.memberId;
+            const memberName = setBtn.closest('.member-item').querySelector('.member-name').textContent;
             showPinModal(memberId, 'set', memberName);
-        });
-    });
-    
-    // Reset PIN button handlers
-    document.querySelectorAll('.reset-pin-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const memberId = btn.dataset.memberId;
-            const memberName = btn.closest('.member-item').querySelector('.member-name').textContent;
+            return;
+        }
+        const resetBtn = e.target.closest('.reset-pin-btn');
+        if (resetBtn) {
+            const memberId = resetBtn.dataset.memberId;
+            const memberName = resetBtn.closest('.member-item').querySelector('.member-name').textContent;
+            const yes = await showSettingsConfirm({
+                title: 'Reset PIN',
+                message: `Reset PIN for ${memberName}? This will remove the current PIN.`,
+                confirmText: 'Reset PIN',
+                danger: true,
+            });
+            if (!yes) {
+                return;
+            }
             showPinModal(memberId, 'reset', memberName);
-        });
+        }
     });
     
     // PIN management form submission

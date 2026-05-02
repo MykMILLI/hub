@@ -13,6 +13,7 @@ try:
     from plaid.model.accounts_get_request import AccountsGetRequest
     from plaid.model.auth_get_request import AuthGetRequest
     from plaid.model.link_token_create_request import LinkTokenCreateRequest
+    from plaid.model.products import Products
     PLAID_AVAILABLE = True
 except ImportError:
     PLAID_AVAILABLE = False
@@ -86,9 +87,9 @@ class PlaidService:
 
         try:
             request_data = {
-                'products': ['auth', 'transactions'],
+                'products': [Products('transactions')],
                 'client_name': 'HomeHub Family Budget',
-                'country_codes': ['US'],
+                'country_codes': [CountryCode('US')],
                 'language': 'en',
                 'user': {
                     'client_user_id': user_id,

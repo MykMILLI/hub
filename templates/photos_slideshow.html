@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="mx-auto">
+  <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
+    <h2 class="text-3xl font-bold">Family Album Slideshow</h2>
+    <a href="/photos" class="btn btn-secondary"><i class="fa-solid fa-arrow-left"></i> Back to Photos</a>
+  </div>
+
+  <div class="card p-4 mb-4">
+    <div class="flex flex-wrap gap-2 items-center">
+      <button id="playPauseBtn" class="btn btn-primary"><i class="fa-solid fa-pause"></i> Pause</button>
+      <button id="prevBtn" class="btn btn-secondary"><i class="fa-solid fa-backward"></i> Prev</button>
+      <button id="nextBtn" class="btn btn-secondary"><i class="fa-solid fa-forward"></i> Next</button>
+      <label class="text-sm ml-2">Speed</label>
+      <select id="speedSelect" class="p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
+        <option value="2000">2s</option>
+        <option value="3500" selected>3.5s</option>
+        <option value="5000">5s</option>
+        <option value="8000">8s</option>
+      </select>
+      <label class="inline-flex items-center gap-2 text-sm ml-2">
+        <input id="shuffleToggle" type="checkbox"> Shuffle
+      </label>
+      <span id="statusText" class="text-sm text-gray-500 ml-auto">Loading...</span>
+    </div>
+  </div>
+
+  <div class="card p-2 md:p-4">
+    <div class="relative w-full h-[70vh] bg-black rounded-xl overflow-hidden flex items-center justify-center">
+      <img id="slideImage" class="max-w-full max-h-full object-contain hidden" alt="Slideshow image">
+      <video id="slideVideo" class="max-w-full max-h-full object-contain hidden" controls></video>
+      <div id="emptyState" class="text-gray-300 text-center p-6">No family-shared photos/videos found.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const currentMember = localStorage.getItem('username') || '{{ current_member_name }}';
+  const imgEl = document.getElementById('slideImage');
+  const vidEl = document.getElementById('slideVideo');
+  const emptyEl = document.getElementById('emptyState');
+  const statusText = document.getElementById('statusText');
+  const playPauseBtn = document.getElementById('playPauseBtn');
+  const prevBtn = document.getElementById('prevBtn');
+  const nextBtn = document.getElementById('nextBtn');
+  const speedSelect = document.getElementById('speedSelect');
+  const shuffleToggle = document.getElementById('shuffleToggle');
+
+  let items = [];
+  let index = 0;
+  let timer = null;
+  let playing = true;
+  let wakeLock = null;
+
+  async function requestWakeLock(){
+    try {
+      if ('wakeLock' in navigator) {
+        wakeLock = await navigator.wakeLock.request('screen');
+      }
+    } catch (_) {}
+  }
+
+  function hideAll(){
+    imgEl.classList.add('hidden');
+    vidEl.classList.add('hidden');
+  }
+
+  function currentItem(){
+    if (!items.length) return null;
+    return items[index % items.length];
+  }
+
+  function render(){
+    const item = currentItem();
+    if (!item) {
+      hideAll();
+      emptyEl.classList.remove('hidden');
+      statusText.textContent = 'No items';
+      return;
+    }
+    emptyEl.classList.add('hidden');
+    statusText.textContent = `${index + 1} / ${items.length}`;
+
+    if (item.is_video) {
+      hideAll();
+      vidEl.classList.remove('hidden');
+      vidEl.src = item.preview_url;
+      vidEl.play().catch(() => {});
+    } else {
+      hideAll();
+      imgEl.classList.remove('hidden');
+      imgEl.src = item.preview_url;
+      vidEl.pause();
+      vidEl.removeAttribute('src');
+    }
+  }
+
+  function next(){
+    if (!items.length) return;
+    if (shuffleToggle.checked) {
+      index = Math.floor(Math.random() * items.length);
+    } else {
+      index = (index + 1) % items.length;
+    }
+    render();
+  }
+
+  function prev(){
+    if (!items.length) return;
+    index = (index - 1 + items.length) % items.length;
+    render();
+  }
+
+  function restartTimer(){
+    if (timer) clearInterval(timer);
+    if (!playing) return;
+    timer = setInterval(next, Number(speedSelect.value || 3500));
+  }
+
+  playPauseBtn.addEventListener('click', () => {
+    playing = !playing;
+    playPauseBtn.innerHTML = playing
+      ? '<i class="fa-solid fa-pause"></i> Pause'
+      : '<i class="fa-solid fa-play"></i> Play';
+    restartTimer();
+  });
+  prevBtn.addEventListener('click', () => { prev(); restartTimer(); });
+  nextBtn.addEventListener('click', () => { next(); restartTimer(); });
+  speedSelect.addEventListener('change', restartTimer);
+
+  async function loadFamilyItems(){
+    const res = await fetch(`/api/photos/assets?member=${encodeURIComponent(currentMember)}&scope=family`);
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to load slideshow assets');
+    items = data.items || [];
+    index = 0;
+    render();
+    restartTimer();
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && playing) restartTimer();
+  });
+
+  requestWakeLock();
+  loadFamilyItems().catch(err => {
+    statusText.textContent = err.message || 'Error';
+  });
+})();
+</script>
+{% endblock %}

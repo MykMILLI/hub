@@ -41,6 +41,15 @@
     .btn-success:hover { filter:brightness(1.08); transform: translateY(-1px); box-shadow: 0 8px 12px rgba(0,0,0,0.15); }
     .btn-secondary { background:var(--m3-surface-variant); color:var(--m3-on-surface); box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
     .btn-secondary:hover { filter:brightness(0.95); }
+    :where(a, button, input, select, textarea, [role="button"], [tabindex]):focus-visible {
+        outline: 2px solid rgba(var(--primary-rgb, 37, 99, 235), 0.9);
+        outline-offset: 2px;
+        box-shadow: 0 0 0 4px rgba(var(--primary-rgb, 37, 99, 235), 0.2);
+        border-radius: 0.75rem;
+    }
+    :where(input, select, textarea):focus-visible {
+        border-color: rgba(var(--primary-rgb, 37, 99, 235), 0.85);
+    }
     /* Sidebar modern styling with glassmorphism */
     .sidebar {
         background: linear-gradient(135deg, var(--sidebar-background-color) 0%, rgba(79, 70, 229, 0.8) 100%);
@@ -62,6 +71,24 @@
         --background-color: #0f172a;
         --card-background-color: #111827;
         --text-color: #f1f5f9;
+    }
+    @media (max-width: 767px) {
+        body {
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+        .sidebar {
+            width: min(88vw, 340px);
+            max-width: 340px;
+        }
+        .main-content {
+            padding: 0.75rem;
+        }
+        .main-content .sticky.top-0 {
+            top: 0.25rem;
+        }
+        .btn, button.btn, a.btn {
+            min-height: 2.5rem;
+        }
     }
     </style>
     <link rel="manifest" href="/manifest.webmanifest">
@@ -106,9 +133,9 @@
 <body class="min-h-screen">
     <div class="flex min-h-screen">
         <!-- Global JSON data for client scripts -->
-        <script id="familyData" type="application/json">[]</script>
+        <script id="familyData" type="application/json">{{ (config.family_members or []) | tojson }}</script>
         <!-- Sidebar -->
-        <aside id="sidebar" class="sidebar w-64 text-white flex flex-col fixed md:static inset-y-0 left-0 transform -translate-x-full md:translate-x-0 transition-transform duration-200 z-40">
+        <aside id="sidebar" class="sidebar hidden w-64 text-white flex-col fixed md:static inset-y-0 left-0 transform -translate-x-full md:translate-x-0 transition-transform duration-200 z-40" aria-hidden="true">
             <div class="glass-lg m-2 p-6 text-2xl font-bold border border-white/30 flex items-center justify-between rounded-2xl" style="color: var(--sidebar-text-color);">
                 <span class="brand-name font-extrabold tracking-tight">{% if g.hub_settings %}{{ g.hub_settings.hub_name }}{% else %}{{ config.instance_name }}{% endif %}</span>
                 <div class="flex items-center gap-2">
@@ -119,18 +146,40 @@
                 </div>
             </div>
             <nav class="flex-1 p-4 space-y-2 overflow-y-auto" id="sidebarNav">
+                {% if config.menu_visibility.get('notifications', true) and config.feature_toggles.get('notifications', true) %}
+                <div class="flex items-center gap-2 mb-1">
+                    <a href="/messages" class="glass-sm relative inline-flex items-center justify-center w-10 h-10 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Messages" data-menu="notifications">
+                        <i class="fa-solid fa-message"></i>
+                        <span id="navMessagesUnread" class="hidden absolute -top-1 -right-1 min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-red-500 text-white text-[10px] leading-[1.1rem] text-center font-bold"></span>
+                    </a>
+                    <a href="/polls" class="glass-sm relative inline-flex items-center justify-center w-10 h-10 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Polls" data-menu="notifications">
+                        <i class="fa-solid fa-square-poll-vertical"></i>
+                    </a>
+                    <a href="/notifications" class="glass-sm relative inline-flex items-center justify-center w-10 h-10 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Notifications" data-menu="notifications">
+                        <i class="fa-solid fa-bell"></i>
+                        <span id="navNotificationsUnread" class="hidden absolute -top-1 -right-1 min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-red-500 text-white text-[10px] leading-[1.1rem] text-center font-bold"></span>
+                    </a>
+                </div>
+                {% endif %}
                 {% if config.menu_visibility.get('welcome', true) %}<a href="/" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Welcome" data-menu="welcome"><i class="fa-solid fa-house w-5 text-center"></i><span class="nav-label">Welcome</span></a>{% endif %}
-                {% if config.menu_visibility.get('shared_notes', true) and config.feature_toggles.get('notes') %}<a href="/notes" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Shared Notes" data-menu="shared_notes"><i class="fa-solid fa-note-sticky w-5 text-center"></i><span class="nav-label">Shared Notes</span></a>{% endif %}
+                {% if config.menu_visibility.get('timeline', true) %}<a href="/timeline" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Timeline" data-menu="timeline"><i class="fa-solid fa-timeline w-5 text-center"></i><span class="nav-label">Timeline</span></a>{% endif %}
+                {% if config.menu_visibility.get('notifications', true) and config.feature_toggles.get('notifications', true) %}<a href="/messages" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Messages" data-menu="notifications"><i class="fa-solid fa-message w-5 text-center"></i><span class="nav-label">Messages</span></a>{% endif %}
+                {% if config.menu_visibility.get('notifications', true) and config.feature_toggles.get('notifications', true) %}<a href="/polls" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Polls" data-menu="notifications"><i class="fa-solid fa-square-poll-vertical w-5 text-center"></i><span class="nav-label">Polls</span></a>{% endif %}
+                {% if config.feature_toggles.get('notes') %}<a href="/notes" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Projects & Spaces" data-menu="shared_notes"><i class="fa-solid fa-diagram-project w-5 text-center"></i><span class="nav-label">Projects & Spaces</span></a>{% endif %}
                 {% if config.menu_visibility.get('shared_cloud', true) and config.feature_toggles.get('shared_cloud') %}<a href="/upload" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Shared Cloud" data-menu="shared_cloud"><i class="fa-solid fa-cloud w-5 text-center"></i><span class="nav-label">Shared Cloud</span></a>{% endif %}
                 {% if config.menu_visibility.get('shopping_list', true) and config.feature_toggles.get('shopping_list') %}<a href="/shopping" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Shopping List" data-menu="shopping_list"><i class="fa-solid fa-cart-shopping w-5 text-center"></i><span class="nav-label">Shopping List</span></a>{% endif %}
                 {% if config.menu_visibility.get('chores', true) and config.feature_toggles.get('chores') %}<a href="/chores" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="To-Do/Chores" data-menu="chores"><i class="fa-solid fa-list-check w-5 text-center"></i><span class="nav-label">To-Do/Chores</span></a>{% endif %}
-                {% if config.menu_visibility.get('recipes', true) and config.feature_toggles.get('recipes') %}<a href="/recipes" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Recipe Book" data-menu="recipes"><i class="fa-solid fa-utensils w-5 text-center"></i><span class="nav-label">Recipe Book</span></a>{% endif %}
+                {% if config.feature_toggles.get('recipes') %}<a href="/recipes" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Recipe Book" data-menu="recipes"><i class="fa-solid fa-utensils w-5 text-center"></i><span class="nav-label">Recipe Book</span></a>{% endif %}
                 {% if config.menu_visibility.get('expiry_tracker', true) and config.feature_toggles.get('expiry_tracker') %}<a href="/expiry" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Expiry Tracker" data-menu="expiry_tracker"><i class="fa-solid fa-hourglass-half w-5 text-center"></i><span class="nav-label">Expiry Tracker</span></a>{% endif %}
                 {% if config.menu_visibility.get('url_shortener', true) and config.feature_toggles.get('url_shortener') %}<a href="/shorten" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="URL Shortener" data-menu="url_shortener"><i class="fa-solid fa-link w-5 text-center"></i><span class="nav-label">URL Shortener</span></a>{% endif %}
                 {% if config.menu_visibility.get('media_downloader', true) and config.feature_toggles.get('media_downloader') %}<a href="/media" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Media Downloader" data-menu="media_downloader"><i class="fa-solid fa-download w-5 text-center"></i><span class="nav-label">Media Downloader</span></a>{% endif %}
                 {% if config.menu_visibility.get('pdf_compressor', true) and config.feature_toggles.get('pdf_compressor') %}<a href="/pdfs" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="PDF Compressor" data-menu="pdf_compressor"><i class="fa-solid fa-file-pdf w-5 text-center"></i><span class="nav-label">PDF Compressor</span></a>{% endif %}
                 {% if config.menu_visibility.get('qr_generator', true) and config.feature_toggles.get('qr_generator') %}<a href="/qr" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="QR Generator" data-menu="qr_generator"><i class="fa-solid fa-qrcode w-5 text-center"></i><span class="nav-label">QR Generator</span></a>{% endif %}
                 {% if config.menu_visibility.get('expense_tracker', true) and config.feature_toggles.get('expense_tracker', true) %}<a href="/expenses" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Expense & Money Tracker" data-menu="expense_tracker"><i class="fa-solid fa-wallet w-5 text-center"></i><span class="nav-label">Expense & Money Tracker</span></a>{% endif %}
+                {% if config.menu_visibility.get('shared_calendar', true) and config.feature_toggles.get('shared_calendar', true) %}<a href="/calendar" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Family Calendar" data-menu="shared_calendar"><i class="fa-solid fa-calendar-days w-5 text-center"></i><span class="nav-label">Family Calendar</span></a>{% endif %}
+                {% if config.menu_visibility.get('meal_planner', true) and config.feature_toggles.get('meal_planner', true) %}<a href="/meal-planner" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Meal Planner" data-menu="meal_planner"><i class="fa-solid fa-bowl-food w-5 text-center"></i><span class="nav-label">Meal Planner</span></a>{% endif %}
+                {% if config.menu_visibility.get('photos', true) and config.feature_toggles.get('photos', true) %}<a href="/upload#family-photos" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Family Photos" data-menu="photos"><i class="fa-solid fa-images w-5 text-center"></i><span class="nav-label">Family Photos</span></a>{% endif %}
+                {% if config.menu_visibility.get('notifications', true) and config.feature_toggles.get('notifications', true) %}<a href="/notifications" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Notifications" data-menu="notifications"><i class="fa-solid fa-bell w-5 text-center"></i><span class="nav-label">Notifications</span></a>{% endif %}
             </nav>
             <div class="border-t border-white/20 p-4">
                 {% if config.menu_visibility.get('settings', true) %}<a href="/settings" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Settings" data-menu="settings"><i class="fa-solid fa-gear w-5 text-center"></i><span class="nav-label">Settings</span></a>{% endif %}
@@ -140,8 +189,13 @@
             (() => {
                 const links = document.querySelectorAll('#sidebarNav .sidebar-link');
                 const path = window.location.pathname.replace(/\/$/, '');
+                const moduleAccess = {{ (app_module_access or {})|tojson }};
                 links.forEach(link => {
                     let href = link.getAttribute('href').replace(/\/$/, '');
+                    const moduleKey = (link.dataset.menu || '').trim();
+                    if (moduleKey && moduleAccess[moduleKey] === false) {
+                        link.classList.add('hidden');
+                    }
                     // Only mark active if exact match
                     if (href === path) {
                         link.classList.add('active');
@@ -152,25 +206,62 @@
             })();
             </script>
         </aside>
+        <div id="sidebarBackdrop" class="hidden md:hidden fixed inset-0 bg-black/40 z-30"></div>
+        <div id="launcherModal" class="hidden fixed inset-0 bg-black/70 z-50 items-center justify-center p-4 sm:p-6">
+            <div class="glass-lg w-full max-w-4xl max-h-[calc(100vh-3rem)] overflow-y-auto rounded-3xl border border-white/20 shadow-2xl p-5 md:p-6">
+                <div class="flex items-center justify-between gap-3 mb-4">
+                    <div>
+                        <h3 class="text-xl font-bold text-m3-on-surface">App Launcher</h3>
+                        <p class="text-sm text-m3-on-surface-variant">Open any module from one place.</p>
+                    </div>
+                    <button id="closeLauncher" class="btn btn-secondary" type="button">Close</button>
+                </div>
+                <div class="mb-4">
+                    <input id="launcherSearch" type="text" class="w-full p-3 border rounded-xl dark:bg-gray-800 dark:border-gray-600" placeholder="Search apps..." />
+                </div>
+                <div id="launcherGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3"></div>
+            </div>
+        </div>
         <!-- Main Content -->
-        <main class="main-content flex-1 p-4 md:p-8 overflow-y-auto md:ml-0 ml-0">
+        <main class="main-content flex-1 p-3 md:p-8 overflow-y-auto md:ml-0 ml-0">
             <div class="max-w-none md:max-w-none mx-auto">
                 <div class="sticky top-0 z-20 mb-6">
-                    <div class="glass p-4 rounded-2xl flex items-center flex-wrap gap-2">
-                        <button id="openSidebar" class="md:hidden bg-gradient-to-br from-m3-primary to-m3-secondary text-white px-4 py-2 rounded-xl hover:shadow-lg transition-m3 font-medium"><i class="fa-solid fa-bars"></i> Menu</button>
-                        <button id="themeToggle" class="bg-gradient-to-br from-yellow-500 to-orange-500 dark:from-blue-600 dark:to-indigo-600 text-white px-4 py-2 rounded-xl hover:shadow-lg transition-m3 font-medium" title="Toggle dark mode"><i class="fa-solid fa-sun dark:hidden"></i><i class="fa-solid fa-moon hidden dark:inline"></i></button>
-                        {% if not (hide_user_ui | default(false)) %}
-                        <div class="ml-auto flex items-center gap-3 flex-wrap justify-end">
-                            <div id="welcome" class="text-sm font-medium text-m3-on-surface-variant truncate max-w-[50vw]"></div>
-                            <div>
-                                <label class="text-sm font-medium text-m3-on-surface-variant mr-2">User:</label>
-                                <select id="userSwitcher" class="glass border rounded-lg p-2 text-sm font-medium cursor-pointer hover:shadow-md transition-m3"></select>
+                    <div class="glass p-4 rounded-2xl flex items-center gap-2">
+                        <button id="openLauncher" class="bg-gradient-to-br from-m3-primary to-m3-secondary text-white px-4 py-2 rounded-xl hover:shadow-lg transition-m3 font-medium" aria-label="Open app launcher"><i class="fa-solid fa-grip"></i></button>
+
+                        <div class="flex-1 text-center font-semibold text-gray-800 dark:text-white truncate">
+                            {% if g.hub_settings %}{{ g.hub_settings.hub_name }}{% else %}{{ config.instance_name }}{% endif %}
+                        </div>
+
+                        <div class="flex items-center gap-2">
+                            {% if not (hide_user_ui | default(false)) %}
+                            <div id="currentMemberAvatar" class="w-9 h-9 rounded-full border border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800 overflow-hidden flex items-center justify-center text-xs font-bold text-gray-600 dark:text-gray-300" title="Current member">
+                                {% if current_member_avatar %}
+                                <img src="{{ current_member_avatar }}" alt="Current member avatar" class="w-full h-full object-cover">
+                                {% else %}
+                                {{ (current_member or config.admin_name or 'U')[:1].upper() }}
+                                {% endif %}
+                            </div>
+                            {% endif %}
+                            <button id="themeToggle" class="glass px-3 py-2 rounded-xl hover:shadow-lg transition-m3 font-medium" title="Toggle dark mode" aria-label="Toggle dark mode">
+                                <i class="fa-solid fa-sun dark:hidden"></i><i class="fa-solid fa-moon hidden dark:inline"></i>
+                            </button>
+                            {% if not (hide_user_ui | default(false)) %}
+                            <div id="profileSwitcher" class="relative" title="Profile">
+                                <button id="profileSwitcherBtn" type="button" class="glass border border-gray-200/70 dark:border-gray-700/70 rounded-2xl px-3 py-2 hover:shadow-md transition-m3 min-w-[190px] text-left">
+                                    <span class="block text-[10px] leading-none uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1">Profile</span>
+                                    <span class="flex items-center justify-between gap-2">
+                                        <span id="profileSwitcherValue" class="text-sm font-semibold text-gray-800 dark:text-gray-100 truncate">{{ current_member or 'Guest' }}</span>
+                                        <i class="fa-solid fa-users text-[11px] text-gray-500 dark:text-gray-400"></i>
+                                    </span>
+                                </button>
+                                <select id="userSwitcher" aria-label="Select profile" class="hidden" tabindex="-1" aria-hidden="true"></select>
                             </div>
                             {% if is_authed %}
-                            <a href="/logout" class="glass px-3 py-2 rounded-lg text-sm font-medium hover:shadow-md transition-m3"><i class="fa-solid fa-right-from-bracket"></i> Logout</a>
+                            <a href="/logout" class="glass px-3 py-2 rounded-lg text-sm font-medium hover:shadow-md transition-m3" title="Logout"><i class="fa-solid fa-right-from-bracket"></i></a>
+                            {% endif %}
                             {% endif %}
                         </div>
-                        {% endif %}
                     </div>
                 </div>
                 <div id="globalFlashWrap" class="hidden">{% include "_flash.html" %}</div>
@@ -218,119 +309,379 @@
             });            
             setTimeout(()=>wrap.remove(), msgs.length*70 + 200);
         })();        
-        function showUserSelectModal(users){
-            const modal = document.getElementById('userSelectModal');
-            const input = document.getElementById('userSelectInput');
-            const confirmBtn = document.getElementById('userSelectConfirm');
-            if (!modal || !input || !confirmBtn) return;
-            input.innerHTML = '';
-            users.forEach(u => {
-                const opt = document.createElement('option');
-                opt.value = u; opt.textContent = u; input.appendChild(opt);
-            });
-            modal.classList.remove('hidden');
-            modal.classList.add('flex');
-            confirmBtn.onclick = function(){
-                const selected = input.value;
-                if (selected){
-                    localStorage.setItem('username', selected);
-                    const switcher = document.getElementById('userSwitcher');
-                    if (switcher){ switcher.value = selected; }
-                    renderWelcome();
-                    applyUserContext();
+
+        (function(){
+            if (window.uiConfirm && window.uiAlert && window.uiPrompt) return;
+
+            let overlay = null;
+            let resolveFn = null;
+
+            function ensureDialog(){
+                if (overlay) return;
+                overlay = document.createElement('div');
+                overlay.id = 'globalStyledDialog';
+                overlay.className = 'hidden fixed inset-0 z-50 bg-black/50 items-center justify-center p-4';
+                overlay.innerHTML = `
+                    <div class="card w-full max-w-md p-5" role="dialog" aria-modal="true" aria-live="polite">
+                        <div class="flex items-center justify-between mb-2">
+                            <h3 id="globalStyledDialogTitle" class="text-lg font-semibold text-gray-900 dark:text-gray-100">Confirm</h3>
+                            <button type="button" id="globalStyledDialogClose" class="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300" aria-label="Close">
+                                <i class="fa-solid fa-xmark"></i>
+                            </button>
+                        </div>
+                        <div id="globalStyledDialogMessage" class="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-line mb-3"></div>
+                        <div id="globalStyledDialogInputWrap" class="hidden mb-3">
+                            <input id="globalStyledDialogInput" type="text" class="w-full p-2 border rounded dark:bg-gray-800 dark:border-gray-600" />
+                        </div>
+                        <div class="flex justify-end gap-2">
+                            <button type="button" id="globalStyledDialogCancel" class="btn btn-secondary">Cancel</button>
+                            <button type="button" id="globalStyledDialogOk" class="btn btn-primary">OK</button>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(overlay);
+            }
+
+            function closeDialog(value){
+                if (!overlay) return;
+                overlay.classList.add('hidden');
+                overlay.classList.remove('flex');
+                const done = resolveFn;
+                resolveFn = null;
+                if (done) done(value);
+            }
+
+            function openDialog(options){
+                ensureDialog();
+
+                const titleEl = document.getElementById('globalStyledDialogTitle');
+                const msgEl = document.getElementById('globalStyledDialogMessage');
+                const inputWrap = document.getElementById('globalStyledDialogInputWrap');
+                const inputEl = document.getElementById('globalStyledDialogInput');
+                const cancelBtn = document.getElementById('globalStyledDialogCancel');
+                const okBtn = document.getElementById('globalStyledDialogOk');
+                const closeBtn = document.getElementById('globalStyledDialogClose');
+
+                const mode = options.mode || 'confirm';
+                const allowCancel = options.allowCancel !== false && mode !== 'alert';
+                titleEl.textContent = options.title || (mode === 'prompt' ? 'Input Required' : (mode === 'alert' ? 'Notice' : 'Confirm'));
+                msgEl.textContent = String(options.message || '');
+
+                okBtn.textContent = options.confirmText || 'OK';
+                okBtn.classList.toggle('btn-danger', !!options.danger);
+                okBtn.classList.toggle('btn-primary', !options.danger);
+
+                cancelBtn.textContent = options.cancelText || 'Cancel';
+                cancelBtn.classList.toggle('hidden', !allowCancel);
+                closeBtn.classList.toggle('hidden', !allowCancel);
+
+                if (mode === 'prompt') {
+                    inputWrap.classList.remove('hidden');
+                    inputEl.type = options.inputType || 'text';
+                    inputEl.placeholder = options.placeholder || '';
+                    inputEl.value = options.defaultValue || '';
+                } else {
+                    inputWrap.classList.add('hidden');
+                    inputEl.value = '';
                 }
-                modal.classList.add('hidden');
-                modal.classList.remove('flex');
+
+                const onOverlayClick = (event) => {
+                    if (event.target === overlay && allowCancel) closeDialog(mode === 'prompt' ? null : false);
+                };
+                const onKeyDown = (event) => {
+                    if (event.key === 'Escape' && allowCancel) closeDialog(mode === 'prompt' ? null : false);
+                    if (event.key === 'Enter' && mode === 'prompt' && !event.shiftKey) {
+                        event.preventDefault();
+                        closeDialog(inputEl.value);
+                    }
+                };
+
+                overlay.onclick = onOverlayClick;
+                cancelBtn.onclick = () => closeDialog(mode === 'prompt' ? null : false);
+                closeBtn.onclick = () => closeDialog(mode === 'prompt' ? null : false);
+                okBtn.onclick = () => closeDialog(mode === 'prompt' ? inputEl.value : true);
+
+                overlay.classList.remove('hidden');
+                overlay.classList.add('flex');
+
+                setTimeout(() => {
+                    if (mode === 'prompt') inputEl.focus();
+                    else okBtn.focus();
+                }, 20);
+
+                return new Promise((resolve) => {
+                    resolveFn = (result) => {
+                        document.removeEventListener('keydown', onKeyDown);
+                        resolve(result);
+                    };
+                    document.addEventListener('keydown', onKeyDown);
+                });
+            }
+
+            window.uiConfirm = function(message, options = {}){
+                return openDialog({ ...options, mode: 'confirm', message });
             };
+            window.uiAlert = function(message, options = {}){
+                return openDialog({ ...options, mode: 'alert', message, allowCancel: false, confirmText: options.confirmText || 'OK' });
+            };
+            window.uiPrompt = function(message, options = {}){
+                return openDialog({ ...options, mode: 'prompt', message });
+            };
+        })();
+
+        function showUserSelectModal(users){
+            if (typeof window.openUserPickerModal === 'function') {
+                window.openUserPickerModal({ users: users || [], requireSelection: false });
+            }
         }
         // Ensure a username is stored in localStorage; initialize after DOM is ready
         document.addEventListener('DOMContentLoaded', async function(){
             const switcher = document.getElementById('userSwitcher');
             if (switcher){
                 const adminName = '{{ config.admin_name }}';
+                let familyMembersMeta = [];
+                let adminUsers = new Set([adminName, 'Administrator', 'admin']);
+                const profileSwitcherBtn = document.getElementById('profileSwitcherBtn');
+                const profileSwitcherValue = document.getElementById('profileSwitcherValue');
+                const userPickerModal = document.getElementById('userPickerModal');
+                const userPickerGrid = document.getElementById('userPickerGrid');
+                const userPickerClose = document.getElementById('userPickerClose');
+                const userPickerGuest = document.getElementById('userPickerGuest');
+                const userPickerProfile = document.getElementById('userPickerProfile');
+
+                function setProfileSwitcherCurrent(memberName){
+                    if (!profileSwitcherValue) return;
+                    profileSwitcherValue.textContent = String(memberName || '').trim() || 'Guest';
+                }
+
+                function closeUserPickerModal(){
+                    if (!userPickerModal) return;
+                    userPickerModal.classList.add('hidden');
+                    userPickerModal.classList.remove('flex');
+                }
+
+                function renderUserPicker(users){
+                    if (!userPickerGrid) return;
+                    const current = String(localStorage.getItem('username') || switcher.value || '').trim();
+                    userPickerGrid.innerHTML = '';
+                    users.forEach(name => {
+                        const selectedName = String(name || '').trim();
+                        const meta = familyMembersMeta.find(m => m.name === selectedName);
+                        const avatar = String(meta?.avatar || '').trim();
+                        const isActive = selectedName === current;
+                        const card = document.createElement('button');
+                        card.type = 'button';
+                        card.className = 'w-24 sm:w-24 md:w-24 p-2 rounded-2xl border text-center transition-m3 focus:outline-none focus:ring-2 focus:ring-m3-primary/40 ' + (isActive
+                            ? 'border-m3-primary/80 bg-m3-primary/10 dark:bg-m3-primary/20'
+                            : 'border-transparent hover:border-white/20');
+                        card.innerHTML = `
+                            <div class="w-16 h-16 sm:w-16 sm:h-16 rounded-full overflow-hidden border-2 ${isActive ? 'border-m3-primary/70' : 'border-white/30'} bg-gray-100 dark:bg-gray-800 mx-auto flex items-center justify-center text-lg font-bold text-gray-700 dark:text-gray-200 mb-2">
+                                ${avatar ? `<img src="${avatar}" alt="${selectedName} avatar" class="w-full h-full object-cover">` : (selectedName || 'U').slice(0,1).toUpperCase()}
+                            </div>
+                            <div class="text-xs font-semibold text-m3-on-surface truncate">${selectedName}</div>
+                        `;
+                        card.addEventListener('click', () => {
+                            closeUserPickerModal();
+                            if (!selectedName || selectedName === switcher.value) return;
+                            switcher.value = selectedName;
+                            switcher.dispatchEvent(new Event('change', { bubbles: true }));
+                        });
+                        userPickerGrid.appendChild(card);
+                    });
+                }
+
+                window.openUserPickerModal = function(options = {}){
+                    const users = Array.isArray(options.users) && options.users.length ? options.users : (window.__homehubUsers || []);
+                    renderUserPicker(users);
+                    if (!userPickerModal) return;
+                    userPickerModal.classList.remove('hidden');
+                    userPickerModal.classList.add('flex');
+                    const requireSelection = !!options.requireSelection;
+                    if (userPickerGuest) userPickerGuest.classList.toggle('hidden', requireSelection);
+                };
+
+                profileSwitcherBtn?.addEventListener('click', () => {
+                    const selected = String(localStorage.getItem('username') || switcher.value || '').trim();
+                    const meta = familyMembersMeta.find(m => m.name === selected);
+                    if (selected && meta && meta.id && typeof window.openMemberProfile === 'function') {
+                        window.openMemberProfile(meta.id, meta.name);
+                        return;
+                    }
+                    window.openUserPickerModal({ requireSelection: false });
+                });
+                userPickerClose?.addEventListener('click', closeUserPickerModal);
+                userPickerModal?.addEventListener('click', (event) => {
+                    if (event.target === userPickerModal) closeUserPickerModal();
+                });
+
+                async function performMemberLogout(){
+                    try {
+                        await fetch('/api/member-logout', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({})
+                        });
+                    } catch (_) {}
+                    localStorage.removeItem('username');
+                    switcher.value = '';
+                    setProfileSwitcherCurrent('');
+                    renderCurrentMemberAvatar('');
+                    closeUserPickerModal();
+                    document.dispatchEvent(new CustomEvent('user-switched', { detail: { user: '' }}));
+                }
+
+                window.performMemberLogout = performMemberLogout;
+
+                userPickerGuest?.addEventListener('click', async () => {
+                    await performMemberLogout();
+                });
+
+                userPickerProfile?.addEventListener('click', () => {
+                    const selected = String(localStorage.getItem('username') || switcher.value || '').trim();
+                    if (!selected) {
+                        if (window.globalToast) globalToast('Select a user first', 'info');
+                        return;
+                    }
+                    const meta = familyMembersMeta.find(m => m.name === selected);
+                    if (!meta || !meta.id || typeof window.openMemberProfile !== 'function') {
+                        if (window.globalToast) globalToast('Profile settings unavailable for this user', 'error');
+                        return;
+                    }
+                    closeUserPickerModal();
+                    window.openMemberProfile(meta.id, meta.name);
+                });
+
+                document.addEventListener('user-switched', (event) => {
+                    const selected = event?.detail?.user || localStorage.getItem('username') || '';
+                    setProfileSwitcherCurrent(selected);
+                    renderUserPicker(window.__homehubUsers || []);
+                });
+
+                function renderCurrentMemberAvatar(memberName){
+                    const avatarEl = document.getElementById('currentMemberAvatar');
+                    if (!avatarEl) return;
+                    const selected = String(memberName || '').trim();
+                    const meta = familyMembersMeta.find(m => m.name === selected);
+                    const avatar = (meta?.avatar || '').trim();
+                    if (avatar) {
+                        avatarEl.innerHTML = `<img src="${avatar}" alt="Current member avatar" class="w-full h-full object-cover">`;
+                        return;
+                    }
+                    const initial = (selected || 'U').slice(0, 1).toUpperCase();
+                    avatarEl.textContent = initial;
+                }
                 
                 // Fetch family members from database
                 fetch('/api/family-members')
-                    .then(r => r.json())
+                    .then(async (r) => {
+                        const data = await r.json().catch(() => ({}));
+                        if (!r.ok || !data.ok) {
+                            throw new Error(data.error || 'Failed to load family members');
+                        }
+                        return data;
+                    })
                     .then(data => {
                         let family = [];
-                        if (data.ok && data.members) {
+                        if (data.members) {
+                            familyMembersMeta = data.members;
+                            window.__homehubUsersMeta = familyMembersMeta;
                             family = data.members.map(m => m.name);
+                            data.members.filter(m => m.is_admin).forEach(m => adminUsers.add(m.name));
                         }
-                        const users = [adminName, ...family];
+                        window.__homehubAdmins = Array.from(adminUsers);
+                        const users = [...new Set([adminName, ...family])];
+                        window.__homehubUsers = users;
                         switcher.innerHTML = '';
                         users.forEach(u => {
                             const opt = document.createElement('option');
                             opt.value = u; opt.textContent = u;
                             switcher.appendChild(opt);
                         });
-                        const existing = localStorage.getItem('username');
-                        if (existing){
-                            switcher.value = existing;
-                        } else {
-                            // Show first-run user selection modal now that DOM is ready
-                            showUserSelectModal(users);
-                        }
+                        const activeUser = localStorage.getItem('username') || adminName;
+                        renderCurrentMemberAvatar(activeUser || '');
+                        setProfileSwitcherCurrent(activeUser);
+                        renderUserPicker(users);
                     })
                     .catch(e => {
                         console.warn('Failed to load family members from API, using config fallback', e);
+                        window.__homehubUsersMeta = [];
                         const familyEl = document.getElementById('familyData');
                         let family = [];
                         try { family = JSON.parse(familyEl?.textContent || '[]'); } catch(e) { family = []; }
                         const users = [adminName, ...family];
+                        window.__homehubAdmins = Array.from(adminUsers);
+                        window.__homehubUsers = users;
                         switcher.innerHTML = '';
                         users.forEach(u => {
                             const opt = document.createElement('option');
                             opt.value = u; opt.textContent = u;
                             switcher.appendChild(opt);
                         });
-                        const existing = localStorage.getItem('username');
-                        if (existing){
-                            switcher.value = existing;
-                        } else {
-                            showUserSelectModal(users);
-                        }
+                        const activeUser = localStorage.getItem('username') || adminName;
+                        renderCurrentMemberAvatar(activeUser || '');
+                        setProfileSwitcherCurrent(activeUser);
+                        renderUserPicker(users);
                     });
                 
                 switcher.addEventListener('change', async function(){
                     const selectedMember = this.value;
                     const adminName = '{{ config.admin_name }}';
+                    const adminUserSet = new Set(window.__homehubAdmins || [adminName, 'Administrator', 'admin']);
                     
-                    // Admin doesn't require PIN, switch directly
-                    if (selectedMember === adminName) {
-                        localStorage.setItem('username', selectedMember);
-                        renderWelcome();
-                        applyUserContext();
-                        document.dispatchEvent(new CustomEvent('user-switched', { detail: { user: selectedMember }}));
-                        return;
-                    }
-                    
-                    // Family members: check if they have a PIN set
+                    // Check selected member metadata and enforce PIN if set
                     try {
-                        const response = await fetch('/api/family-members');
-                        const data = await response.json();
-                        
-                        const member = data.members?.find(m => m.name === selectedMember);
-                        const hasPIN = member && member.pin; // Check if member has a PIN
+                        if (!familyMembersMeta.length) {
+                            const response = await fetch('/api/family-members');
+                            const data = await response.json();
+                            if (data.ok && data.members) familyMembersMeta = data.members;
+                        }
+                        const member = familyMembersMeta.find(m => m.name === selectedMember);
+                        const hasPIN = !!(member && member.pin);
+                        const isAdminUser = !!(member && member.is_admin) || adminUserSet.has(selectedMember);
                         
                         if (hasPIN) {
-                            // Member has PIN: show verification modal
+                            // Any member (including admins) with PIN must verify.
                             window.showMemberPINModal(selectedMember);
                         } else {
-                            // No PIN set: show setup modal or login directly
-                            // After they set a PIN, they'll see setup modal
-                            // For first-time, we'll allow them to set it now
+                            // No PIN set: admins may proceed directly; standard users set PIN first.
+                            if (isAdminUser) {
+                                const loginRes = await fetch('/api/member-login', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ name: selectedMember, pin: '' })
+                                });
+                                const loginData = await loginRes.json().catch(() => ({}));
+                                if (!loginRes.ok) throw new Error(loginData?.error || 'Unable to switch user');
+                                if (typeof window.startMemberWelcomeFlow === 'function') {
+                                    window.startMemberWelcomeFlow(selectedMember);
+                                } else {
+                                    localStorage.setItem('username', selectedMember);
+                                    renderWelcome();
+                                    applyUserContext();
+                                    const avatarEl = document.getElementById('currentMemberAvatar');
+                                    if (avatarEl) {
+                                        const row = familyMembersMeta.find(m => m.name === selectedMember);
+                                        const avatar = String(row?.avatar || '').trim();
+                                        avatarEl.innerHTML = avatar
+                                            ? `<img src="${avatar}" alt="Current member avatar" class="w-full h-full object-cover">`
+                                            : (selectedMember || 'U').slice(0,1).toUpperCase();
+                                    }
+                                    document.dispatchEvent(new CustomEvent('user-switched', { detail: { user: selectedMember }}));
+                                }
+                                return;
+                            }
                             window.showMemberSetPinModal(selectedMember);
                         }
                     } catch (err) {
                         console.error('Error checking member PIN status:', err);
-                        // Fallback: show PIN modal anyway
-                        window.showMemberPINModal(selectedMember);
+                        if (window.globalToast) window.globalToast(err.message || 'Unable to switch user', 'error');
                     }
                     
                     // Reset selector to current user until PIN verified
                     const currentUser = localStorage.getItem('username') || adminName;
                     this.value = currentUser;
+                    setProfileSwitcherCurrent(currentUser);
+                    renderUserPicker(window.__homehubUsers || []);
                 });
             }
             
@@ -343,6 +694,18 @@
                     // Server has a session - use the server's member name
                     console.log('Synced with server session:', data.member);
                     localStorage.setItem('username', data.member);
+                    const switcher = document.getElementById('userSwitcher');
+                    if (switcher) switcher.value = data.member;
+                    renderCurrentMemberAvatar(data.member);
+                    const profileSwitcherValue = document.getElementById('profileSwitcherValue');
+                    if (profileSwitcherValue) profileSwitcherValue.textContent = data.member;
+                    document.dispatchEvent(new CustomEvent('user-switched', { detail: { user: data.member }}));
+                } else {
+                    localStorage.removeItem('username');
+                    const switcher = document.getElementById('userSwitcher');
+                    if (switcher) switcher.value = '';
+                    setProfileSwitcherCurrent('');
+                    renderCurrentMemberAvatar('');
                 }
             } catch (err) {
                 console.warn('Could not sync with server session', err);
@@ -353,34 +716,183 @@
             console.log('Rendering welcome with username:', localStorage.getItem('username'));
             renderWelcome();
             applyUserContext();
+            renderCurrentMemberAvatar(localStorage.getItem('username') || '');
+            document.dispatchEvent(new CustomEvent('user-switched', { detail: { user: localStorage.getItem('username') || '' }}));
             
-            // Sidebar toggles
-            const sidebar = document.getElementById('sidebar');
-            const COLLAPSE_KEY = 'ui:sidebarCollapsed';
-            const rootEl = document.documentElement;
-            document.getElementById('openSidebar')?.addEventListener('click', ()=> sidebar.classList.remove('-translate-x-full'));
-            document.getElementById('closeSidebar')?.addEventListener('click', ()=> sidebar.classList.add('-translate-x-full'));
-            // Desktop collapse/expand
-            const collapseIcon = document.getElementById('collapseIcon');
-            function applyCollapsedState(collapsed){
-                const isCollapsed = !!collapsed;
-                if(window.matchMedia('(min-width: 768px)').matches){
-                    sidebar.classList.toggle('collapsed', isCollapsed);
-                }
-                // Keep root hint in sync for next load (used to avoid flash)
-                rootEl.classList.toggle('prefers-sidebar-collapsed', isCollapsed);
-                if(collapseIcon){ collapseIcon.className = 'fa-solid '+(isCollapsed ? 'fa-angles-right' : 'fa-angles-left'); }
-                const btn = document.getElementById('toggleCollapse');
-                if(btn){ btn.title = isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'; }
+            const launcherModal = document.getElementById('launcherModal');
+            const launcherGrid = document.getElementById('launcherGrid');
+            const launcherSearch = document.getElementById('launcherSearch');
+            let draggedLauncherCard = null;
+
+            function currentLauncherMember(){
+                const fromStorage = String(localStorage.getItem('username') || '').trim();
+                if (fromStorage) return fromStorage;
+                const fromProfile = String(document.getElementById('profileSwitcherValue')?.textContent || '').trim();
+                return fromProfile || 'Guest';
             }
-            // Initialize from saved preference
-            try{ const saved = localStorage.getItem(COLLAPSE_KEY); applyCollapsedState(saved==='1'||saved==='true'); }catch(e){}
-            document.getElementById('toggleCollapse')?.addEventListener('click', ()=>{
-                if(window.matchMedia('(min-width: 768px)').matches){
-                    const willCollapse = !sidebar.classList.contains('collapsed');
-                    applyCollapsedState(willCollapse);
-                    try{ localStorage.setItem(COLLAPSE_KEY, willCollapse ? '1' : '0'); }catch(e){}
+
+            function launcherOrderStorageKey(memberName){
+                const safe = String(memberName || 'Guest').replace(/[^a-zA-Z0-9_-]/g, '_');
+                return `ui:launcherOrder:${safe}`;
+            }
+
+            function loadSavedLauncherOrder(memberName){
+                try {
+                    const raw = localStorage.getItem(launcherOrderStorageKey(memberName));
+                    const parsed = JSON.parse(raw || '[]');
+                    return Array.isArray(parsed) ? parsed.map(v => String(v)) : [];
+                } catch (_) {
+                    return [];
                 }
+            }
+
+            function saveLauncherOrderFromGrid(){
+                const memberName = currentLauncherMember();
+                const ids = Array.from(launcherGrid?.querySelectorAll('[data-launcher-id]') || [])
+                    .map(node => String(node.getAttribute('data-launcher-id') || '').trim())
+                    .filter(Boolean);
+                try {
+                    localStorage.setItem(launcherOrderStorageKey(memberName), JSON.stringify(ids));
+                } catch (_) {}
+            }
+
+            function buildLauncherItems(){
+                if (!launcherGrid) return;
+                const navLinks = Array.from(document.querySelectorAll('#sidebarNav a.sidebar-link'));
+                const footerLinks = Array.from(document.querySelectorAll('#sidebar .border-t a.sidebar-link'));
+                let allLinks = [...navLinks, ...footerLinks];
+                if (!allLinks.length) {
+                    allLinks = Array.from(document.querySelectorAll('#sidebar a.sidebar-link'));
+                }
+                allLinks.forEach((link, index) => {
+                    if (!link.dataset.launcherId) {
+                        link.dataset.launcherId = `launcher_${index}`;
+                    }
+                });
+                const links = allLinks;
+
+                const baseItems = links.map((link, index) => ({
+                    id: String(link.dataset.launcherId || `launcher_${index}`),
+                    naturalIndex: index,
+                    href: link.getAttribute('href') || '#',
+                    iconClass: link.querySelector('i')?.className || 'fa-solid fa-link',
+                    label: (link.querySelector('.nav-label')?.textContent || link.getAttribute('title') || '').trim() || 'Open',
+                }));
+
+                const savedOrder = loadSavedLauncherOrder(currentLauncherMember());
+                const savedRank = new Map(savedOrder.map((id, idx) => [id, idx]));
+                const items = [...baseItems].sort((a, b) => {
+                    const aRank = savedRank.has(a.id) ? savedRank.get(a.id) : Number.MAX_SAFE_INTEGER;
+                    const bRank = savedRank.has(b.id) ? savedRank.get(b.id) : Number.MAX_SAFE_INTEGER;
+                    if (aRank !== bRank) return aRank - bRank;
+                    return a.naturalIndex - b.naturalIndex;
+                });
+
+                launcherGrid.innerHTML = '';
+                items.forEach((item) => {
+                    const card = document.createElement('a');
+                    card.href = item.href;
+                    card.draggable = true;
+                    card.className = 'glass-sm p-3 rounded-2xl border border-white/20 hover:shadow-lg transition-m3 flex flex-col gap-2 min-h-[92px] justify-center cursor-grab active:cursor-grabbing';
+                    card.setAttribute('data-launcher-id', item.id);
+                    card.setAttribute('data-launcher-label', item.label.toLowerCase());
+                    card.innerHTML = `
+                        <span class="w-8 h-8 rounded-lg bg-white/20 inline-flex items-center justify-center text-m3-on-surface">
+                            <i class="${item.iconClass}"></i>
+                        </span>
+                        <span class="text-sm font-semibold text-m3-on-surface leading-tight">${item.label}</span>
+                    `;
+                    launcherGrid.appendChild(card);
+                });
+            }
+
+            function ensureLauncherItems(){
+                if (!launcherGrid) return;
+                if (!launcherGrid.children.length) {
+                    buildLauncherItems();
+                }
+            }
+
+            function applyLauncherFilter(){
+                if (!launcherGrid) return;
+                const needle = String(launcherSearch?.value || '').trim().toLowerCase();
+                launcherGrid.querySelectorAll('[data-launcher-label]').forEach((node) => {
+                    const label = (node.getAttribute('data-launcher-label') || '').toLowerCase();
+                    const shouldHide = needle.length > 0 && !label.includes(needle);
+                    node.classList.toggle('hidden', shouldHide);
+                });
+            }
+
+            function openLauncher(){
+                buildLauncherItems();
+                launcherModal?.classList.remove('hidden');
+                launcherModal?.classList.add('flex');
+                document.body.classList.add('overflow-hidden');
+                if (launcherSearch) {
+                    launcherSearch.value = '';
+                }
+                ensureLauncherItems();
+                applyLauncherFilter();
+                requestAnimationFrame(() => {
+                    ensureLauncherItems();
+                    applyLauncherFilter();
+                });
+                setTimeout(() => {
+                    ensureLauncherItems();
+                    applyLauncherFilter();
+                }, 30);
+            }
+
+            function closeLauncher(){
+                launcherModal?.classList.add('hidden');
+                launcherModal?.classList.remove('flex');
+                document.body.classList.remove('overflow-hidden');
+            }
+
+            document.getElementById('openLauncher')?.addEventListener('click', openLauncher);
+            document.getElementById('closeLauncher')?.addEventListener('click', closeLauncher);
+            launcherModal?.addEventListener('click', (event) => {
+                if (event.target === launcherModal) closeLauncher();
+            });
+            document.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape') closeLauncher();
+            });
+            launcherGrid?.addEventListener('dragstart', (event) => {
+                const card = event.target.closest('[data-launcher-id]');
+                if (!card) return;
+                draggedLauncherCard = card;
+                card.classList.add('opacity-60');
+                if (event.dataTransfer) {
+                    event.dataTransfer.effectAllowed = 'move';
+                    event.dataTransfer.setData('text/plain', card.getAttribute('data-launcher-id') || '');
+                }
+            });
+            launcherGrid?.addEventListener('dragover', (event) => {
+                const targetCard = event.target.closest('[data-launcher-id]');
+                if (!draggedLauncherCard || !targetCard || targetCard === draggedLauncherCard) return;
+                event.preventDefault();
+            });
+            launcherGrid?.addEventListener('drop', (event) => {
+                const targetCard = event.target.closest('[data-launcher-id]');
+                if (!draggedLauncherCard || !targetCard || targetCard === draggedLauncherCard) return;
+                event.preventDefault();
+                const rect = targetCard.getBoundingClientRect();
+                const before = event.clientY < (rect.top + rect.height / 2);
+                launcherGrid.insertBefore(draggedLauncherCard, before ? targetCard : targetCard.nextSibling);
+                saveLauncherOrderFromGrid();
+            });
+            launcherGrid?.addEventListener('dragend', () => {
+                launcherGrid.querySelectorAll('[data-launcher-id]').forEach((node) => node.classList.remove('opacity-60'));
+                draggedLauncherCard = null;
+            });
+            launcherSearch?.addEventListener('input', () => {
+                ensureLauncherItems();
+                applyLauncherFilter();
+            });
+            document.addEventListener('user-switched', () => {
+                if (launcherModal?.classList.contains('hidden')) return;
+                buildLauncherItems();
+                applyLauncherFilter();
             });
         });
         function renderWelcome(){
@@ -395,24 +907,28 @@
                 second: '2-digit',
                 hour12: true
             });
-            document.getElementById('welcome').textContent = name ? `Dashboard: ${name} — ${ds}` : ds;
+            const welcomeEl = document.getElementById('welcome');
+            if (welcomeEl) {
+                welcomeEl.textContent = name ? `Dashboard: ${name} — ${ds}` : ds;
+            }
         }
         function applyUserContext(){
             const current = localStorage.getItem('username') || '';
             const adminName = '{{ config.admin_name }}';
+            const adminUsers = new Set(window.__homehubAdmins || [adminName, 'Administrator', 'admin']);
             // hidden inputs
             document.querySelectorAll('input[name="creator"]').forEach(function(i){ i.value = current; });
             document.querySelectorAll('input[name="user"]').forEach(function(i){ i.value = current; });
             // delete button visibility where data-creator is available
             document.querySelectorAll('.delete-form').forEach(f => {
                 const creator = f.getAttribute('data-creator');
-                const allowed = (current === creator || current === adminName || current === 'Administrator' || current === 'admin');
+                const allowed = (current === creator || adminUsers.has(current));
                 f.style.display = allowed ? '' : 'none';
             });
             // Notice editor visibility if present
             const nf = document.getElementById('noticeForm');
             if (nf){
-                const isAdmin = (current === adminName || current === 'Administrator' || current === 'admin');
+                const isAdmin = adminUsers.has(current);
                 nf.style.display = isAdmin ? '' : 'none';
                 const userField = nf.querySelector('input[name="user"]');
                 if (userField) userField.value = current;
@@ -420,18 +936,123 @@
         }
         // renderWelcome/applyUserContext are invoked from DOMContentLoaded
     </script>
-    <!-- First-visit user selection modal -->
-    <div id="userSelectModal" class="fixed inset-0 bg-black/50 backdrop-blur-md hidden items-center justify-center z-50">
-        <div class="glass-lg bg-opacity-95 w-full max-w-sm p-8 rounded-3xl shadow-2xl">
-            <h3 class="text-2xl font-bold mb-2 text-m3-on-surface">Welcome to {% if g.hub_settings %}{{ g.hub_settings.hub_name }}{% else %}HomeHub{% endif %}</h3>
-            <p class="text-sm font-medium text-m3-on-surface-variant mb-6">Select your user to personalize your experience.</p>
-            <div class="mb-6">
-                <label class="block text-sm font-semibold text-m3-on-surface mb-3" for="userSelectInput">Your User</label>
-                <select id="userSelectInput" class="w-full glass-sm rounded-xl p-3 font-medium cursor-pointer focus:outline-none focus:ring-2 focus:ring-m3-primary"></select>
+    <!-- Netflix-style User Picker Modal -->
+    <div id="userPickerModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden items-center justify-center z-50 p-4 md:p-6">
+        <div class="glass-lg w-full max-w-xl p-5 md:p-6 rounded-3xl shadow-2xl border border-white/20">
+            <div class="flex items-center justify-between gap-3 mb-5">
+                <div>
+                    <h3 class="text-xl font-bold text-m3-on-surface">Who&apos;s using HomeHub?</h3>
+                    <p class="text-sm font-medium text-m3-on-surface-variant">Choose a profile to continue.</p>
+                </div>
+                <button id="userPickerClose" class="btn btn-secondary">Close</button>
             </div>
-            <div class="flex justify-end gap-3">
-                <button id="userSelectConfirm" class="btn btn-primary px-6 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl">Continue</button>
+            <div id="userPickerGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 justify-items-center gap-3 px-1"></div>
+            <div class="flex justify-center gap-2 mt-6">
+                <button id="userPickerProfile" class="btn btn-secondary">Profile Settings</button>
+                <button id="userPickerGuest" class="btn btn-secondary">Log Out</button>
             </div>
+        </div>
+    </div>
+
+    <div id="expiryReminderModal" class="hidden fixed inset-0 bg-black/70 z-[70] items-center justify-center p-4">
+        <div class="glass-lg w-full max-w-lg p-6 rounded-2xl border border-white/20 shadow-2xl">
+            <div class="text-center">
+                <h3 class="text-2xl font-bold text-m3-on-surface mb-2">Expiry Reminder</h3>
+                <p id="expiryReminderTitle" class="text-lg font-semibold text-m3-on-surface"></p>
+                <p id="expiryReminderBody" class="text-sm text-m3-on-surface-variant mt-2"></p>
+            </div>
+            <div class="mt-6 flex justify-center gap-2">
+                <button id="expiryReminderSnooze" type="button" class="btn btn-secondary hidden">Snooze 1 Day</button>
+                <button id="expiryReminderAcknowledge" type="button" class="btn btn-primary">Acknowledge</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="familyNoticeAckModal" class="hidden fixed inset-0 bg-black/70 z-[71] items-center justify-center p-4">
+        <div class="glass-lg w-full max-w-lg p-6 rounded-2xl border border-white/20 shadow-2xl">
+            <div class="text-center">
+                <h3 class="text-2xl font-bold text-m3-on-surface mb-2">Family Notice</h3>
+                <p id="familyNoticeAckTitle" class="text-lg font-semibold text-m3-on-surface"></p>
+                <p id="familyNoticeAckBody" class="text-sm text-m3-on-surface-variant mt-2 whitespace-pre-wrap"></p>
+            </div>
+            <div class="mt-6 flex justify-center gap-2">
+                <button id="familyNoticeAcknowledge" type="button" class="btn btn-primary">Acknowledge</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="pollResponseAlertModal" class="hidden fixed inset-0 bg-black/70 z-[72] items-center justify-center p-4 sm:p-6">
+        <div class="glass-lg w-full max-w-lg p-6 rounded-2xl border border-white/20 shadow-2xl max-h-[calc(100vh-4rem)] overflow-y-auto">
+            <div class="text-center">
+                <h3 class="text-2xl font-bold text-m3-on-surface mb-2">Poll Response</h3>
+                <p id="pollResponseAlertTitle" class="text-lg font-semibold text-m3-on-surface"></p>
+                <p id="pollResponseAlertBody" class="text-sm text-m3-on-surface-variant mt-2 whitespace-pre-wrap"></p>
+            </div>
+            <div class="mt-6 flex justify-center gap-2">
+                <button id="pollResponseAlertClose" type="button" class="btn btn-primary">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="familyPollModal" class="hidden fixed inset-0 bg-black/70 z-[73] items-center justify-center p-4 sm:p-6">
+        <div class="glass-lg w-full max-w-2xl p-6 rounded-2xl border border-white/20 shadow-2xl max-h-[calc(100vh-4rem)] overflow-y-auto">
+            <h3 class="text-2xl font-bold text-m3-on-surface mb-2 text-center">Family Poll</h3>
+            <form id="familyPollResponseForm" class="mt-2 space-y-4">
+                <p id="familyPollQuestion" class="text-base font-semibold text-m3-on-surface text-center"></p>
+                <fieldset class="space-y-2">
+                    <legend class="text-sm font-semibold text-m3-on-surface">Choose one option</legend>
+                    <div id="familyPollOptions" class="space-y-2"></div>
+                </fieldset>
+                <div>
+                    <label for="familyPollFreeText" class="block text-sm font-semibold text-m3-on-surface mb-1">Optional note</label>
+                    <textarea id="familyPollFreeText" rows="2" class="w-full p-2 border rounded dark:bg-gray-800 dark:border-gray-600" placeholder="Optional response note"></textarea>
+                </div>
+                <div class="mt-2 flex justify-center gap-2">
+                    <button id="familyPollLater" type="button" class="btn btn-secondary">Later</button>
+                    <button id="familyPollSubmit" type="submit" class="btn btn-primary">Submit</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="globalIncomingCallModal" class="hidden fixed inset-0 bg-black/70 z-50 items-center justify-center p-4 sm:p-6">
+        <div class="card w-full max-w-5xl p-4 rounded-2xl border border-gray-200/70 dark:border-gray-700/70 max-h-[calc(100vh-4rem)] overflow-y-auto">
+            <div class="flex items-center justify-between gap-2 mb-3">
+                <h3 id="globalCallTitle" class="text-lg font-bold">Incoming Video Call</h3>
+                <button id="globalCallClose" type="button" class="btn btn-secondary text-xs">Close</button>
+            </div>
+            <p id="globalCallStatus" class="text-sm text-gray-600 dark:text-gray-400 mb-3">Waiting for response...</p>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div class="rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 bg-black/80 aspect-video">
+                    <video id="globalLocalVideo" class="w-full h-full object-cover" autoplay muted playsinline></video>
+                </div>
+                <div class="rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 bg-black/80 aspect-video">
+                    <video id="globalRemoteVideo" class="w-full h-full object-cover" autoplay playsinline></video>
+                </div>
+            </div>
+            <div class="mt-4 flex items-center justify-end gap-2 flex-wrap">
+                <button id="globalCallDecline" type="button" class="btn btn-secondary text-xs">Decline</button>
+                <button id="globalCallAccept" type="button" class="btn btn-primary text-xs">Accept</button>
+                <button id="globalCallMute" type="button" class="btn btn-secondary text-xs hidden">Mute</button>
+                <button id="globalCallCamera" type="button" class="btn btn-secondary text-xs hidden">Camera Off</button>
+                <button id="globalCallEnd" type="button" class="btn btn-danger text-xs hidden">End</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="globalMessagePopupModal" class="hidden fixed inset-0 bg-black/70 z-50 items-center justify-center p-4 sm:p-6">
+        <div class="card w-full max-w-lg p-5 rounded-2xl border border-gray-200/70 dark:border-gray-700/70 max-h-[calc(100vh-4rem)] overflow-y-auto">
+            <h3 class="text-lg font-bold mb-1">New Message</h3>
+            <p id="globalMessagePopupFrom" class="text-sm font-semibold text-gray-700 dark:text-gray-200"></p>
+            <p id="globalMessagePopupBody" class="text-sm text-gray-600 dark:text-gray-400 mt-2 whitespace-pre-wrap"></p>
+            <form id="globalMessageReplyForm" class="mt-4 space-y-2">
+                <textarea id="globalMessageReplyInput" rows="3" class="w-full p-2 border rounded dark:bg-gray-800 dark:border-gray-600"></textarea>
+                <div class="flex items-center justify-end gap-2 flex-wrap">
+                    <button id="globalMessageDismiss" type="button" class="btn btn-secondary text-xs">Dismiss</button>
+                    <a href="/messages" class="btn btn-secondary text-xs">Open Messages</a>
+                    <button id="globalMessageReplySend" type="submit" class="btn btn-primary text-xs">Reply</button>
+                </div>
+            </form>
         </div>
     </div>
     
@@ -506,6 +1127,9 @@
                 <button type="button" class="status-btn w-full p-3 rounded-lg border-2 border-gray-300 hover:border-purple-500 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-all text-left font-semibold text-gray-700 dark:text-gray-300 text-sm" data-status="away">
                     <i class="fas fa-person-wandering text-purple-500 mr-2"></i>Away
                 </button>
+                <button type="button" class="status-btn w-full p-3 rounded-lg border-2 border-gray-300 hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-all text-left font-semibold text-gray-700 dark:text-gray-300 text-sm" data-status="Marblehead Vacation Home">
+                    <i class="fas fa-house text-blue-500 mr-2"></i>Marblehead Vacation Home
+                </button>
             </div>
             <div class="mb-3">
                 <label class="block text-xs text-gray-600 dark:text-gray-400 mb-2">Or type a custom status:</label>
@@ -525,6 +1149,11 @@
         <p class="text-gray-600 dark:text-gray-400 mb-6">Set a 4-digit PIN to protect your personal data</p>
         
         <form id="setPinForm" class="space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Email Address</label>
+                <input type="email" id="memberEmailInput" class="w-full p-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:bg-gray-700 dark:text-white" placeholder="you@example.com" required>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Used for notifications sent by the central HomeHub SMTP setup.</p>
+            </div>
             <div>
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Create PIN</label>
                 <input type="password" id="newPinInput" class="w-full p-3 border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:border-blue-500 dark:bg-gray-700 dark:text-white text-center text-4xl font-bold tracking-widest" placeholder="••••" maxlength="4" pattern="[0-9]{4}" required>
@@ -561,6 +1190,7 @@
     const welcomeMessage = document.getElementById('welcomeMessage');
     const newPinInput = document.getElementById('newPinInput');
     const confirmPinInput = document.getElementById('confirmPinInput');
+    const memberEmailInput = document.getElementById('memberEmailInput');
     const setPinError = document.getElementById('setPinError');
     const skipPinSetup = document.getElementById('skipPinSetup');
     const statusSection = document.getElementById('statusSection');
@@ -593,6 +1223,7 @@
     function showSetPinModal(memberName) {
         pendingMember = memberName;
         needsSetupPin = true;
+        memberEmailInput.value = '';
         newPinInput.value = '';
         confirmPinInput.value = '';
         setPinError.classList.add('hidden');
@@ -622,6 +1253,26 @@
     function showWelcomeOverlay(memberName) {
         welcomeMessage.textContent = `Welcome, ${memberName}!`;
         welcomeOverlay.classList.remove('hidden');
+    }
+
+    function startMemberWelcomeFlow(memberName) {
+        if (!memberName) return;
+        localStorage.setItem('username', memberName);
+        const switcher = document.getElementById('userSwitcher');
+        if (switcher) switcher.value = memberName;
+        const avatarEl = document.getElementById('currentMemberAvatar');
+        if (avatarEl) {
+            const familyMembersMeta = window.__homehubUsersMeta || [];
+            const meta = familyMembersMeta.find(m => m.name === memberName);
+            if (meta && meta.avatar) {
+                avatarEl.innerHTML = `<img src="${meta.avatar}" alt="Current member avatar" class="w-full h-full object-cover">`;
+            } else {
+                avatarEl.textContent = (memberName || 'U').slice(0,1).toUpperCase();
+            }
+        }
+        document.dispatchEvent(new CustomEvent('user-switched', { detail: { user: memberName }}));
+        showWelcomeOverlay(memberName);
+        showStatusSelection();
     }
     
     // Show status selection (integrated into welcome overlay)
@@ -671,12 +1322,8 @@
             hidePINModal();
             console.log('PIN verified, showing welcome + status for:', memberToLogin);
             
-            // Update localStorage
-            localStorage.setItem('username', memberToLogin);
-            
             // Show welcome overlay with status selection
-            showWelcomeOverlay(memberToLogin);
-            setTimeout(() => showStatusSelection(), 500);
+            startMemberWelcomeFlow(memberToLogin);
             
         } catch (err) {
             pinError.textContent = 'Error: ' + err.message;
@@ -689,10 +1336,17 @@
         e.preventDefault();
         const newPin = newPinInput.value.trim();
         const confirmPin = confirmPinInput.value.trim();
+        const memberEmail = memberEmailInput.value.trim();
         const memberToSetup = pendingMember; // Capture member name before anything async
         
-        if (!newPin || !confirmPin || !memberToSetup) {
+        if (!newPin || !confirmPin || !memberToSetup || !memberEmail) {
             setPinError.textContent = 'Member name not set - please try again';
+            setPinError.classList.remove('hidden');
+            return;
+        }
+
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(memberEmail)) {
+            setPinError.textContent = 'Please enter a valid email address';
             setPinError.classList.remove('hidden');
             return;
         }
@@ -718,7 +1372,8 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
                     pin: newPin,
-                    member_name: memberToSetup
+                    member_name: memberToSetup,
+                    email: memberEmail
                 })
             });
             
@@ -746,13 +1401,11 @@
             }
             
             // Logged in successfully - use captured member name
-            localStorage.setItem('username', memberToSetup);
             hideSetPinModal();
             console.log('PIN setup complete, showing welcome + status for:', memberToSetup);
             
             // Show welcome overlay with status selection
-            showWelcomeOverlay(memberToSetup);
-            setTimeout(() => showStatusSelection(), 500);
+            startMemberWelcomeFlow(memberToSetup);
             
         } catch (err) {
             setPinError.textContent = 'Error: ' + err.message;
@@ -761,14 +1414,30 @@
     });
     
     pinCancel.addEventListener('click', hidePINModal);
-    skipPinSetup.addEventListener('click', () => {
+    skipPinSetup.addEventListener('click', async () => {
         const memberToSkip = pendingMember; // Capture before anything changes
-        hideSetPinModal();
-        if (memberToSkip) {
-            localStorage.setItem('username', memberToSkip);
-            console.log('Skipping PIN setup, showing welcome + status for:', memberToSkip);
-            showWelcomeOverlay(memberToSkip);
-            setTimeout(() => showStatusSelection(), 500);
+        if (!memberToSkip) return;
+
+        try {
+            const loginResponse = await fetch('/api/member-login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: memberToSkip, pin: '' })
+            });
+            const loginData = await loginResponse.json();
+
+            if (!loginResponse.ok) {
+                setPinError.textContent = loginData.error || 'Unable to continue without PIN';
+                setPinError.classList.remove('hidden');
+                return;
+            }
+
+            hideSetPinModal();
+            console.log('PIN setup skipped, authenticated login + status flow for:', memberToSkip);
+            startMemberWelcomeFlow(memberToSkip);
+        } catch (err) {
+            setPinError.textContent = 'Error: ' + err.message;
+            setPinError.classList.remove('hidden');
         }
     });
     
@@ -798,7 +1467,7 @@
     
     // Confirm status button
     confirmStatusBtn.addEventListener('click', async () => {
-        const memberName = localStorage.getItem('username');
+        const memberName = localStorage.getItem('username') || document.getElementById('userSwitcher')?.value;
         const customStatus = customStatusInput.value.trim();
         const statusToSet = customStatus || selectedStatus || 'home';
         
@@ -834,6 +1503,7 @@
     // Expose for use in member switcher
     window.showMemberPINModal = showPINModal;
     window.showMemberSetPinModal = showSetPinModal;
+    window.startMemberWelcomeFlow = startMemberWelcomeFlow;
 })();
 </script>
 
@@ -862,6 +1532,40 @@
                     </label>
                 </div>
                 <p class="text-sm text-gray-500 mt-2">Click camera to change photo</p>
+                <button type="button" id="clearAvatarBtn" onclick="clearProfileAvatar()" class="btn btn-secondary text-xs">Remove Photo</button>
+            </div>
+
+            <div class="space-y-2">
+                <label class="block text-base font-semibold text-gray-700 dark:text-gray-300">Email</label>
+                <input type="email" id="profileEmail" placeholder="you@example.com"
+                    class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg text-base dark:bg-gray-700 dark:text-white placeholder-gray-400 dark:placeholder-gray-500">
+                <div class="flex items-center justify-between gap-2">
+                    <p class="text-xs text-gray-500 dark:text-gray-400">When changed, a test email is sent automatically to verify SMTP delivery.</p>
+                    <button type="button" id="profileSendTestEmailBtn" onclick="sendProfileTestEmail()" class="btn btn-secondary text-xs px-2 py-1 whitespace-nowrap">Send test email now</button>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div class="space-y-2">
+                    <label class="block text-base font-semibold text-gray-700 dark:text-gray-300">Birthday</label>
+                    <input type="date" id="profileBirthday"
+                        class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg text-base dark:bg-gray-700 dark:text-white">
+                </div>
+                <div class="space-y-2">
+                    <label class="block text-base font-semibold text-gray-700 dark:text-gray-300">Favorite Color</label>
+                    <input type="text" id="profileFavoriteColor" placeholder="Blue"
+                        class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg text-base dark:bg-gray-700 dark:text-white placeholder-gray-400 dark:placeholder-gray-500">
+                </div>
+                <div class="space-y-2">
+                    <label class="block text-base font-semibold text-gray-700 dark:text-gray-300">Favorite Song</label>
+                    <input type="text" id="profileFavoriteSong" placeholder="Song title"
+                        class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg text-base dark:bg-gray-700 dark:text-white placeholder-gray-400 dark:placeholder-gray-500">
+                </div>
+                <div class="space-y-2">
+                    <label class="block text-base font-semibold text-gray-700 dark:text-gray-300">Amazon Wishlist</label>
+                    <input type="url" id="profileWishlistUrl" placeholder="https://www.amazon.com/hz/wishlist/..."
+                        class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg text-base dark:bg-gray-700 dark:text-white placeholder-gray-400 dark:placeholder-gray-500">
+                </div>
             </div>
             
             <!-- Location/Status Section -->
@@ -898,6 +1602,15 @@
                 <i class="fa-solid fa-info-circle mr-2"></i>
                 More settings coming soon
             </div>
+
+            <div class="flex gap-3">
+                <button type="button" id="profileOpenUserPickerBtn" class="flex-1 px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-semibold hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                    Switch User
+                </button>
+                <button type="button" id="profileLogoutBtn" class="flex-1 px-4 py-3 border border-red-300 dark:border-red-700 text-red-600 dark:text-red-300 rounded-lg text-sm font-semibold hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
+                    Log Out
+                </button>
+            </div>
             
             <!-- Action Buttons -->
             <div class="flex gap-4">
@@ -912,11 +1625,58 @@
     </div>
 </div>
 
+<!-- Public Family Member Profile Modal -->
+<div id="publicMemberProfileOverlay" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-5 sm:p-6 md:p-8">
+    <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-2 sm:p-3">
+        <div class="sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-5 pt-6 pb-4 sm:px-6 sm:pt-7 sm:pb-4 flex justify-between items-start gap-3">
+            <h2 class="text-xl sm:text-2xl font-bold leading-tight break-words pr-2" id="publicProfileName">Family Member</h2>
+            <button type="button" onclick="closePublicMemberProfile()" class="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
+                <i class="fa-solid fa-times text-xl"></i>
+            </button>
+        </div>
+        <div class="px-5 pb-6 pt-5 sm:px-6 sm:pb-7 sm:pt-5 space-y-5">
+            <div class="flex flex-wrap items-center gap-4">
+                <div id="publicProfileAvatar" class="w-20 h-20 rounded-full flex items-center justify-center font-bold text-2xl text-white bg-gradient-to-br from-blue-500 to-purple-600 shadow-lg">U</div>
+                <div>
+                    <div class="text-sm text-gray-500 dark:text-gray-400">Current Status</div>
+                    <div id="publicProfileStatus" class="text-base font-semibold text-gray-900 dark:text-white">Home</div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div class="card p-3">
+                    <div class="text-xs text-gray-500 dark:text-gray-400">Birthday</div>
+                    <div id="publicProfileBirthday" class="font-semibold text-gray-900 dark:text-white">Not set</div>
+                </div>
+                <div class="card p-3">
+                    <div class="text-xs text-gray-500 dark:text-gray-400">Favorite Color</div>
+                    <div id="publicProfileFavoriteColor" class="font-semibold text-gray-900 dark:text-white">Not set</div>
+                </div>
+                <div class="card p-3">
+                    <div class="text-xs text-gray-500 dark:text-gray-400">Favorite Song</div>
+                    <div id="publicProfileFavoriteSong" class="font-semibold text-gray-900 dark:text-white">Not set</div>
+                </div>
+                <div class="card p-3">
+                    <div class="text-xs text-gray-500 dark:text-gray-400">Amazon Wishlist</div>
+                    <a id="publicProfileWishlist" href="#" target="_blank" rel="noopener" class="font-semibold text-blue-600 hover:underline hidden">Open Wishlist</a>
+                    <div id="publicProfileWishlistEmpty" class="font-semibold text-gray-900 dark:text-white">Not set</div>
+                </div>
+            </div>
+
+            <div>
+                <div class="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-2">Recent Actions</div>
+                <div id="publicProfileActions" class="space-y-2"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 let currentProfileData = {
     memberId: null,
     memberName: null,
     avatar: null,
+    email: null,
     status: 'home'
 };
 
@@ -932,11 +1692,17 @@ function openMemberProfile(memberId, memberName, status, hasAvatar) {
                     memberId: data.id,
                     memberName: data.name,
                     avatar: data.avatar,
+                    email: data.email || '',
                     status: data.status || 'home'
                 };
                 
                 // Update overlay
                 document.getElementById('profileMemberName').textContent = data.name;
+                document.getElementById('profileEmail').value = data.email || '';
+                document.getElementById('profileBirthday').value = data.birthday || '';
+                document.getElementById('profileFavoriteColor').value = data.favorite_color || '';
+                document.getElementById('profileFavoriteSong').value = data.favorite_song || '';
+                document.getElementById('profileWishlistUrl').value = data.amazon_wishlist_url || '';
                 document.getElementById('profileCustomStatus').value = '';
                 selectedProfileStatus = null;
                 
@@ -986,8 +1752,17 @@ function openMemberProfile(memberId, memberName, status, hasAvatar) {
 
 function closeMemberProfile() {
     document.getElementById('memberProfileOverlay').classList.add('hidden');
-    currentProfileData = { memberId: null, memberName: null, avatar: null, status: 'home' };
+    currentProfileData = { memberId: null, memberName: null, avatar: null, email: null, status: 'home' };
     selectedProfileStatus = null;
+}
+
+function clearProfileAvatar() {
+    currentProfileData.avatar = null;
+    const avatarEl = document.getElementById('profileAvatar');
+    if (!avatarEl) return;
+    avatarEl.style.backgroundImage = 'none';
+    avatarEl.style.background = 'linear-gradient(135deg, var(--primary-color), #667eea)';
+    avatarEl.textContent = (currentProfileData.memberName || 'U').charAt(0).toUpperCase();
 }
 
 function clearProfileStatusSelection() {
@@ -1027,7 +1802,8 @@ function handleAvatarUpload(event) {
     
     // Check file size (max 500KB)
     if (file.size > 500000) {
-        alert('Image too large. Maximum size is 500KB.');
+        if (window.uiAlert) window.uiAlert('Image too large. Maximum size is 500KB.', { title: 'Invalid Image' });
+        else alert('Image too large. Maximum size is 500KB.');
         return;
     }
     
@@ -1050,7 +1826,18 @@ async function saveMemberProfile() {
     if (!currentProfileData.memberId) return;
     
     const customStatus = document.getElementById('profileCustomStatus').value.trim();
+    const emailToSave = (document.getElementById('profileEmail')?.value || '').trim();
+    const birthdayToSave = (document.getElementById('profileBirthday')?.value || '').trim();
+    const favoriteColorToSave = (document.getElementById('profileFavoriteColor')?.value || '').trim();
+    const favoriteSongToSave = (document.getElementById('profileFavoriteSong')?.value || '').trim();
+    const wishlistUrlToSave = (document.getElementById('profileWishlistUrl')?.value || '').trim();
     const statusToSave = customStatus || selectedProfileStatus || currentProfileData.status;
+
+    if (emailToSave && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailToSave)) {
+        if (window.uiAlert) window.uiAlert('Please enter a valid email address', { title: 'Invalid Email' });
+        else alert('Please enter a valid email address');
+        return;
+    }
     
     try {
         const response = await fetch(`/api/member/${currentProfileData.memberId}/profile`, {
@@ -1058,6 +1845,11 @@ async function saveMemberProfile() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 avatar: currentProfileData.avatar,
+                email: emailToSave,
+                birthday: birthdayToSave,
+                favorite_color: favoriteColorToSave,
+                favorite_song: favoriteSongToSave,
+                amazon_wishlist_url: wishlistUrlToSave,
                 status: statusToSave
             })
         });
@@ -1069,11 +1861,58 @@ async function saveMemberProfile() {
             // Reload to show updated avatar and status
             setTimeout(() => location.reload(), 500);
         } else {
-            alert('Error: ' + (data.error || 'Failed to save profile'));
+            if (window.uiAlert) window.uiAlert('Error: ' + (data.error || 'Failed to save profile'), { title: 'Profile Save Failed' });
+            else alert('Error: ' + (data.error || 'Failed to save profile'));
         }
     } catch (err) {
         console.error('Error saving profile:', err);
-        alert('Error saving profile. Please try again.');
+        if (window.uiAlert) window.uiAlert('Error saving profile. Please try again.', { title: 'Profile Save Failed' });
+        else alert('Error saving profile. Please try again.');
+    }
+}
+
+async function sendProfileTestEmail() {
+    if (!currentProfileData.memberId) return;
+    const emailValue = (document.getElementById('profileEmail')?.value || '').trim();
+    if (!emailValue) {
+        if (window.uiAlert) window.uiAlert('Set an email first, then try test email.', { title: 'Email Required' });
+        else alert('Set an email first, then try test email.');
+        return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailValue)) {
+        if (window.uiAlert) window.uiAlert('Please enter a valid email address first.', { title: 'Invalid Email' });
+        else alert('Please enter a valid email address first.');
+        return;
+    }
+
+    const btn = document.getElementById('profileSendTestEmailBtn');
+    const original = btn ? btn.textContent : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Sending...';
+    }
+    try {
+        const response = await fetch(`/api/member/${currentProfileData.memberId}/profile/test-email`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+        });
+        const data = await response.json();
+        if (data.ok) {
+            if (window.globalToast) globalToast('Test email sent', 'success');
+            else if (window.uiAlert) uiAlert('Test email sent.', { title: 'Success' });
+            else alert('Test email sent.');
+        } else {
+            if (window.uiAlert) window.uiAlert('Error: ' + (data.error || 'Failed to send test email'), { title: 'Test Email Failed' });
+            else alert('Error: ' + (data.error || 'Failed to send test email'));
+        }
+    } catch (err) {
+        if (window.uiAlert) window.uiAlert('Error sending test email. Please try again.', { title: 'Test Email Failed' });
+        else alert('Error sending test email. Please try again.');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = original || 'Send test email now';
+        }
     }
 }
 
@@ -1092,17 +1931,1099 @@ document.querySelectorAll('.member-avatar-card').forEach(card => {
     card.addEventListener('click', function() {
         const memberId = this.dataset.memberId;
         const memberName = this.dataset.memberName;
-        openMemberProfile(memberId, memberName);
+        if (typeof window.openPublicMemberProfile === 'function') {
+            window.openPublicMemberProfile(memberId, memberName);
+        }
     });
+});
+
+document.getElementById('profileOpenUserPickerBtn')?.addEventListener('click', function() {
+    closeMemberProfile();
+    if (typeof window.openUserPickerModal === 'function') {
+        window.openUserPickerModal({ requireSelection: false });
+    }
+});
+
+document.getElementById('profileLogoutBtn')?.addEventListener('click', async function() {
+    closeMemberProfile();
+    if (typeof window.performMemberLogout === 'function') {
+        await window.performMemberLogout();
+    }
+});
+
+function closePublicMemberProfile() {
+    document.getElementById('publicMemberProfileOverlay')?.classList.add('hidden');
+}
+
+async function openPublicMemberProfile(memberId, fallbackName) {
+    if (!memberId) return;
+    try {
+        const response = await fetch(`/api/member/${memberId}/public-profile`);
+        const data = await response.json();
+        if (!response.ok || !data.ok) {
+            if (window.globalToast) globalToast(data.error || 'Unable to load member profile', 'error');
+            return;
+        }
+
+        document.getElementById('publicProfileName').textContent = data.name || fallbackName || 'Family Member';
+        document.getElementById('publicProfileStatus').textContent = (data.status || 'home').replaceAll('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
+        document.getElementById('publicProfileBirthday').textContent = data.birthday || 'Not set';
+        document.getElementById('publicProfileFavoriteColor').textContent = data.favorite_color || 'Not set';
+        document.getElementById('publicProfileFavoriteSong').textContent = data.favorite_song || 'Not set';
+
+        const wishlist = document.getElementById('publicProfileWishlist');
+        const wishlistEmpty = document.getElementById('publicProfileWishlistEmpty');
+        if (data.amazon_wishlist_url) {
+            wishlist.href = data.amazon_wishlist_url;
+            wishlist.classList.remove('hidden');
+            wishlistEmpty.classList.add('hidden');
+        } else {
+            wishlist.classList.add('hidden');
+            wishlistEmpty.classList.remove('hidden');
+        }
+
+        const avatarEl = document.getElementById('publicProfileAvatar');
+        if (data.avatar) {
+            avatarEl.style.backgroundImage = `url('${data.avatar}')`;
+            avatarEl.style.backgroundSize = 'cover';
+            avatarEl.style.backgroundPosition = 'center';
+            avatarEl.textContent = '';
+        } else {
+            avatarEl.style.backgroundImage = 'none';
+            avatarEl.style.background = 'linear-gradient(135deg, var(--primary-color), #667eea)';
+            avatarEl.textContent = (data.name || fallbackName || 'U').charAt(0).toUpperCase();
+        }
+
+        const actionsHost = document.getElementById('publicProfileActions');
+        actionsHost.innerHTML = '';
+        const actions = Array.isArray(data.recent_actions) ? data.recent_actions : [];
+        if (!actions.length) {
+            const empty = document.createElement('div');
+            empty.className = 'text-sm text-gray-500 dark:text-gray-400';
+            empty.textContent = 'No recent actions yet.';
+            actionsHost.appendChild(empty);
+        } else {
+            actions.forEach(entry => {
+                const row = document.createElement('div');
+                row.className = 'card p-3';
+                let when = '';
+                try {
+                    when = entry.timestamp ? new Date(entry.timestamp).toLocaleString() : '';
+                } catch (_) { when = ''; }
+                const summary = document.createElement('div');
+                summary.className = 'text-sm text-gray-800 dark:text-gray-100';
+                summary.textContent = (entry.summary || 'Activity').toString();
+                const time = document.createElement('div');
+                time.className = 'text-xs text-gray-500 dark:text-gray-400 mt-1';
+                time.textContent = when;
+                row.appendChild(summary);
+                row.appendChild(time);
+                actionsHost.appendChild(row);
+            });
+        }
+
+        document.getElementById('publicMemberProfileOverlay').classList.remove('hidden');
+    } catch (err) {
+        if (window.globalToast) globalToast('Unable to load member profile', 'error');
+    }
+}
+
+window.openPublicMemberProfile = openPublicMemberProfile;
+
+document.getElementById('publicMemberProfileOverlay')?.addEventListener('click', function(e) {
+    if (e.target === this) closePublicMemberProfile();
 });
 </script>
 
+<script>
+(function() {
+    if (window.__homehubKeyboardNavInitialized) return;
+    window.__homehubKeyboardNavInitialized = true;
+
+    const FOCUSABLE_SELECTOR = [
+        'a[href]',
+        'button:not([disabled])',
+        'input:not([disabled]):not([type="hidden"])',
+        'select:not([disabled])',
+        'textarea:not([disabled])',
+        '[tabindex]:not([tabindex="-1"])',
+        '[role="button"]'
+    ].join(',');
+
+    function isVisible(el) {
+        if (!el) return false;
+        const style = window.getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden') return false;
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+    }
+
+    function isTypingContext(el) {
+        if (!el) return false;
+        if (el.isContentEditable) return true;
+        const tag = (el.tagName || '').toLowerCase();
+        return tag === 'input' || tag === 'textarea' || tag === 'select';
+    }
+
+    function activeScope() {
+        const modals = Array.from(document.querySelectorAll('.fixed.inset-0:not(.hidden)')).filter(isVisible);
+        for (let i = modals.length - 1; i >= 0; i--) {
+            const modal = modals[i];
+            if (modal.querySelector(FOCUSABLE_SELECTOR)) return modal;
+        }
+        return document;
+    }
+
+    function focusables(scope) {
+        return Array.from(scope.querySelectorAll(FOCUSABLE_SELECTOR))
+            .filter(el => isVisible(el) && !el.hasAttribute('disabled') && el.getAttribute('aria-hidden') !== 'true');
+    }
+
+    function moveFocus(direction) {
+        const scope = activeScope();
+        const items = focusables(scope);
+        if (!items.length) return false;
+
+        const current = document.activeElement;
+        let index = items.indexOf(current);
+        if (index < 0) {
+            items[0].focus();
+            return true;
+        }
+
+        index = (index + direction + items.length) % items.length;
+        items[index].focus();
+        return true;
+    }
+
+    function activateFocused() {
+        const el = document.activeElement;
+        if (!el || el === document.body || isTypingContext(el)) return false;
+        const tag = (el.tagName || '').toLowerCase();
+        if (tag === 'button' || tag === 'a' || el.getAttribute('role') === 'button') {
+            el.click();
+            return true;
+        }
+        return false;
+    }
+
+    function closeTopOverlay() {
+        const scope = activeScope();
+        if (scope === document) return false;
+
+        const closeBtn = scope.querySelector('#userPickerClose, #pinCancel, #closeMealModal, [data-dismiss], [aria-label="Close"], [aria-label="close"], button[id*="close" i], button[id*="cancel" i]');
+        if (closeBtn && isVisible(closeBtn)) {
+            closeBtn.click();
+            return true;
+        }
+
+        if (typeof scope.click === 'function') {
+            scope.click();
+            return true;
+        }
+        return false;
+    }
+
+    document.addEventListener('keydown', function(event) {
+        if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+
+        const key = event.key;
+        const target = event.target;
+
+        if ((key === 'ArrowLeft' || key === 'ArrowUp' || key === 'ArrowRight' || key === 'ArrowDown') && !isTypingContext(target)) {
+            const direction = (key === 'ArrowLeft' || key === 'ArrowUp') ? -1 : 1;
+            if (moveFocus(direction)) {
+                event.preventDefault();
+            }
+            return;
+        }
+
+        if (key === 'Enter' && !isTypingContext(target)) {
+            if (activateFocused()) {
+                event.preventDefault();
+            }
+            return;
+        }
+
+        if (key === 'Escape') {
+            if (closeTopOverlay()) {
+                event.preventDefault();
+            }
+        }
+    }, true);
+})();
+</script>
+
+<script>
+(function(){
+    const modal = document.getElementById('expiryReminderModal');
+    const titleEl = document.getElementById('expiryReminderTitle');
+    const bodyEl = document.getElementById('expiryReminderBody');
+    const snoozeBtn = document.getElementById('expiryReminderSnooze');
+    const ackBtn = document.getElementById('expiryReminderAcknowledge');
+    let queue = [];
+
+    function currentMember(){
+        return String(localStorage.getItem('username') || '').trim();
+    }
+
+    function setModalVisible(show){
+        if (!modal) return;
+        modal.classList.toggle('hidden', !show);
+        modal.classList.toggle('flex', show);
+        if (show && ackBtn) {
+            setTimeout(() => ackBtn.focus(), 10);
+        }
+    }
+
+    function renderCurrent(){
+        if (!queue.length) {
+            setModalVisible(false);
+            return;
+        }
+        const item = queue[0];
+        const daysLeft = Number(item.days_left);
+        const status = Number.isFinite(daysLeft)
+            ? (daysLeft < 0 ? `expired ${Math.abs(daysLeft)} day${Math.abs(daysLeft) === 1 ? '' : 's'} ago` : (daysLeft === 0 ? 'expires today' : `expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'}`))
+            : 'has an upcoming expiry';
+        if (titleEl) titleEl.textContent = item.name || 'Expiry item';
+        if (bodyEl) bodyEl.textContent = `${status}. Expiry date: ${item.expiry_date || 'N/A'}.`;
+        if (snoozeBtn) {
+            const canSnooze = !!item.can_snooze || (Number.isFinite(daysLeft) && daysLeft < 0);
+            snoozeBtn.classList.toggle('hidden', !canSnooze);
+        }
+        setModalVisible(true);
+    }
+
+    async function fetchPending(){
+        const member = currentMember();
+        if (!member) {
+            queue = [];
+            renderCurrent();
+            return;
+        }
+        try {
+            const res = await fetch(`/api/expiry/reminders/pending?member=${encodeURIComponent(member)}`);
+            const data = await res.json();
+            if (!res.ok || !data.ok) return;
+            queue = Array.isArray(data.items) ? data.items : [];
+            renderCurrent();
+        } catch (_){ }
+    }
+
+    ackBtn?.addEventListener('click', async () => {
+        const current = queue[0];
+        if (!current) return;
+        const member = currentMember();
+        if (!member) {
+            queue.shift();
+            renderCurrent();
+            return;
+        }
+        try {
+            const res = await fetch(`/api/expiry/reminders/${current.id}/ack`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ member })
+            });
+            const data = await res.json();
+            if (!res.ok || !data.ok) return;
+            queue.shift();
+            renderCurrent();
+        } catch (_){ }
+    });
+
+    snoozeBtn?.addEventListener('click', async () => {
+        const current = queue[0];
+        if (!current) return;
+        const member = currentMember();
+        if (!member) return;
+        try {
+            const res = await fetch(`/api/expiry/reminders/${current.id}/snooze`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ member, days: 1 })
+            });
+            const data = await res.json();
+            if (!res.ok || !data.ok) return;
+            queue.shift();
+            renderCurrent();
+        } catch (_){ }
+    });
+
+    document.addEventListener('DOMContentLoaded', () => {
+        setTimeout(fetchPending, 300);
+    });
+
+    document.addEventListener('user-switched', () => {
+        setTimeout(fetchPending, 150);
+    });
+})();
+</script>
+
+<script>
+(function(){
+    const modal = document.getElementById('familyNoticeAckModal');
+    const titleEl = document.getElementById('familyNoticeAckTitle');
+    const bodyEl = document.getElementById('familyNoticeAckBody');
+    const ackBtn = document.getElementById('familyNoticeAcknowledge');
+    let queue = [];
+
+    function currentMember(){
+        return String(localStorage.getItem('username') || '').trim();
+    }
+
+    function setModalVisible(show){
+        if (!modal) return;
+        modal.classList.toggle('hidden', !show);
+        modal.classList.toggle('flex', show);
+        if (show && ackBtn) {
+            setTimeout(() => ackBtn.focus(), 10);
+        }
+    }
+
+    function renderCurrent(){
+        if (!queue.length) {
+            setModalVisible(false);
+            return;
+        }
+        const item = queue[0];
+        if (titleEl) titleEl.textContent = item.title || 'Family Notice';
+        if (bodyEl) {
+            const sender = item.sender ? `From ${item.sender}` : 'Family update';
+            bodyEl.textContent = `${sender}\n\n${item.message || ''}`;
+        }
+        setModalVisible(true);
+    }
+
+    async function fetchPending(){
+        const member = currentMember();
+        if (!member) {
+            queue = [];
+            renderCurrent();
+            return;
+        }
+        try {
+            const res = await fetch(`/api/family-notices/pending?member=${encodeURIComponent(member)}`);
+            const data = await res.json();
+            if (!res.ok || !data.ok) return;
+            queue = Array.isArray(data.items) ? data.items : [];
+            renderCurrent();
+        } catch (_){ }
+    }
+
+    ackBtn?.addEventListener('click', async () => {
+        const current = queue[0];
+        if (!current) return;
+        const member = currentMember();
+        if (!member) {
+            queue.shift();
+            renderCurrent();
+            return;
+        }
+        try {
+            const res = await fetch(`/api/family-notices/${current.id}/ack`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ member })
+            });
+            const data = await res.json();
+            if (!res.ok || !data.ok) return;
+            queue.shift();
+            renderCurrent();
+        } catch (_){ }
+    });
+
+    document.addEventListener('DOMContentLoaded', () => {
+        setTimeout(fetchPending, 420);
+    });
+
+    document.addEventListener('user-switched', () => {
+        setTimeout(fetchPending, 180);
+    });
+})();
+</script>
+
+<script>
+(function(){
+    const messagesBadge = document.getElementById('navMessagesUnread');
+    const notificationsBadge = document.getElementById('navNotificationsUnread');
+
+    const pollModal = document.getElementById('familyPollModal');
+    const pollQuestionEl = document.getElementById('familyPollQuestion');
+    const pollOptionsEl = document.getElementById('familyPollOptions');
+    const pollFreeTextEl = document.getElementById('familyPollFreeText');
+    const pollForm = document.getElementById('familyPollResponseForm');
+    const pollLaterBtn = document.getElementById('familyPollLater');
+
+    const alertModal = document.getElementById('pollResponseAlertModal');
+    const alertTitleEl = document.getElementById('pollResponseAlertTitle');
+    const alertBodyEl = document.getElementById('pollResponseAlertBody');
+    const alertCloseBtn = document.getElementById('pollResponseAlertClose');
+
+    let pollQueue = [];
+    let responseAlertQueue = [];
+
+    function currentMember(){
+        return String(localStorage.getItem('username') || '').trim();
+    }
+
+    function toggleBadge(el, count){
+        if (!el) return;
+        const n = Number(count || 0);
+        if (n > 0) {
+            el.textContent = String(n > 99 ? '99+' : n);
+            el.classList.remove('hidden');
+        } else {
+            el.classList.add('hidden');
+            el.textContent = '';
+        }
+    }
+
+    async function refreshHeaderCounts(){
+        const member = currentMember();
+        if (!member) {
+            toggleBadge(messagesBadge, 0);
+            toggleBadge(notificationsBadge, 0);
+            return;
+        }
+        try {
+            const [msgRes, notifRes, pollRes] = await Promise.all([
+                fetch(`/api/messages/unread-count?member=${encodeURIComponent(member)}`),
+                fetch(`/api/notifications?member=${encodeURIComponent(member)}&unread_only=true`),
+                fetch(`/api/polls/pending-count?member=${encodeURIComponent(member)}`),
+            ]);
+            const msgData = await msgRes.json();
+            const notifData = await notifRes.json();
+            const pollData = await pollRes.json();
+            const unreadMessages = Number(msgData.count || 0);
+            const unreadNotifications = Array.isArray(notifData.items) ? notifData.items.length : 0;
+            const pendingPolls = Number(pollData.count || 0);
+            toggleBadge(messagesBadge, unreadMessages);
+            toggleBadge(notificationsBadge, unreadNotifications + pendingPolls);
+        } catch (_) {}
+    }
+
+    function setPollModalVisible(show){
+        if (!pollModal) return;
+        pollModal.classList.toggle('hidden', !show);
+        pollModal.classList.toggle('flex', show);
+    }
+
+    function setAlertModalVisible(show){
+        if (!alertModal) return;
+        alertModal.classList.toggle('hidden', !show);
+        alertModal.classList.toggle('flex', show);
+    }
+
+    function selectedPollOption(){
+        const selected = pollOptionsEl?.querySelector('input[name="familyPollOption"]:checked');
+        return selected ? String(selected.value || '').trim() : '';
+    }
+
+    function escHtml(value){
+        return String(value || '').replace(/[&<>"']/g, (m) => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        }[m]));
+    }
+
+    function renderCurrentPoll(){
+        const current = pollQueue[0];
+        if (!current) {
+            setPollModalVisible(false);
+            return;
+        }
+        if (pollQuestionEl) pollQuestionEl.textContent = current.question || 'Family poll';
+        if (pollFreeTextEl) pollFreeTextEl.value = '';
+        if (pollOptionsEl) {
+            const options = Array.isArray(current.options) ? current.options : [];
+            pollOptionsEl.innerHTML = options.map((option, idx) => `
+                <label class="flex items-center gap-2 p-2 rounded-lg border border-gray-200 dark:border-gray-700">
+                    <input type="radio" name="familyPollOption" value="${escHtml(option)}" ${idx === 0 ? 'checked' : ''}>
+                    <span class="text-sm">${escHtml(option)}</span>
+                </label>
+            `).join('');
+        }
+        setPollModalVisible(true);
+    }
+
+    function renderCurrentResponseAlert(){
+        const current = responseAlertQueue[0];
+        if (!current) {
+            setAlertModalVisible(false);
+            return;
+        }
+        if (alertTitleEl) alertTitleEl.textContent = current.title || 'Poll response';
+        if (alertBodyEl) alertBodyEl.textContent = current.message || '';
+        setAlertModalVisible(true);
+    }
+
+    async function fetchPendingPolls(){
+        const member = currentMember();
+        if (!member) {
+            pollQueue = [];
+            renderCurrentPoll();
+            return;
+        }
+        try {
+            const res = await fetch(`/api/polls/pending?member=${encodeURIComponent(member)}`);
+            const data = await res.json();
+            if (!res.ok || !data.ok) return;
+            pollQueue = Array.isArray(data.items) ? data.items : [];
+            renderCurrentPoll();
+        } catch (_) {}
+    }
+
+    async function fetchPollResponseAlerts(){
+        const member = currentMember();
+        if (!member) {
+            responseAlertQueue = [];
+            renderCurrentResponseAlert();
+            return;
+        }
+        try {
+            const res = await fetch(`/api/polls/response-alerts?member=${encodeURIComponent(member)}`);
+            const data = await res.json();
+            if (!res.ok || !data.ok) return;
+            responseAlertQueue = Array.isArray(data.items) ? data.items : [];
+            renderCurrentResponseAlert();
+        } catch (_) {}
+    }
+
+    pollLaterBtn?.addEventListener('click', () => {
+        setPollModalVisible(false);
+    });
+
+    pollForm?.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const current = pollQueue[0];
+        if (!current) return;
+        const member = currentMember();
+        if (!member) return;
+        const selected = selectedPollOption();
+        const responseText = (pollFreeTextEl?.value || '').trim();
+        if (!selected && !responseText) return;
+        try {
+            const res = await fetch(`/api/polls/${current.id}/vote`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ member, selected_option: selected, response_text: responseText })
+            });
+            const data = await res.json();
+            if (!res.ok || !data.ok) return;
+            pollQueue.shift();
+            renderCurrentPoll();
+            refreshHeaderCounts();
+        } catch (_) {}
+    });
+
+    alertCloseBtn?.addEventListener('click', async () => {
+        const current = responseAlertQueue[0];
+        if (!current) return;
+        const member = currentMember();
+        try {
+            await fetch(`/api/notifications/${current.id}/read`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ member })
+            });
+        } catch (_) {}
+        responseAlertQueue.shift();
+        renderCurrentResponseAlert();
+        refreshHeaderCounts();
+    });
+
+    document.addEventListener('DOMContentLoaded', () => {
+        setTimeout(() => {
+            refreshHeaderCounts();
+            fetchPendingPolls();
+            fetchPollResponseAlerts();
+        }, 460);
+    });
+
+    document.addEventListener('user-switched', () => {
+        setTimeout(() => {
+            refreshHeaderCounts();
+            fetchPendingPolls();
+            fetchPollResponseAlerts();
+        }, 220);
+    });
+})();
+</script>
+
+<script>
+(function(){
+    const callModal = document.getElementById('globalIncomingCallModal');
+    const callTitle = document.getElementById('globalCallTitle');
+    const callStatus = document.getElementById('globalCallStatus');
+    const callClose = document.getElementById('globalCallClose');
+    const callAccept = document.getElementById('globalCallAccept');
+    const callDecline = document.getElementById('globalCallDecline');
+    const callMute = document.getElementById('globalCallMute');
+    const callCamera = document.getElementById('globalCallCamera');
+    const callEnd = document.getElementById('globalCallEnd');
+    const localVideo = document.getElementById('globalLocalVideo');
+    const remoteVideo = document.getElementById('globalRemoteVideo');
+
+    const msgModal = document.getElementById('globalMessagePopupModal');
+    const msgFrom = document.getElementById('globalMessagePopupFrom');
+    const msgBody = document.getElementById('globalMessagePopupBody');
+    const msgDismiss = document.getElementById('globalMessageDismiss');
+    const msgReplyForm = document.getElementById('globalMessageReplyForm');
+    const msgReplyInput = document.getElementById('globalMessageReplyInput');
+
+    const rtcIceServers = {{ (webrtc_ice_servers or [])|tojson }};
+    const seenMessageKeys = new Set();
+    const ignoredCallSessions = new Set();
+
+    let selectedIncomingOffer = null;
+    let lastCallSignalId = 0;
+    let callPollTimer = null;
+    let messagePollTimer = null;
+    let busyMsgPoll = false;
+
+    const callState = {
+        sessionId: '',
+        peer: '',
+        pc: null,
+        localStream: null,
+        remoteStream: null,
+    };
+
+    function currentMember(){
+        return String(localStorage.getItem('username') || '').trim();
+    }
+
+    function callSignalCursorKey(member){
+        return `homehub:lastCallSignalId:${member || 'anonymous'}`;
+    }
+
+    function loadLastCallSignalId(){
+        const member = currentMember();
+        if (!member) {
+            lastCallSignalId = 0;
+            return;
+        }
+        const raw = localStorage.getItem(callSignalCursorKey(member));
+        const parsed = Number(raw || 0);
+        lastCallSignalId = Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+    }
+
+    function persistLastCallSignalId(){
+        const member = currentMember();
+        if (!member) return;
+        localStorage.setItem(callSignalCursorKey(member), String(lastCallSignalId || 0));
+    }
+
+    function toast(msg, type='info'){ if(window.globalToast) globalToast(msg, type); }
+
+    function setCallModalVisible(show){
+        if (!callModal) return;
+        callModal.classList.toggle('hidden', !show);
+        callModal.classList.toggle('flex', show);
+    }
+
+    function setMsgModalVisible(show){
+        if (!msgModal) return;
+        msgModal.classList.toggle('hidden', !show);
+        msgModal.classList.toggle('flex', show);
+    }
+
+    function setCallStatus(text){
+        if (callStatus) callStatus.textContent = text;
+    }
+
+    function setInCallControls(inCall){
+        callAccept?.classList.toggle('hidden', inCall);
+        callDecline?.classList.toggle('hidden', inCall);
+        callMute?.classList.toggle('hidden', !inCall);
+        callCamera?.classList.toggle('hidden', !inCall);
+        callEnd?.classList.toggle('hidden', !inCall);
+    }
+
+    async function sendCallSignal(signalType, payload = {}){
+        if (!callState.sessionId || !callState.peer) return;
+        await fetch('/api/calls/signal', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_id: callState.sessionId,
+                sender: currentMember(),
+                recipient: callState.peer,
+                signal_type: signalType,
+                payload,
+            })
+        });
+    }
+
+    async function ensureLocalMedia(){
+        if (callState.localStream) return callState.localStream;
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        callState.localStream = stream;
+        if (localVideo) localVideo.srcObject = stream;
+        return stream;
+    }
+
+    function resetCallState(){
+        if (callState.pc) { try { callState.pc.close(); } catch (_) {} }
+        callState.pc = null;
+
+        if (callState.localStream) callState.localStream.getTracks().forEach(track => track.stop());
+        if (callState.remoteStream) callState.remoteStream.getTracks().forEach(track => track.stop());
+
+        callState.localStream = null;
+        callState.remoteStream = null;
+        callState.sessionId = '';
+        callState.peer = '';
+        selectedIncomingOffer = null;
+
+        if (localVideo) localVideo.srcObject = null;
+        if (remoteVideo) remoteVideo.srcObject = null;
+        callMute.textContent = 'Mute';
+        callCamera.textContent = 'Camera Off';
+        setCallStatus('Waiting for response...');
+        setInCallControls(false);
+    }
+
+    async function buildPeerConnection(){
+        const pc = new RTCPeerConnection({ iceServers: rtcIceServers });
+        callState.pc = pc;
+        callState.remoteStream = new MediaStream();
+        if (remoteVideo) remoteVideo.srcObject = callState.remoteStream;
+
+        const stream = await ensureLocalMedia();
+        stream.getTracks().forEach(track => pc.addTrack(track, stream));
+
+        pc.ontrack = (event) => {
+            event.streams[0].getTracks().forEach(track => callState.remoteStream.addTrack(track));
+        };
+
+        pc.onicecandidate = async (event) => {
+            if (!event.candidate) return;
+            await sendCallSignal('ice', { candidate: event.candidate });
+        };
+
+        pc.onconnectionstatechange = () => {
+            const state = pc.connectionState;
+            if (state === 'connected') {
+                setCallStatus(`Connected to ${callState.peer}`);
+                setInCallControls(true);
+            }
+            if (state === 'disconnected' || state === 'failed' || state === 'closed') {
+                setCallStatus('Call ended');
+            }
+        };
+        return pc;
+    }
+
+    async function acceptOffer(offerSignal){
+        const payload = offerSignal.payload || {};
+        callState.sessionId = offerSignal.session_id;
+        callState.peer = offerSignal.sender;
+        callTitle.textContent = `Video call with ${offerSignal.sender}`;
+        setCallStatus('Connecting...');
+        setCallModalVisible(true);
+
+        const pc = await buildPeerConnection();
+        await pc.setRemoteDescription(new RTCSessionDescription({ type: payload.type || 'offer', sdp: payload.sdp || '' }));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        await sendCallSignal('answer', { sdp: answer.sdp, type: answer.type });
+    }
+
+    async function startOutgoingCall(callee){
+        const caller = currentMember();
+        if (!caller || !callee) return;
+        if (callState.sessionId) {
+            toast('A call is already active', 'info');
+            return;
+        }
+        const startRes = await fetch('/api/calls/session/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ caller, callee })
+        });
+        const startData = await startRes.json();
+        if (!startRes.ok || !startData.ok) throw new Error(startData.error || 'Failed to start call');
+
+        callState.sessionId = String(startData.session_id || '');
+        callState.peer = callee;
+        callTitle.textContent = `Video call with ${callee}`;
+        setCallStatus('Calling...');
+        setCallModalVisible(true);
+
+        const pc = await buildPeerConnection();
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        await sendCallSignal('offer', { sdp: offer.sdp, type: offer.type });
+    }
+
+    async function handleCallSignal(signal){
+        const type = String(signal.signal_type || '').toLowerCase();
+        const sessionId = String(signal.session_id || '').trim();
+        if (!sessionId) return;
+
+        if (ignoredCallSessions.has(sessionId) && (type === 'offer' || type === 'ice')) {
+            return;
+        }
+
+        if (type === 'offer') {
+            if (selectedIncomingOffer && String(selectedIncomingOffer.session_id || '') === sessionId) {
+                return;
+            }
+            if (callState.sessionId && callState.sessionId !== signal.session_id) {
+                const originalSession = callState.sessionId;
+                const originalPeer = callState.peer;
+                callState.sessionId = signal.session_id;
+                callState.peer = signal.sender;
+                await sendCallSignal('reject', { reason: 'busy' });
+                ignoredCallSessions.add(sessionId);
+                callState.sessionId = originalSession;
+                callState.peer = originalPeer;
+                return;
+            }
+            selectedIncomingOffer = signal;
+            callTitle.textContent = `Incoming video call from ${signal.sender}`;
+            setCallStatus('Incoming call...');
+            setInCallControls(false);
+            setCallModalVisible(true);
+            return;
+        }
+
+        if (!callState.sessionId || signal.session_id !== callState.sessionId) return;
+
+        if (type === 'answer') {
+            if (!callState.pc) return;
+            const payload = signal.payload || {};
+            await callState.pc.setRemoteDescription(new RTCSessionDescription({ type: payload.type || 'answer', sdp: payload.sdp || '' }));
+            setCallStatus(`Connected to ${callState.peer}`);
+            setInCallControls(true);
+            return;
+        }
+        if (type === 'ice') {
+            const payload = signal.payload || {};
+            if (callState.pc && payload.candidate) {
+                try { await callState.pc.addIceCandidate(new RTCIceCandidate(payload.candidate)); } catch (_) {}
+            }
+            return;
+        }
+        if (type === 'reject') {
+            ignoredCallSessions.add(sessionId);
+            toast(`${signal.sender} declined the call`, 'info');
+            resetCallState();
+            setCallModalVisible(false);
+            return;
+        }
+        if (type === 'end') {
+            ignoredCallSessions.add(sessionId);
+            toast('Call ended', 'info');
+            resetCallState();
+            setCallModalVisible(false);
+        }
+    }
+
+    async function pollCalls(){
+        const member = currentMember();
+        if (!member) return;
+        try {
+            const res = await fetch(`/api/calls/signals?member=${encodeURIComponent(member)}&after_id=${lastCallSignalId}`);
+            const data = await res.json();
+            if (!res.ok || !data.ok) return;
+            const rows = Array.isArray(data.items) ? data.items : [];
+            for (const row of rows) {
+                lastCallSignalId = Math.max(lastCallSignalId, Number(row.id || 0));
+                await handleCallSignal(row);
+            }
+            persistLastCallSignalId();
+        } catch (_) {}
+    }
+
+    async function pollMessages(){
+        if (busyMsgPoll) return;
+        const member = currentMember();
+        if (!member) return;
+        busyMsgPoll = true;
+        try {
+            const res = await fetch(`/api/messages/threads?member=${encodeURIComponent(member)}`);
+            const data = await res.json();
+            if (!res.ok || !data.ok) return;
+            const rows = Array.isArray(data.threads) ? data.threads : [];
+            const unread = rows.find(row => Number(row.unread || 0) > 0);
+            if (!unread) return;
+
+            const threadRes = await fetch(`/api/messages/thread/${encodeURIComponent(unread.member)}?member=${encodeURIComponent(member)}`);
+            const threadData = await threadRes.json();
+            if (!threadRes.ok || !threadData.ok) return;
+            const messages = Array.isArray(threadData.messages) ? threadData.messages : [];
+            const latestUnread = [...messages].reverse().find(row => row.recipient === member && !row.is_read);
+            if (!latestUnread) return;
+
+            const key = `${latestUnread.id}:${latestUnread.created_at || ''}`;
+            if (seenMessageKeys.has(key)) return;
+            seenMessageKeys.add(key);
+
+            msgFrom.textContent = `From ${unread.member}`;
+            msgBody.textContent = latestUnread.message || 'Sent an attachment';
+            msgReplyInput.value = '';
+            msgReplyForm.dataset.replyTo = unread.member;
+            setMsgModalVisible(true);
+        } catch (_) {
+        } finally {
+            busyMsgPoll = false;
+        }
+    }
+
+    callAccept?.addEventListener('click', async () => {
+        const offer = selectedIncomingOffer;
+        if (!offer) return;
+        try {
+            await acceptOffer(offer);
+            ignoredCallSessions.add(String(offer.session_id || '').trim());
+            selectedIncomingOffer = null;
+        } catch (err) {
+            toast(err.message || 'Unable to accept call', 'error');
+            resetCallState();
+            setCallModalVisible(false);
+        }
+    });
+
+    callDecline?.addEventListener('click', async () => {
+        const offer = selectedIncomingOffer;
+        if (offer) {
+            callState.sessionId = offer.session_id;
+            callState.peer = offer.sender;
+            try { await sendCallSignal('reject', {}); } catch (_) {}
+            ignoredCallSessions.add(String(offer.session_id || '').trim());
+        }
+        resetCallState();
+        setCallModalVisible(false);
+    });
+
+    callClose?.addEventListener('click', async () => {
+        try { await sendCallSignal('end', {}); } catch (_) {}
+        if (callState.sessionId) ignoredCallSessions.add(String(callState.sessionId).trim());
+        resetCallState();
+        setCallModalVisible(false);
+    });
+
+    callEnd?.addEventListener('click', async () => {
+        try { await sendCallSignal('end', {}); } catch (_) {}
+        if (callState.sessionId) ignoredCallSessions.add(String(callState.sessionId).trim());
+        resetCallState();
+        setCallModalVisible(false);
+    });
+
+    callMute?.addEventListener('click', () => {
+        if (!callState.localStream) return;
+        const tracks = callState.localStream.getAudioTracks();
+        const currentlyEnabled = tracks.some(track => track.enabled);
+        tracks.forEach(track => { track.enabled = !currentlyEnabled; });
+        callMute.textContent = currentlyEnabled ? 'Unmute' : 'Mute';
+    });
+
+    callCamera?.addEventListener('click', () => {
+        if (!callState.localStream) return;
+        const tracks = callState.localStream.getVideoTracks();
+        const currentlyEnabled = tracks.some(track => track.enabled);
+        tracks.forEach(track => { track.enabled = !currentlyEnabled; });
+        callCamera.textContent = currentlyEnabled ? 'Camera On' : 'Camera Off';
+    });
+
+    msgDismiss?.addEventListener('click', () => {
+        setMsgModalVisible(false);
+    });
+
+    msgReplyForm?.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const replyTo = String(msgReplyForm.dataset.replyTo || '').trim();
+        const sender = currentMember();
+        const message = String(msgReplyInput.value || '').trim();
+        if (!replyTo || !sender || !message) return;
+        try {
+            const formData = new FormData();
+            formData.set('sender', sender);
+            formData.set('recipient', replyTo);
+            formData.set('message', message);
+            const res = await fetch('/api/messages/send', { method: 'POST', body: formData });
+            const data = await res.json();
+            if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to send reply');
+
+            await fetch(`/api/messages/thread/${encodeURIComponent(replyTo)}/read`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ member: sender })
+            });
+            setMsgModalVisible(false);
+            toast('Reply sent', 'success');
+        } catch (err) {
+            toast(err.message || 'Reply failed', 'error');
+        }
+    });
+
+    document.addEventListener('DOMContentLoaded', () => {
+        loadLastCallSignalId();
+        pollCalls();
+        pollMessages();
+        callPollTimer = setInterval(pollCalls, 1500);
+        messagePollTimer = setInterval(pollMessages, 2000);
+    });
+
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+            pollCalls();
+            pollMessages();
+        }
+    });
+
+    document.addEventListener('user-switched', () => {
+        ignoredCallSessions.clear();
+        selectedIncomingOffer = null;
+        loadLastCallSignalId();
+        setTimeout(() => {
+            pollCalls();
+            pollMessages();
+        }, 180);
+    });
+
+    window.addEventListener('beforeunload', () => {
+        if (callPollTimer) clearInterval(callPollTimer);
+        if (messagePollTimer) clearInterval(messagePollTimer);
+        if (callState.sessionId) {
+            sendCallSignal('end', {}).catch(() => {});
+        }
+        resetCallState();
+    });
+
+    window.HomeHubRealtimeComms = {
+        startOutgoingCall,
+    };
+})();
+</script>
+
 <!-- Weather Widget Script -->
-<script src="{{ url_for('static', filename='js/weather-new.js') }}"></script>
+<script src="{{ url_for('static', filename='js/weather-new.js', v=asset_version) }}"></script>
 
 <script>
 (function(){
     if ('serviceWorker' in navigator) {
+        const host = window.location.hostname || '';
+        const isLocalDev = host === 'localhost' || host === '127.0.0.1' || host === '::1';
+
+        if (isLocalDev) {
+            navigator.serviceWorker.getRegistrations()
+                .then(registrations => Promise.all(registrations.map(reg => reg.unregister())))
+                .catch(() => {});
+            if (window.caches && caches.keys) {
+                caches.keys()
+                    .then(keys => Promise.all(keys.map(k => caches.delete(k))))
+                    .catch(() => {});
+            }
+            return;
+        }
+
         window.addEventListener('load', function(){
             navigator.serviceWorker.register('/sw.js', { scope: '/' })
                 .catch(function(err){ console.warn('SW registration failed', err); });

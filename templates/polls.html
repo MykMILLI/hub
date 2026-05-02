@@ -1,0 +1,258 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="max-w-7xl w-full mx-auto space-y-4 md:space-y-5 min-w-0" style="min-width: 0;">
+  <section class="card p-5 rounded-2xl border border-gray-200/70 dark:border-gray-700/70">
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+      <div>
+        <h1 class="text-3xl font-extrabold tracking-tight">Family Polls</h1>
+        <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">Create polls and answer family polls with structured forms.</p>
+      </div>
+      <div>
+        <a href="/messages" class="btn btn-secondary text-xs">Back to Messages</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="card p-3 sm:p-4 rounded-2xl border border-gray-200/70 dark:border-gray-700/70 space-y-4 min-w-0">
+    <h2 class="text-lg font-bold">Create Poll</h2>
+    <form id="pollCreateForm" class="space-y-4">
+      <div>
+        <label for="pollQuestion" class="block text-sm font-semibold mb-2">Poll question</label>
+        <input id="pollQuestion" type="text" class="w-full p-2.5 border rounded-xl dark:bg-gray-800 dark:border-gray-600" placeholder="What do you want for dinner?">
+      </div>
+
+      <div>
+        <div class="flex items-center justify-between gap-2 mb-2">
+          <label class="block text-sm font-semibold">Poll options</label>
+          <button id="addPollOptionBtn" type="button" class="btn btn-secondary text-xs">Add option</button>
+        </div>
+        <div id="pollOptionsFormList" class="space-y-2"></div>
+      </div>
+
+      <div>
+        <div class="text-sm font-semibold mb-2">Recipients</div>
+        <div id="pollRecipients" class="grid grid-cols-2 md:grid-cols-4 gap-2"></div>
+      </div>
+
+      <div class="flex items-center gap-4 text-sm flex-wrap">
+        <label class="inline-flex items-center gap-2"><input id="pollChannelEmail" type="checkbox" checked> Email</label>
+        <label class="inline-flex items-center gap-2"><input id="pollChannelMobile" type="checkbox" checked> Mobile</label>
+        <label class="inline-flex items-center gap-2"><input id="pollChannelInApp" type="checkbox" checked> In-app</label>
+        <button type="submit" class="btn btn-primary">Create Poll</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="card p-3 sm:p-4 rounded-2xl border border-gray-200/70 dark:border-gray-700/70 min-w-0">
+    <h2 class="text-lg font-bold mb-3">Polls Waiting For Your Response</h2>
+    <div id="pendingPollForms" class="space-y-3"></div>
+  </section>
+
+  <section class="card p-3 sm:p-4 rounded-2xl border border-gray-200/70 dark:border-gray-700/70 min-w-0">
+    <h2 class="text-lg font-bold mb-3">My Poll Results</h2>
+    <div id="myPolls" class="space-y-3"></div>
+  </section>
+</div>
+
+<script>
+(function(){
+  const currentMember = localStorage.getItem('username') || '{{ current_member_name }}';
+  const pollCreateForm = document.getElementById('pollCreateForm');
+  const pollRecipients = document.getElementById('pollRecipients');
+  const pollOptionsFormList = document.getElementById('pollOptionsFormList');
+  const addPollOptionBtn = document.getElementById('addPollOptionBtn');
+  const myPolls = document.getElementById('myPolls');
+  const pendingPollForms = document.getElementById('pendingPollForms');
+
+  let members = [];
+  let pollRefreshTimer = null;
+  let eventsSource = null;
+  let reconnectTimer = null;
+
+  function toast(msg, type='info'){ if(window.globalToast) globalToast(msg, type); }
+  function esc(v){ return String(v || '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+  function createPollOptionField(value = ''){
+    return `<div class="flex items-center gap-2 poll-option-row">
+      <input type="text" class="poll-option-input flex-1 p-2.5 border rounded-xl dark:bg-gray-800 dark:border-gray-600" value="${esc(value)}" placeholder="Option text">
+      <button type="button" class="btn btn-secondary text-xs remove-poll-option">Remove</button>
+    </div>`;
+  }
+
+  function ensureMinimumPollOptions(){
+    const rows = pollOptionsFormList.querySelectorAll('.poll-option-row');
+    if (rows.length >= 2) return;
+    const missing = 2 - rows.length;
+    for (let i = 0; i < missing; i++) {
+      pollOptionsFormList.insertAdjacentHTML('beforeend', createPollOptionField(''));
+    }
+  }
+
+  async function loadMembers(){
+    const res = await fetch('/api/family-members');
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Failed loading family members');
+    members = (data.members || []).map(m => m.name).filter(Boolean).filter(n => n !== currentMember);
+    pollRecipients.innerHTML = members.map(name => `<label class="inline-flex items-center gap-2 text-sm"><input type="checkbox" class="poll-recipient" value="${esc(name)}" checked><span>${esc(name)}</span></label>`).join('');
+  }
+
+  async function createPoll(){
+    const question = String(document.getElementById('pollQuestion').value || '').trim();
+    const optionsRaw = Array.from(document.querySelectorAll('.poll-option-input')).map(el => String(el.value || '').trim()).filter(Boolean);
+    const recipients = Array.from(document.querySelectorAll('.poll-recipient:checked')).map(el => el.value);
+
+    const channels = [];
+    if (document.getElementById('pollChannelInApp').checked) channels.push('in_app');
+    if (document.getElementById('pollChannelEmail').checked) channels.push('email');
+    if (document.getElementById('pollChannelMobile').checked) channels.push('mobile');
+
+    const res = await fetch('/api/polls/create', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ creator: currentMember, question, options: optionsRaw, recipients, channels })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to create poll');
+
+    document.getElementById('pollQuestion').value = '';
+    pollOptionsFormList.innerHTML = '';
+    ensureMinimumPollOptions();
+    toast('Poll sent to family', 'success');
+    await Promise.all([loadMyPolls(), loadPendingPollForms()]);
+  }
+
+  function renderMyPoll(poll){
+    const responses = poll.responses || [];
+    return `<div class="rounded-xl border border-gray-200 dark:border-gray-700 p-3">
+      <div class="font-semibold text-sm">${esc(poll.question)}</div>
+      <div class="text-xs text-gray-500 mt-1">${poll.response_count}/${poll.recipient_count} responses • ${poll.is_active ? 'Open' : 'Closed'}</div>
+      <div class="mt-2 space-y-1">
+        ${responses.length ? responses.map(row => `<div class="text-sm"><span class="font-medium">${esc(row.member_name)}</span>: ${esc(row.selected_option || row.response_text || 'Responded')}</div>`).join('') : '<div class="text-sm text-gray-500">No responses yet.</div>'}
+      </div>
+    </div>`;
+  }
+
+  function renderPendingPollForm(poll){
+    const options = Array.isArray(poll.options) ? poll.options : [];
+    return `<form class="rounded-xl border border-gray-200 dark:border-gray-700 p-3 space-y-3 pending-poll-form min-w-0" data-poll-id="${Number(poll.id)}">
+      <div class="text-sm font-semibold">${esc(poll.question || '')}</div>
+      <div class="space-y-2">
+        ${options.map((option, idx) => `<label class="flex items-start gap-2 p-2 rounded-lg border border-gray-200 dark:border-gray-700"><input type="radio" name="poll-option-${Number(poll.id)}" value="${esc(option)}" ${idx === 0 ? 'checked' : ''}><span class="text-sm break-words">${esc(option)}</span></label>`).join('')}
+      </div>
+      <textarea class="w-full p-2 border rounded dark:bg-gray-800 dark:border-gray-600 poll-response-text" rows="2" placeholder="Optional response note"></textarea>
+      <div class="flex justify-end">
+        <button type="submit" class="btn btn-primary text-xs">Submit Response</button>
+      </div>
+    </form>`;
+  }
+
+  async function loadMyPolls(){
+    const res = await fetch(`/api/polls/mine?member=${encodeURIComponent(currentMember)}`);
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to load polls');
+    const rows = data.items || [];
+    myPolls.innerHTML = rows.length ? rows.map(renderMyPoll).join('') : '<div class="text-sm text-gray-500">No polls created yet.</div>';
+  }
+
+  async function loadPendingPollForms(){
+    const res = await fetch(`/api/polls/pending?member=${encodeURIComponent(currentMember)}`);
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to load pending polls');
+    const rows = data.items || [];
+    pendingPollForms.innerHTML = rows.length ? rows.map(renderPendingPollForm).join('') : '<div class="text-sm text-gray-500">No pending poll responses.</div>';
+  }
+
+  async function refreshPollsLive(){
+    try {
+      await Promise.all([loadPendingPollForms(), loadMyPolls()]);
+    } catch (_) {}
+  }
+
+  function connectLiveEvents(){
+    if (eventsSource) {
+      try { eventsSource.close(); } catch (_) {}
+    }
+    eventsSource = new EventSource(`/api/stream/events?member=${encodeURIComponent(currentMember)}`);
+    eventsSource.addEventListener('notifications', refreshPollsLive);
+    eventsSource.addEventListener('sync', refreshPollsLive);
+    eventsSource.onerror = () => {
+      try { eventsSource.close(); } catch (_) {}
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(connectLiveEvents, 3000);
+    };
+  }
+
+  addPollOptionBtn.addEventListener('click', () => {
+    pollOptionsFormList.insertAdjacentHTML('beforeend', createPollOptionField(''));
+  });
+
+  pollOptionsFormList.addEventListener('click', (event) => {
+    const removeBtn = event.target.closest('.remove-poll-option');
+    if (!removeBtn) return;
+    const row = removeBtn.closest('.poll-option-row');
+    if (row) row.remove();
+    ensureMinimumPollOptions();
+  });
+
+  pollCreateForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    try {
+      await createPoll();
+    } catch (err) {
+      toast(err.message || 'Failed to create poll', 'error');
+    }
+  });
+
+  pendingPollForms.addEventListener('submit', async (event) => {
+    const form = event.target.closest('.pending-poll-form');
+    if (!form) return;
+    event.preventDefault();
+    const pollId = Number(form.getAttribute('data-poll-id') || 0);
+    if (!pollId) return;
+
+    const selected = form.querySelector('input[type="radio"]:checked');
+    const selectedOption = selected ? String(selected.value || '').trim() : '';
+    const responseText = String(form.querySelector('.poll-response-text')?.value || '').trim();
+
+    try {
+      const res = await fetch(`/api/polls/${pollId}/vote`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ member: currentMember, selected_option: selectedOption, response_text: responseText })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to submit response');
+
+      toast('Poll response submitted', 'success');
+      await Promise.all([loadPendingPollForms(), loadMyPolls()]);
+    } catch (err) {
+      toast(err.message || 'Failed to submit poll response', 'error');
+    }
+  });
+
+  (async function init(){
+    try {
+      ensureMinimumPollOptions();
+      await loadMembers();
+      await Promise.all([loadMyPolls(), loadPendingPollForms()]);
+      connectLiveEvents();
+      pollRefreshTimer = setInterval(refreshPollsLive, 7000);
+    } catch (err) {
+      toast(err.message || 'Failed to load polls', 'error');
+    }
+  })();
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) refreshPollsLive();
+  });
+
+  window.addEventListener('beforeunload', () => {
+    if (pollRefreshTimer) clearInterval(pollRefreshTimer);
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    if (eventsSource) {
+      try { eventsSource.close(); } catch (_) {}
+    }
+  });
+})();
+</script>
+{% endblock %}

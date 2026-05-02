@@ -1,8 +1,9 @@
-from flask import render_template, request, redirect, url_for, flash, jsonify, current_app
+from flask import render_template, request, redirect, url_for, flash, jsonify, current_app, session
 from datetime import datetime, date, timedelta
-from ..models import db, HomeStatus, MemberStatus, Notice, Reminder, RecurringReminder, FamilyMember
+from ..models import db, HomeStatus, MemberStatus, Notice, Reminder, RecurringReminder, FamilyMember, ActivityLog, FamilyNotice, FamilyNoticeAcknowledgement, HouseholdRoutineState
 from ..blueprints import main_bp
 from ..security import sanitize_html, sanitize_text
+from ..services.notification_service import publish_notification
 import json
 
 
@@ -15,9 +16,73 @@ def _parse_date_param(value, default=None):
         return default
 
 
+def _get_or_create_household_routine_state(actor: str | None = None) -> HouseholdRoutineState:
+    row = HouseholdRoutineState.query.first()
+    if row:
+        return row
+    row = HouseholdRoutineState(
+        bedtime_anchor_date=date.today(),
+        bedtime_anchor_reader='Rachel',
+        bath_mode=0,
+        updated_by=sanitize_text(actor or '').strip() or None,
+    )
+    db.session.add(row)
+    db.session.commit()
+    return row
+
+
+def _bedtime_reader_for_date(anchor_date: date, anchor_reader: str, on_date: date) -> str:
+    first = sanitize_text(anchor_reader or '').strip() or 'Rachel'
+    second = 'Mykal' if first.lower() == 'rachel' else 'Rachel'
+    delta_days = (on_date - anchor_date).days
+    return first if delta_days % 2 == 0 else second
+
+
+def _build_routine_payload(state: HouseholdRoutineState) -> dict:
+    bath_mode = int(state.bath_mode or 0) % 2
+    if bath_mode == 0:
+        bath_assignment = {'avery': 'Avery & Mommy', 'harley': 'Harley & Daddy'}
+    else:
+        bath_assignment = {'avery': 'Avery & Daddy', 'harley': 'Harley & Mommy'}
+
+    today = date.today()
+    bedtime_reader = _bedtime_reader_for_date(
+        state.bedtime_anchor_date or today,
+        state.bedtime_anchor_reader or 'Rachel',
+        today,
+    )
+    completed_at = None
+    if state.updated_at:
+        completed_at = state.updated_at.replace(microsecond=0).isoformat() + 'Z'
+
+    return {
+        'bedtime': {
+            'for_date': today.isoformat(),
+            'reader': bedtime_reader,
+            'anchor_date': (state.bedtime_anchor_date or today).isoformat(),
+            'anchor_reader': state.bedtime_anchor_reader or 'Rachel',
+            'alternates_with': 'Mykal' if bedtime_reader == 'Rachel' else 'Rachel',
+        },
+        'bath': {
+            'mode': bath_mode,
+            'avery': bath_assignment['avery'],
+            'harley': bath_assignment['harley'],
+            'completed_by': state.updated_by or '',
+            'completed_at': completed_at,
+        }
+    }
+
+
 @main_bp.route('/')
 def index():
     config = current_app.config['HOMEHUB_CONFIG']
+    current_member_name = sanitize_text(session.get('current_member') or '').strip() or sanitize_text(config.get('admin_name', 'Administrator'))
+    current_member_row = FamilyMember.query.filter_by(name=current_member_name).first()
+    routine_state = _get_or_create_household_routine_state(current_member_name)
+    routines = _build_routine_payload(routine_state)
+    current_member_status_text = ''
+    if current_member_row and (current_member_row.status or '').strip():
+        current_member_status_text = current_member_row.status
     notice = Notice.query.order_by(Notice.updated_at.desc()).first()
     # Calendar: gather reminders grouped by date
     try:
@@ -82,12 +147,49 @@ def index():
     except Exception:
         reminders_json = '{}'
     # Pass Python object; template will use |tojson safely
+    timeline_posts = []
+    try:
+        timeline_posts = (
+            ActivityLog.query
+            .filter(ActivityLog.visibility == 'family')
+            .order_by(ActivityLog.timestamp.desc(), ActivityLog.id.desc())
+            .limit(5)
+            .all()
+        )
+    except Exception:
+        timeline_posts = []
+
+    recent_notice_rows = FamilyNotice.query.filter_by(sender=current_member_name).order_by(FamilyNotice.created_at.desc()).limit(5).all()
+    family_notice_summary = []
+    for n in recent_notice_rows:
+        try:
+            recipients = json.loads(n.recipients_json or '[]')
+            if not isinstance(recipients, list):
+                recipients = []
+        except Exception:
+            recipients = []
+        ack_rows = FamilyNoticeAcknowledgement.query.filter_by(notice_id=n.id).all()
+        acked = sorted([sanitize_text(a.member_name or '').strip() for a in ack_rows if sanitize_text(a.member_name or '').strip()])
+        pending = sorted([r for r in recipients if r and r not in acked])
+        family_notice_summary.append({
+            'id': n.id,
+            'title': n.title,
+            'message': n.message,
+            'created_at': n.created_at,
+            'recipients': recipients,
+            'acked': acked,
+            'pending': pending,
+            'acked_count': len(acked),
+            'total_recipients': len(recipients),
+        })
+
     return render_template(
         'index.html',
         config=config,
         notice=notice,
         reminders_data=by_date,
         reminders_json=reminders_json,
+        timeline_posts=timeline_posts,
         who_statuses=who_statuses,
         member_statuses=member_statuses,
         reminder_categories=reminder_categories,
@@ -96,7 +198,30 @@ def index():
         family_status_times=family_status_times,
         family_avatars=family_avatars,
         family_members_data=family_members_data,
+        current_member_name=current_member_name,
+        current_member_status_text=current_member_status_text,
+        family_notice_summary=family_notice_summary,
+        routines=routines,
     )
+
+
+@main_bp.route('/api/routines/bath/complete', methods=['POST'])
+def api_routine_bath_complete():
+    actor = sanitize_text(session.get('current_member') or '').strip() or sanitize_text(current_app.config.get('HOMEHUB_CONFIG', {}).get('admin_name', 'Administrator'))
+    row = _get_or_create_household_routine_state(actor)
+    row.bath_mode = 1 if int(row.bath_mode or 0) == 0 else 0
+    row.updated_by = actor
+    row.updated_at = datetime.utcnow()
+    db.session.add(row)
+    db.session.commit()
+    return jsonify({'ok': True, 'routines': _build_routine_payload(row)})
+
+
+@main_bp.route('/api/routines', methods=['GET'])
+def api_routine_snapshot():
+    actor = sanitize_text(session.get('current_member') or '').strip() or sanitize_text(current_app.config.get('HOMEHUB_CONFIG', {}).get('admin_name', 'Administrator'))
+    row = _get_or_create_household_routine_state(actor)
+    return jsonify({'ok': True, 'routines': _build_routine_payload(row)})
 
 
 def _serialize_reminder(r: Reminder):
@@ -566,6 +691,240 @@ def update_notice():
     return redirect(url_for('main.index'))
 
 
+@main_bp.route('/api/family-notices/send', methods=['POST'])
+def api_send_family_notice():
+    try:
+        data = request.get_json(force=True) or {}
+        sender = sanitize_text(str(data.get('sender') or session.get('current_member') or '').strip())
+        message = sanitize_text(str(data.get('message', '')).strip())
+        channels = data.get('channels', ['in_app'])
+        require_ack = bool(data.get('require_ack', True))
+
+        if not sender:
+            return jsonify({'ok': False, 'error': 'Sender is required'}), 400
+        if not message:
+            return jsonify({'ok': False, 'error': 'Notice message is required'}), 400
+
+        normalized_channels = []
+        if isinstance(channels, list):
+            for ch in channels:
+                c = sanitize_text(str(ch or '').strip().lower())
+                if c in {'in_app', 'email', 'mobile'} and c not in normalized_channels:
+                    normalized_channels.append(c)
+        if not normalized_channels:
+            normalized_channels = ['in_app']
+
+        members = FamilyMember.query.order_by(FamilyMember.name.asc()).all()
+        recipients = [sanitize_text((m.name or '')).strip() for m in members if sanitize_text((m.name or '')).strip() and sanitize_text((m.name or '')).strip() != sender]
+
+        if not recipients:
+            return jsonify({'ok': False, 'error': 'No recipients available'}), 400
+
+        notice = FamilyNotice(
+            title='Family Notice',
+            message=message,
+            sender=sender,
+            recipients_json=json.dumps(recipients),
+            channels_json=json.dumps(normalized_channels),
+            require_ack=require_ack,
+        )
+        db.session.add(notice)
+        db.session.flush()
+
+        publish_notification(
+            event_type='family_notice',
+            title='Family Notice',
+            message=f"{sender}: {message}",
+            target_members=recipients,
+            created_by=sender,
+            payload={'family_notice_id': notice.id, 'sender': sender},
+            channels=normalized_channels,
+        )
+
+        return jsonify({
+            'ok': True,
+            'notice': {
+                'id': notice.id,
+                'message': notice.message,
+                'sender': notice.sender,
+                'channels': normalized_channels,
+                'recipients': recipients,
+                'require_ack': require_ack,
+                'acked_count': 0,
+                'total_recipients': len(recipients),
+            }
+        })
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+
+
+@main_bp.route('/api/family-notices/pending', methods=['GET'])
+def api_family_notices_pending():
+    member = sanitize_text(str(request.args.get('member') or session.get('current_member') or '').strip())
+    if not member:
+        return jsonify({'ok': True, 'items': []})
+
+    rows = FamilyNotice.query.order_by(FamilyNotice.created_at.asc(), FamilyNotice.id.asc()).all()
+    pending = []
+    for n in rows:
+        try:
+            recipients = json.loads(n.recipients_json or '[]')
+            if not isinstance(recipients, list):
+                recipients = []
+        except Exception:
+            recipients = []
+        if member not in recipients:
+            continue
+        if not bool(getattr(n, 'require_ack', True)):
+            continue
+        ack = FamilyNoticeAcknowledgement.query.filter_by(notice_id=n.id, member_name=member).first()
+        if ack:
+            continue
+        pending.append({
+            'id': n.id,
+            'title': n.title or 'Family Notice',
+            'message': n.message or '',
+            'sender': n.sender or '',
+            'created_at': n.created_at.isoformat() if n.created_at else None,
+        })
+
+    return jsonify({'ok': True, 'items': pending})
+
+
+@main_bp.route('/api/family-notices/<int:notice_id>/ack', methods=['POST'])
+def api_ack_family_notice(notice_id):
+    notice = FamilyNotice.query.get_or_404(notice_id)
+    data = request.get_json(silent=True) or {}
+    member = sanitize_text(str(data.get('member') or session.get('current_member') or '').strip())
+    if not member:
+        return jsonify({'ok': False, 'error': 'Member is required'}), 400
+
+    try:
+        recipients = json.loads(notice.recipients_json or '[]')
+        if not isinstance(recipients, list):
+            recipients = []
+    except Exception:
+        recipients = []
+
+    if member not in recipients:
+        return jsonify({'ok': False, 'error': 'Not a recipient for this notice'}), 403
+
+    existing = FamilyNoticeAcknowledgement.query.filter_by(notice_id=notice.id, member_name=member).first()
+    if not existing:
+        db.session.add(FamilyNoticeAcknowledgement(notice_id=notice.id, member_name=member, acknowledged_at=datetime.utcnow()))
+        db.session.commit()
+
+    acked_rows = FamilyNoticeAcknowledgement.query.filter_by(notice_id=notice.id).all()
+    acked = sorted([sanitize_text(a.member_name or '').strip() for a in acked_rows if sanitize_text(a.member_name or '').strip()])
+    pending = sorted([r for r in recipients if r and r not in acked])
+
+    return jsonify({
+        'ok': True,
+        'notice_id': notice.id,
+        'acked': acked,
+        'pending': pending,
+        'acked_count': len(acked),
+        'total_recipients': len(recipients),
+    })
+
+
+@main_bp.route('/api/family-notices/mine', methods=['GET'])
+def api_family_notices_mine():
+    sender = sanitize_text(str(request.args.get('sender') or session.get('current_member') or '').strip())
+    if not sender:
+        return jsonify({'ok': True, 'items': []})
+
+    rows = FamilyNotice.query.filter_by(sender=sender).order_by(FamilyNotice.created_at.desc()).limit(20).all()
+    items = []
+    for n in rows:
+        try:
+            recipients = json.loads(n.recipients_json or '[]')
+            if not isinstance(recipients, list):
+                recipients = []
+        except Exception:
+            recipients = []
+        acked_rows = FamilyNoticeAcknowledgement.query.filter_by(notice_id=n.id).all()
+        acked = sorted([sanitize_text(a.member_name or '').strip() for a in acked_rows if sanitize_text(a.member_name or '').strip()])
+        pending = sorted([r for r in recipients if r and r not in acked])
+        items.append({
+            'id': n.id,
+            'title': n.title,
+            'message': n.message,
+            'sender': n.sender,
+            'require_ack': bool(getattr(n, 'require_ack', True)),
+            'created_at': n.created_at.isoformat() if n.created_at else None,
+            'acked': acked,
+            'pending': pending,
+            'acked_count': len(acked),
+            'total_recipients': len(recipients),
+        })
+
+    return jsonify({'ok': True, 'items': items})
+
+
+@main_bp.route('/notice-history', methods=['GET'])
+def notice_history_page():
+    sender = sanitize_text(str(request.args.get('sender') or session.get('current_member') or '').strip())
+    if not sender:
+        sender = sanitize_text(current_app.config['HOMEHUB_CONFIG'].get('admin_name', 'Administrator'))
+
+    page = request.args.get('page', type=int) or 1
+    if page < 1:
+        page = 1
+    per_page = 25
+
+    query = FamilyNotice.query.filter_by(sender=sender).order_by(FamilyNotice.created_at.desc(), FamilyNotice.id.desc())
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+
+    items = []
+    for n in pagination.items:
+        try:
+            recipients = json.loads(n.recipients_json or '[]')
+            if not isinstance(recipients, list):
+                recipients = []
+        except Exception:
+            recipients = []
+
+        acked_rows = FamilyNoticeAcknowledgement.query.filter_by(notice_id=n.id).all()
+        acked = sorted([sanitize_text(a.member_name or '').strip() for a in acked_rows if sanitize_text(a.member_name or '').strip()])
+        pending = sorted([r for r in recipients if r and r not in acked])
+
+        try:
+            channels = json.loads(n.channels_json or '[]')
+            if not isinstance(channels, list):
+                channels = []
+        except Exception:
+            channels = []
+
+        items.append({
+            'id': n.id,
+            'title': n.title or 'Family Notice',
+            'message': n.message or '',
+            'sender': n.sender or '',
+            'require_ack': bool(getattr(n, 'require_ack', True)),
+            'channels': channels,
+            'created_at': n.created_at,
+            'recipients': recipients,
+            'acked': acked,
+            'pending': pending,
+            'acked_count': len(acked),
+            'total_recipients': len(recipients),
+        })
+
+    return render_template(
+        'notice_history.html',
+        sender=sender,
+        items=items,
+        page=pagination.page,
+        pages=pagination.pages,
+        total=pagination.total,
+        has_prev=pagination.has_prev,
+        has_next=pagination.has_next,
+        prev_num=pagination.prev_num,
+        next_num=pagination.next_num,
+    )
+
+
 @main_bp.route('/whoishome', methods=['POST'])
 def who_is_home_action():
     action = sanitize_text(request.form.get('action', 'update'))
@@ -671,3 +1030,90 @@ def member_status_delete():
         member_statuses = {ms.name: ms.text for ms in MemberStatus.query.all() if ms.name in family and (ms.text or '').strip()}
         return jsonify({'ok': True, 'who_statuses': who_statuses, 'member_statuses': member_statuses, 'result': 'removed' if removed else 'none'})
     return redirect(url_for('main.index'))
+
+
+@main_bp.route('/personal-status', methods=['POST'])
+def personal_status_alias():
+    family = set(m.name for m in FamilyMember.query.all())
+    name = sanitize_text(request.form.get('name', ''))
+    action = sanitize_text(request.form.get('action', '')).strip().lower()
+    text = sanitize_text(request.form.get('text', '') or '')
+
+    if not name or name not in family:
+        return jsonify({'ok': False, 'error': 'Invalid user'}), 400
+
+    if action == 'delete':
+        row = MemberStatus.query.filter_by(name=name).first()
+        if row:
+            db.session.delete(row)
+            db.session.commit()
+        return jsonify({'ok': True, 'result': 'removed'})
+
+    if not text:
+        return jsonify({'ok': False, 'error': 'Status cannot be empty'}), 400
+
+    row = MemberStatus.query.filter_by(name=name).first()
+    now = datetime.utcnow()
+    if row:
+        row.text = text
+        row.updated_at = now
+    else:
+        db.session.add(MemberStatus(name=name, text=text, updated_at=now))
+    db.session.commit()
+    return jsonify({'ok': True, 'result': 'saved'})
+
+
+@main_bp.route('/api/member-status/current', methods=['GET'])
+def api_member_status_current():
+    member = sanitize_text(str(request.args.get('member') or session.get('current_member') or '').strip())
+    if not member:
+        return jsonify({'ok': False, 'error': 'Member required'}), 400
+
+    row = MemberStatus.query.filter_by(name=member).first()
+    return jsonify({
+        'ok': True,
+        'member': member,
+        'status': sanitize_text((row.text if row else '') or ''),
+        'updated_at': row.updated_at.isoformat() if row and row.updated_at else None,
+    })
+
+
+@main_bp.route('/api/member-status', methods=['POST'])
+def api_member_status_save():
+    data = request.get_json(force=True) or {}
+    member = sanitize_text(str(data.get('member') or session.get('current_member') or '').strip())
+    text = sanitize_text(str(data.get('status', '') or '').strip())
+
+    if not member:
+        return jsonify({'ok': False, 'error': 'Member required'}), 400
+    if not text:
+        return jsonify({'ok': False, 'error': 'Status cannot be empty'}), 400
+
+    family = set(m.name for m in FamilyMember.query.all())
+    if member not in family:
+        return jsonify({'ok': False, 'error': 'Invalid user'}), 400
+
+    row = MemberStatus.query.filter_by(name=member).first()
+    now = datetime.utcnow()
+    if row:
+        row.text = text
+        row.updated_at = now
+    else:
+        db.session.add(MemberStatus(name=member, text=text, updated_at=now))
+    db.session.commit()
+
+    return jsonify({'ok': True, 'member': member, 'status': text, 'updated_at': now.isoformat()})
+
+
+@main_bp.route('/api/member-status', methods=['DELETE'])
+def api_member_status_delete():
+    data = request.get_json(silent=True) or {}
+    member = sanitize_text(str(data.get('member') or request.args.get('member') or session.get('current_member') or '').strip())
+    if not member:
+        return jsonify({'ok': False, 'error': 'Member required'}), 400
+
+    row = MemberStatus.query.filter_by(name=member).first()
+    if row:
+        db.session.delete(row)
+        db.session.commit()
+    return jsonify({'ok': True, 'member': member, 'result': 'removed' if row else 'none'})

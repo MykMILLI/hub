@@ -137,9 +137,12 @@
         const del = document.createElement('button'); del.type='button'; del.title='Delete';
         del.className = 'opacity-0 group-hover:opacity-100 text-red-600 ml-1';
         del.innerHTML = '<i class="fa fa-times"></i>';
-        del.addEventListener('click', (e)=>{
+        del.addEventListener('click', async (e)=>{
           e.stopPropagation();
-          if(confirm(`Delete tag "${t}"? This removes it from suggestions (items keep their tags).`)){
+          const ok = window.uiConfirm
+            ? await window.uiConfirm(`Delete tag "${t}"? This removes it from suggestions (items keep their tags).`, { title: 'Delete Tag', confirmText: 'Delete', danger: true })
+            : confirm(`Delete tag "${t}"? This removes it from suggestions (items keep their tags).`);
+          if(ok){
             forgetTag(t);
             renderLibrary(host, onAdd);
           }

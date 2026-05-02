@@ -1,0 +1,607 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="mx-auto space-y-6">
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <div>
+      <h2 class="text-3xl font-bold">Family Photos</h2>
+      <p class="text-sm text-gray-600 dark:text-gray-300">Gallery wall view with albums, search, quick filters, and immersive viewer.</p>
+      {% if initial_album_name %}
+      <p class="text-sm text-blue-600 dark:text-blue-300 mt-1">Album detail view: {{ initial_album_name }}</p>
+      {% endif %}
+    </div>
+    <div class="flex items-center gap-2">
+      <button id="newAlbumBtn" class="btn btn-secondary"><i class="fa-solid fa-folder-plus"></i> New Album</button>
+      <a href="/photos/slideshow" class="btn btn-primary"><i class="fa-solid fa-images"></i> Slideshow</a>
+    </div>
+  </div>
+
+  <div class="grid gap-3 sm:grid-cols-3">
+    <div class="card p-4">
+      <div class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Visible Assets</div>
+      <div id="statAssets" class="text-2xl font-bold mt-1">0</div>
+    </div>
+    <div class="card p-4">
+      <div class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Albums</div>
+      <div id="statAlbums" class="text-2xl font-bold mt-1">0</div>
+    </div>
+    <div class="card p-4">
+      <div class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Scope</div>
+      <div id="statScope" class="text-2xl font-bold mt-1 capitalize">All</div>
+    </div>
+  </div>
+
+  <div class="card p-4">
+    <h3 class="text-lg font-semibold mb-3">Upload Photos / Videos</h3>
+    <form id="photoUploadForm" class="grid md:grid-cols-5 gap-3 items-end">
+      <div class="md:col-span-2">
+        <label class="block text-sm mb-1">Files</label>
+        <input type="file" id="photoFiles" multiple accept="image/*,video/*" class="w-full" required>
+      </div>
+      <div>
+        <label class="block text-sm mb-1">Visibility</label>
+        <select id="photoVisibility" class="w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
+          <option value="private">Private</option>
+          <option value="family">Family Shared</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-sm mb-1">Album</label>
+        <select id="uploadAlbum" class="w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
+          <option value="">None</option>
+        </select>
+      </div>
+      <button type="submit" class="btn btn-primary w-full"><i class="fa-solid fa-cloud-arrow-up"></i> Upload</button>
+    </form>
+  </div>
+
+  <div class="sticky top-2 z-10">
+    <div class="glass p-3 rounded-2xl border border-white/25 dark:border-gray-700/40">
+      <div class="grid gap-2 md:grid-cols-6">
+        <div class="md:col-span-2">
+          <input id="photoSearch" placeholder="Search file name or uploader..." class="w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600" />
+        </div>
+        <div class="md:col-span-2 flex flex-wrap gap-2" id="scopeButtons">
+          <button class="scope-btn btn btn-secondary" data-scope="all">All</button>
+          <button class="scope-btn btn btn-secondary" data-scope="family">Family</button>
+          <button class="scope-btn btn btn-secondary" data-scope="private">Private</button>
+        </div>
+        <div>
+          <select id="sortMode" class="w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
+            <option value="newest">Newest First</option>
+            <option value="oldest">Oldest First</option>
+            <option value="name">Name</option>
+          </select>
+        </div>
+        <div>
+          <select id="albumFilter" class="w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
+            <option value="">All Albums</option>
+          </select>
+        </div>
+      </div>
+      <div id="albumChips" class="mt-2 flex flex-wrap gap-2"></div>
+      <div class="mt-2 flex flex-wrap items-center gap-2">
+        <button id="selectionToggle" class="btn btn-secondary" type="button"><i class="fa-solid fa-check-double"></i> Selection Mode</button>
+        <span id="selectionCount" class="text-sm text-gray-600 dark:text-gray-300 hidden">0 selected</span>
+        <button id="batchMoveBtn" class="btn btn-secondary hidden" type="button"><i class="fa-solid fa-folder-open"></i> Move</button>
+        <button id="batchVisibilityBtn" class="btn btn-secondary hidden" type="button"><i class="fa-solid fa-eye"></i> Visibility</button>
+        <button id="batchDeleteBtn" class="btn btn-danger hidden" type="button"><i class="fa-solid fa-trash"></i> Delete</button>
+      </div>
+      <div id="photoCount" class="mt-2 text-sm text-gray-600 dark:text-gray-300"></div>
+    </div>
+  </div>
+
+  <div id="photoWall" class="columns-2 sm:columns-3 lg:columns-4 xl:columns-5" style="column-gap:0.75rem;"></div>
+  <div class="text-center py-2">
+    <button id="loadMoreBtn" class="btn btn-secondary hidden">Load More</button>
+  </div>
+
+  <div class="card p-4 mt-8">
+    <h3 class="text-lg font-semibold mb-2">Android Auto Watch Folders</h3>
+    <p class="text-sm text-gray-600 dark:text-gray-300 mb-3">Save Android folder URIs so companion mobile upload can monitor these folders.</p>
+    <form id="watchFolderForm" class="grid md:grid-cols-4 gap-3 items-end">
+      <div class="md:col-span-2">
+        <label class="block text-sm mb-1">Folder URI</label>
+        <input id="watchFolderUri" class="w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600" placeholder="content://..." required>
+      </div>
+      <div>
+        <label class="block text-sm mb-1">Scope</label>
+        <select id="watchFolderScope" class="w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
+          <option value="private">Private</option>
+          <option value="family">Family Shared</option>
+        </select>
+      </div>
+      <button type="submit" class="btn btn-secondary w-full"><i class="fa-solid fa-folder-plus"></i> Save Folder</button>
+    </form>
+    <ul id="watchFolderList" class="mt-4 space-y-2"></ul>
+  </div>
+</div>
+
+<div id="photoViewerModal" class="hidden fixed inset-0 z-50 bg-black/80 p-4 sm:p-6 md:p-8">
+  <div class="h-full w-full flex items-center justify-center">
+    <div class="glass-lg w-full max-w-6xl max-h-[calc(100vh-2rem)] overflow-y-auto rounded-2xl border border-white/20 shadow-2xl p-3 md:p-4">
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <div id="viewerMeta" class="text-sm text-gray-100"></div>
+        <div class="flex items-center gap-2">
+          <button id="viewerPrev" class="btn btn-secondary" type="button"><i class="fa-solid fa-chevron-left"></i></button>
+          <button id="viewerNext" class="btn btn-secondary" type="button"><i class="fa-solid fa-chevron-right"></i></button>
+          <button id="viewerSetCover" class="btn btn-secondary" type="button"><i class="fa-solid fa-image"></i> Set Cover</button>
+          <a id="viewerDownload" class="btn btn-primary" href="#" target="_blank" rel="noopener noreferrer"><i class="fa-solid fa-download"></i> Download</a>
+          <button id="viewerClose" class="btn btn-secondary" type="button">Close</button>
+        </div>
+      </div>
+      <div class="rounded-xl bg-black min-h-[50vh] flex items-center justify-center p-2">
+        <img id="viewerImage" class="hidden max-w-full max-h-[72vh] object-contain" alt="Photo preview" />
+        <video id="viewerVideo" class="hidden max-w-full max-h-[72vh] object-contain" controls></video>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="albumModal" class="hidden fixed inset-0 z-50 bg-black/70 p-4 sm:p-6">
+  <div class="h-full w-full flex items-center justify-center">
+    <div class="glass-lg w-full max-w-xl max-h-[calc(100vh-2rem)] overflow-y-auto rounded-2xl border border-white/20 shadow-2xl p-4">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-lg font-semibold">Create Album</h3>
+        <button id="closeAlbumModal" class="btn btn-secondary" type="button">Close</button>
+      </div>
+      <form id="createAlbumForm" class="space-y-3">
+        <div>
+          <label class="block text-sm mb-1">Name</label>
+          <input id="albumName" class="w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600" required />
+        </div>
+        <div>
+          <label class="block text-sm mb-1">Description</label>
+          <textarea id="albumDescription" class="w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600" rows="3"></textarea>
+        </div>
+        <div>
+          <label class="block text-sm mb-1">Visibility</label>
+          <select id="albumVisibility" class="w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
+            <option value="private">Private</option>
+            <option value="family">Family Shared</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" type="submit"><i class="fa-solid fa-folder-plus"></i> Create Album</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const currentMember = localStorage.getItem('username') || '{{ current_member_name }}';
+  const initialAlbumId = '{{ initial_album_id or "" }}';
+  const wall = document.getElementById('photoWall');
+  const photoCount = document.getElementById('photoCount');
+  const loadMoreBtn = document.getElementById('loadMoreBtn');
+  const albumFilter = document.getElementById('albumFilter');
+  const uploadAlbum = document.getElementById('uploadAlbum');
+  const albumChips = document.getElementById('albumChips');
+  const statAssets = document.getElementById('statAssets');
+  const statAlbums = document.getElementById('statAlbums');
+  const statScope = document.getElementById('statScope');
+  const selectionToggle = document.getElementById('selectionToggle');
+  const selectionCount = document.getElementById('selectionCount');
+  const batchMoveBtn = document.getElementById('batchMoveBtn');
+  const batchVisibilityBtn = document.getElementById('batchVisibilityBtn');
+  const batchDeleteBtn = document.getElementById('batchDeleteBtn');
+  const viewerSetCover = document.getElementById('viewerSetCover');
+
+  let allItems = [];
+  let filtered = [];
+  let albums = [];
+  let scope = 'all';
+  let searchText = '';
+  let sortMode = 'newest';
+  let selectedAlbum = initialAlbumId || '';
+  let renderCount = 120;
+  let viewerIndex = -1;
+  let selectionMode = false;
+  let selectedIds = new Set();
+
+  function esc(v){ return String(v || '').replace(/[&<>'\"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
+  function toStamp(item){ return new Date(item.captured_at || item.uploaded_at || 0).getTime() || 0; }
+  function prettyDate(item){ const t = toStamp(item); return t ? new Date(t).toLocaleString() : 'Unknown date'; }
+  function dateOnlyStamp(item){
+    const d = new Date(toStamp(item));
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  }
+
+  function bucketLabel(item){
+    const d = new Date(toStamp(item));
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const yesterday = today - 86400000;
+    const stamp = dateOnlyStamp(item);
+    if (stamp === today) return 'Today';
+    if (stamp === yesterday) return 'Yesterday';
+    return d.toLocaleDateString(undefined, { year: 'numeric', month: 'long' });
+  }
+
+  function updateSelectionUI(){
+    const count = selectedIds.size;
+    selectionCount.textContent = `${count} selected`;
+    selectionCount.classList.toggle('hidden', !selectionMode);
+    [batchMoveBtn, batchVisibilityBtn, batchDeleteBtn].forEach(btn => {
+      btn.classList.toggle('hidden', !selectionMode);
+      btn.disabled = count === 0;
+    });
+    selectionToggle.classList.toggle('btn-primary', selectionMode);
+    selectionToggle.classList.toggle('btn-secondary', !selectionMode);
+  }
+
+  function setScopeButtons(){
+    document.querySelectorAll('.scope-btn').forEach(btn => {
+      const active = (btn.dataset.scope || 'all') === scope;
+      btn.classList.toggle('btn-primary', active);
+      btn.classList.toggle('btn-secondary', !active);
+    });
+    statScope.textContent = scope;
+  }
+
+  function sortItems(items){
+    if (sortMode === 'name') return items.sort((a,b) => String(a.original_filename||'').localeCompare(String(b.original_filename||'')));
+    if (sortMode === 'oldest') return items.sort((a,b) => toStamp(a) - toStamp(b));
+    return items.sort((a,b) => toStamp(b) - toStamp(a));
+  }
+
+  function applyFilters(){
+    const query = searchText.trim().toLowerCase();
+    filtered = allItems.filter(item => {
+      if (scope !== 'all' && String(item.visibility || '').toLowerCase() !== scope) return false;
+      if (selectedAlbum && String(item.album_id || '') !== String(selectedAlbum)) return false;
+      if (query) {
+        const hay = `${item.original_filename || ''} ${item.uploader || ''}`.toLowerCase();
+        if (!hay.includes(query)) return false;
+      }
+      return true;
+    });
+    sortItems(filtered);
+    renderCount = 120;
+    renderWall();
+  }
+
+  function renderWall(){
+    const subset = filtered.slice(0, renderCount);
+    statAssets.textContent = String(filtered.length);
+    photoCount.textContent = `${filtered.length} visible item(s)`;
+    const groups = new Map();
+    subset.forEach((item, idx) => {
+      const label = bucketLabel(item);
+      if (!groups.has(label)) groups.set(label, []);
+      groups.get(label).push({ item, idx });
+    });
+
+    wall.innerHTML = Array.from(groups.entries()).map(([label, rows]) => {
+      const tiles = rows.map(({ item, idx }) => {
+        const checked = selectedIds.has(item.id);
+        const media = item.is_video
+          ? `<video class="w-full h-auto rounded-xl bg-black" muted preload="metadata" src="${esc(item.preview_url)}"></video>`
+          : `<img class="w-full h-auto rounded-xl" loading="lazy" src="${esc(item.preview_url)}" alt="${esc(item.original_filename)}">`;
+        const selectBadge = selectionMode
+          ? `<label class="absolute top-2 left-2 bg-black/70 text-white rounded-full p-1"><input type="checkbox" class="asset-select" data-asset-id="${item.id}" ${checked ? 'checked' : ''}></label>`
+          : '';
+        return `
+          <button type="button" class="group mb-3 w-full text-left break-inside-avoid rounded-xl overflow-hidden bg-gray-100 dark:bg-gray-800 border ${checked ? 'border-blue-500' : 'border-gray-200/60 dark:border-gray-700/60'}" data-open-viewer="${idx}">
+            <div class="relative">
+              ${media}
+              ${selectBadge}
+              <div class="absolute top-2 right-2 text-[10px] px-2 py-1 rounded-full bg-black/70 text-white">${esc(item.visibility || 'private')}</div>
+              ${item.is_video ? '<div class="absolute bottom-2 left-2 text-xs px-2 py-1 rounded-full bg-black/70 text-white"><i class="fa-solid fa-play"></i></div>' : ''}
+            </div>
+            <div class="p-2">
+              <div class="text-xs font-semibold truncate">${esc(item.original_filename)}</div>
+              <div class="text-[11px] text-gray-500 dark:text-gray-400 truncate">${esc(item.uploader || 'Unknown')} • ${esc(prettyDate(item))}</div>
+            </div>
+          </button>`;
+      }).join('');
+      return `<section class="mb-4 break-inside-avoid"><h4 class="text-sm font-semibold mb-2 text-gray-700 dark:text-gray-300">${esc(label)}</h4><div class="columns-2 sm:columns-3 lg:columns-4 xl:columns-5" style="column-gap:0.75rem;">${tiles}</div></section>`;
+    }).join('');
+
+    loadMoreBtn.classList.toggle('hidden', renderCount >= filtered.length);
+    updateSelectionUI();
+  }
+
+  function renderAlbumData(){
+    statAlbums.textContent = String(albums.length);
+    const opts = ['<option value="">All Albums</option>'].concat(albums.map(a => `<option value="${a.id}">${esc(a.name)} (${a.asset_count})</option>`));
+    albumFilter.innerHTML = opts.join('');
+    uploadAlbum.innerHTML = ['<option value="">None</option>'].concat(albums.map(a => `<option value="${a.id}">${esc(a.name)}</option>`)).join('');
+
+    if (selectedAlbum) albumFilter.value = String(selectedAlbum);
+
+    albumChips.innerHTML = ['<button class="btn btn-secondary album-chip" data-album="">All Albums</button>']
+      .concat(albums.map(a => `<a class="btn btn-secondary album-chip" data-album="${a.id}" href="/photos/albums/${a.id}">${esc(a.name)}</a>`))
+      .join('');
+    setAlbumChipActive();
+  }
+
+  function setAlbumChipActive(){
+    document.querySelectorAll('.album-chip').forEach(chip => {
+      const active = String(chip.dataset.album || '') === String(selectedAlbum || '');
+      chip.classList.toggle('btn-primary', active);
+      chip.classList.toggle('btn-secondary', !active);
+    });
+  }
+
+  async function loadAlbums(){
+    const res = await fetch(`/api/photos/albums?member=${encodeURIComponent(currentMember)}`);
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to load albums');
+    albums = data.items || [];
+    renderAlbumData();
+  }
+
+  async function loadPhotos(){
+    const res = await fetch(`/api/photos/assets?member=${encodeURIComponent(currentMember)}&scope=all`);
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to load photos');
+    allItems = data.items || [];
+    applyFilters();
+  }
+
+  function closeViewer(){
+    document.getElementById('photoViewerModal').classList.add('hidden');
+    document.getElementById('viewerVideo').pause();
+  }
+
+  function showViewer(idx){
+    viewerIndex = idx;
+    const item = filtered[viewerIndex];
+    if (!item) return;
+    const modal = document.getElementById('photoViewerModal');
+    const img = document.getElementById('viewerImage');
+    const vid = document.getElementById('viewerVideo');
+    const meta = document.getElementById('viewerMeta');
+    const dl = document.getElementById('viewerDownload');
+    meta.textContent = `${item.original_filename} • ${item.uploader || 'Unknown'} • ${prettyDate(item)}`;
+    dl.href = item.download_url;
+    viewerSetCover.classList.toggle('hidden', !item.album_id);
+
+    if (item.is_video) {
+      img.classList.add('hidden');
+      vid.classList.remove('hidden');
+      vid.src = item.preview_url;
+      vid.play().catch(() => {});
+    } else {
+      vid.classList.add('hidden');
+      vid.pause();
+      vid.removeAttribute('src');
+      img.classList.remove('hidden');
+      img.src = item.preview_url;
+    }
+    modal.classList.remove('hidden');
+  }
+
+  function stepViewer(delta){
+    if (!filtered.length) return;
+    const nextIndex = (viewerIndex + delta + filtered.length) % filtered.length;
+    showViewer(nextIndex);
+  }
+
+  async function loadWatchFolders(){
+    const res = await fetch(`/api/photos/watch-folders?member=${encodeURIComponent(currentMember)}`);
+    const data = await res.json();
+    const list = document.getElementById('watchFolderList');
+    if (!res.ok || !data.ok) {
+      list.innerHTML = '<li class="text-sm text-red-500">Failed to load watch folders.</li>';
+      return;
+    }
+    list.innerHTML = (data.items || []).map(row => `<li class="text-sm p-2 rounded border dark:border-gray-700"><span class="font-semibold">${esc(row.scope)}</span> - ${esc(row.folder_uri)}</li>`).join('') || '<li class="text-sm text-gray-500">No watch folders saved yet.</li>';
+  }
+
+  document.getElementById('photoUploadForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const files = document.getElementById('photoFiles').files;
+    if (!files || !files.length) return;
+    const fd = new FormData();
+    for (const f of files) fd.append('files', f);
+    fd.append('creator', currentMember);
+    fd.append('visibility', document.getElementById('photoVisibility').value);
+    const albumChoice = document.getElementById('uploadAlbum').value;
+    if (albumChoice) fd.append('album_id', albumChoice);
+    const res = await fetch('/api/photos/upload', { method: 'POST', body: fd });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) {
+      window.globalToast?.(data.error || 'Upload failed', 'error');
+      return;
+    }
+    window.globalToast?.('Upload complete', 'success');
+    document.getElementById('photoUploadForm').reset();
+    await Promise.all([loadAlbums(), loadPhotos()]);
+  });
+
+  document.querySelectorAll('.scope-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      scope = btn.dataset.scope || 'all';
+      setScopeButtons();
+      applyFilters();
+    });
+  });
+
+  document.getElementById('photoSearch').addEventListener('input', (e) => {
+    searchText = e.target.value || '';
+    applyFilters();
+  });
+
+  document.getElementById('sortMode').addEventListener('change', (e) => {
+    sortMode = e.target.value || 'newest';
+    applyFilters();
+  });
+
+  albumFilter.addEventListener('change', (e) => {
+    selectedAlbum = e.target.value || '';
+    setAlbumChipActive();
+    applyFilters();
+  });
+
+  albumChips.addEventListener('click', (e) => {
+    const chip = e.target.closest('.album-chip');
+    if (!chip) return;
+    selectedAlbum = chip.dataset.album || '';
+    albumFilter.value = selectedAlbum;
+    setAlbumChipActive();
+    applyFilters();
+  });
+
+  wall.addEventListener('click', (e) => {
+    const selectInput = e.target.closest('.asset-select');
+    if (selectInput) {
+      const id = Number(selectInput.dataset.assetId || '0');
+      if (id > 0) {
+        if (selectInput.checked) selectedIds.add(id);
+        else selectedIds.delete(id);
+        updateSelectionUI();
+      }
+      e.stopPropagation();
+      return;
+    }
+    const tile = e.target.closest('[data-open-viewer]');
+    if (!tile) return;
+    if (selectionMode) return;
+    showViewer(Number(tile.dataset.openViewer || '-1'));
+  });
+
+  loadMoreBtn.addEventListener('click', () => {
+    renderCount += 120;
+    renderWall();
+  });
+
+  document.getElementById('viewerClose').addEventListener('click', closeViewer);
+    viewerSetCover.addEventListener('click', async () => {
+      const item = filtered[viewerIndex];
+      if (!item || !item.album_id) return;
+      const res = await fetch(`/api/photos/albums/${item.album_id}/cover`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({cover_photo_id: item.id}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) {
+        window.globalToast?.(data.error || 'Failed to set album cover', 'error');
+        return;
+      }
+      window.globalToast?.('Album cover updated', 'success');
+      await loadAlbums();
+    });
+
+    selectionToggle.addEventListener('click', () => {
+      selectionMode = !selectionMode;
+      if (!selectionMode) selectedIds.clear();
+      renderWall();
+    });
+
+    async function runBatch(action, payloadExtra = {}) {
+      const assetIds = Array.from(selectedIds.values());
+      if (!assetIds.length) return;
+      const res = await fetch('/api/photos/assets/batch', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({action, asset_ids: assetIds, ...payloadExtra}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) {
+        window.globalToast?.(data.error || `Batch ${action} failed`, 'error');
+        return;
+      }
+      window.globalToast?.(`Batch ${action} complete (${data.count || 0})`, 'success');
+      selectedIds.clear();
+      await Promise.all([loadAlbums(), loadPhotos()]);
+    }
+
+    batchMoveBtn.addEventListener('click', async () => {
+      const options = albums.map(a => `${a.id}:${a.name}`).join('\n');
+      const input = window.prompt(`Target album id (blank for none).\n${options}`);
+      if (input === null) return;
+      const target = String(input || '').trim();
+      await runBatch('move', {target_album_id: target || null});
+    });
+
+    batchVisibilityBtn.addEventListener('click', async () => {
+      const visibility = window.prompt('Set visibility to private or family', 'family');
+      if (!visibility) return;
+      await runBatch('visibility', {visibility: visibility.trim().toLowerCase()});
+    });
+
+    batchDeleteBtn.addEventListener('click', async () => {
+      if (!window.confirm(`Delete ${selectedIds.size} selected asset(s)? This cannot be undone.`)) return;
+      await runBatch('delete');
+    });
+
+  document.getElementById('viewerPrev').addEventListener('click', () => stepViewer(-1));
+  document.getElementById('viewerNext').addEventListener('click', () => stepViewer(1));
+  document.getElementById('photoViewerModal').addEventListener('click', (e) => {
+    if (e.target.id === 'photoViewerModal') closeViewer();
+  });
+
+  document.addEventListener('keydown', (e) => {
+    const open = !document.getElementById('photoViewerModal').classList.contains('hidden');
+    if (!open) return;
+    if (e.key === 'Escape') closeViewer();
+    if (e.key === 'ArrowLeft') stepViewer(-1);
+    if (e.key === 'ArrowRight') stepViewer(1);
+  });
+
+  document.getElementById('newAlbumBtn').addEventListener('click', () => {
+    document.getElementById('albumModal').classList.remove('hidden');
+  });
+  document.getElementById('closeAlbumModal').addEventListener('click', () => {
+    document.getElementById('albumModal').classList.add('hidden');
+  });
+  document.getElementById('albumModal').addEventListener('click', (e) => {
+    if (e.target.id === 'albumModal') document.getElementById('albumModal').classList.add('hidden');
+  });
+
+  document.getElementById('createAlbumForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const payload = {
+      creator: currentMember,
+      name: document.getElementById('albumName').value.trim(),
+      description: document.getElementById('albumDescription').value.trim(),
+      visibility: document.getElementById('albumVisibility').value,
+    };
+    const res = await fetch('/api/photos/albums', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) {
+      window.globalToast?.(data.error || 'Failed to create album', 'error');
+      return;
+    }
+    window.globalToast?.('Album created', 'success');
+    document.getElementById('createAlbumForm').reset();
+    document.getElementById('albumModal').classList.add('hidden');
+    await loadAlbums();
+  });
+
+  document.getElementById('watchFolderForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const payload = {
+      member: currentMember,
+      folder_uri: document.getElementById('watchFolderUri').value.trim(),
+      scope: document.getElementById('watchFolderScope').value,
+      platform: 'android',
+    };
+    const res = await fetch('/api/photos/watch-folders', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) {
+      window.globalToast?.(data.error || 'Failed to save watch folder', 'error');
+      return;
+    }
+    window.globalToast?.('Watch folder saved', 'success');
+    document.getElementById('watchFolderForm').reset();
+    await loadWatchFolders();
+  });
+
+  setScopeButtons();
+  Promise.all([loadAlbums(), loadPhotos(), loadWatchFolders()]).catch(err => {
+    window.globalToast?.(err.message || 'Failed to initialize photos page', 'error');
+  });
+})();
+</script>
+{% endblock %}

@@ -20,6 +20,10 @@ def load_config():
     config['feature_toggles'].setdefault('who_is_home', True)
     # Personal status feature toggle (new)
     config['feature_toggles'].setdefault('personal_status', True)
+    config['feature_toggles'].setdefault('shared_calendar', True)
+    config['feature_toggles'].setdefault('meal_planner', True)
+    config['feature_toggles'].setdefault('notifications', True)
+    config['feature_toggles'].setdefault('photos', True)
     # Reminders defaults & calendar start day (supports sunday..saturday or 0-6)
     rem = config.setdefault('reminders', {})
     # Do not overwrite existing user value
@@ -49,6 +53,28 @@ def load_config():
     weather.setdefault('timezone', '')
     weather.setdefault('units', 'metric')
     weather.setdefault('view', 'compact')
+    # SMTP + notifications defaults
+    smtp = config.setdefault('smtp', {})
+    smtp.setdefault('enabled', False)
+    smtp.setdefault('host', '')
+    smtp.setdefault('port', 587)
+    smtp.setdefault('secure', False)
+    smtp.setdefault('username', '')
+    smtp.setdefault('password', '')
+    smtp.setdefault('sender_email', '')
+    smtp.setdefault('sender', '')
+
+    notify = config.setdefault('notifications', {})
+    notify.setdefault('email_enabled', False)
+    notify.setdefault('mobile_enabled', False)
+    notify.setdefault('member_emails', {})
+    notify.setdefault('categories', {
+        'expiry': True,
+        'meal_today': True,
+        'shopping_add': True,
+        'shared_cloud_add': True,
+        'calendar_new_event': True,
+    })
     # Menu visibility defaults - all visible by default
     menu = config.setdefault('menu_visibility', {})
     menu.setdefault('welcome', True)
@@ -63,5 +89,9 @@ def load_config():
     menu.setdefault('pdf_compressor', True)
     menu.setdefault('qr_generator', True)
     menu.setdefault('expense_tracker', True)
+    menu.setdefault('shared_calendar', True)
+    menu.setdefault('meal_planner', True)
+    menu.setdefault('notifications', True)
+    menu.setdefault('photos', True)
     menu.setdefault('settings', True)
     return config

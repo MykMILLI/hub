@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="max-w-screen-2xl mx-auto space-y-6">
+    <div class="card p-6">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+                <h1 class="text-2xl font-bold text-gray-800 dark:text-white">Family Notice History</h1>
+                <p class="text-sm text-gray-600 dark:text-gray-400">Full audit of notices sent by {{ sender }}</p>
+            </div>
+            <a href="/" class="btn btn-secondary">Back to Dashboard</a>
+        </div>
+    </div>
+
+    <div class="card p-6">
+        <div class="text-sm text-gray-500 mb-4">Total notices: {{ total }}</div>
+        {% if items and items|length > 0 %}
+        <div class="space-y-4">
+            {% for n in items %}
+            <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                    <div class="text-sm font-semibold text-gray-800 dark:text-gray-100">
+                        {{ n.created_at.strftime('%b %d, %Y %I:%M %p') if n.created_at else 'Notice' }}
+                    </div>
+                    <div class="text-xs text-gray-500">
+                        Channels: {{ (n.channels or [])|join(', ') if n.channels else 'in_app' }}
+                        {% if n.require_ack %} · Ack required{% else %} · Ack optional{% endif %}
+                    </div>
+                </div>
+                <div class="mt-2 whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-200">{{ n.message }}</div>
+                <div class="mt-3 text-xs text-gray-500">Acknowledged {{ n.acked_count }}/{{ n.total_recipients }}</div>
+                {% if n.acked and n.acked|length > 0 %}
+                <div class="mt-1 text-xs text-green-700 dark:text-green-300">Seen: {{ n.acked|join(', ') }}</div>
+                {% endif %}
+                {% if n.pending and n.pending|length > 0 %}
+                <div class="mt-1 text-xs text-amber-700 dark:text-amber-300">Pending: {{ n.pending|join(', ') }}</div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-sm text-gray-500 dark:text-gray-400">No notices found for this sender.</div>
+        {% endif %}
+
+        {% if pages > 1 %}
+        <div class="mt-6 flex items-center justify-between gap-3">
+            <div class="text-xs text-gray-500">Page {{ page }} of {{ pages }}</div>
+            <div class="flex items-center gap-2">
+                {% if has_prev %}
+                <a href="/notice-history?page={{ prev_num }}" class="btn btn-secondary text-xs">Previous</a>
+                {% endif %}
+                {% if has_next %}
+                <a href="/notice-history?page={{ next_num }}" class="btn btn-secondary text-xs">Next</a>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="glass p-4 rounded-2xl space-y-3">
+  <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100">{{ space.name }} ({{ space.key }})</h1>
+  <p class="text-sm text-gray-500">Shared Space View</p>
+  <div class="space-y-3">
+    {% for page in pages %}
+    <article class="rounded-xl border border-gray-200 dark:border-gray-700 p-3 bg-white dark:bg-gray-900 space-y-2">
+      <h3 class="font-semibold text-gray-900 dark:text-gray-100">{{ page.title }}</h3>
+      <p class="text-xs text-gray-500">Updated by {{ page.updated_by }} • {{ page.updated_at }}</p>
+      <div class="text-sm whitespace-pre-wrap">{{ page.content }}</div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {% for media in page.media %}
+          {% if media.filename and (media.filename.endswith('.mp4') or media.filename.endswith('.webm') or media.filename.endswith('.mov') or media.filename.endswith('.avi')) %}
+          <video controls class="w-full rounded-lg border border-gray-200 dark:border-gray-700"><source src="{{ media.url }}"></video>
+          {% else %}
+          <img src="{{ media.url }}" class="w-full rounded-lg border border-gray-200 dark:border-gray-700" alt="wiki media">
+          {% endif %}
+        {% endfor %}
+      </div>
+    </article>
+    {% else %}
+    <div class="text-sm text-gray-500">No pages found.</div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

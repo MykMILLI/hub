@@ -36,6 +36,7 @@
     <ul id="choreList" class="space-y-2">
         {% for chore in chores %}
         {% set tags = (chore.tags or '[]') %}
+        {% set creator_avatar = avatar_map.get(chore.creator, '') if avatar_map else '' %}
         <li class="card p-4 flex flex-col gap-2" data-id="{{ chore.id }}" data-tags='{{ tags|safe }}' data-done="{{ '1' if chore.done else '0' }}">
             <div class="flex flex-wrap gap-2 items-center">
                 <span class="flex-1 {% if chore.done %}line-through text-gray-400{% endif %}">{{ chore.description }}</span>
@@ -52,7 +53,16 @@
                 </form>
             </div>
             <div class="flex flex-wrap gap-2 items-center justify-between text-xs text-gray-500">
-                <div>By {{ chore.creator }} at {{ chore.timestamp.strftime('%Y-%m-%d %H:%M') }}</div>
+                <div class="inline-flex items-center gap-2 min-w-0">
+                    <span class="w-6 h-6 rounded-full border border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800 overflow-hidden inline-flex items-center justify-center text-[10px] font-bold text-gray-600 dark:text-gray-300 shrink-0">
+                        {% if creator_avatar %}
+                        <img src="{{ creator_avatar }}" alt="{{ chore.creator }} avatar" class="w-full h-full object-cover">
+                        {% else %}
+                        {{ (chore.creator or 'U')[:1].upper() }}
+                        {% endif %}
+                    </span>
+                    <span class="truncate">By {{ chore.creator }} at {{ chore.timestamp.strftime('%Y-%m-%d %H:%M') }}</span>
+                </div>
                 <div class="flex-1"></div>
             </div>
             <div class="md:hidden flex flex-wrap gap-2 items-center item-tags" data-id="{{ chore.id }}"></div>

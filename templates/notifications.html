@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="max-w-7xl mx-auto space-y-5">
+  <section class="card p-5 rounded-2xl border border-gray-200/70 dark:border-gray-700/70">
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+      <div>
+        <h1 class="text-3xl font-extrabold tracking-tight">Notifications</h1>
+        <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">Filter by category, mark items as read, and review delivery history.</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <select id="notifCategory" class="p-2.5 border rounded-xl bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-sm">
+          <option value="">All categories</option>
+        </select>
+        <label class="text-sm flex items-center gap-1.5">
+          <input id="notifUnreadOnly" type="checkbox" class="rounded">
+          Unread only
+        </label>
+        <button id="notifMarkAllRead" type="button" class="btn btn-secondary">Mark Read</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="card p-4 rounded-2xl border border-gray-200/70 dark:border-gray-700/70">
+    <h2 class="text-lg font-bold mb-3">In-App Feed</h2>
+    <div id="notifFeed" class="space-y-2"></div>
+  </section>
+
+  <section class="card p-4 rounded-2xl border border-gray-200/70 dark:border-gray-700/70">
+    <h2 class="text-lg font-bold mb-3">Delivery History</h2>
+    <div class="overflow-x-auto">
+      <table class="min-w-full text-sm">
+        <thead>
+          <tr class="text-left border-b border-gray-200 dark:border-gray-700">
+            <th class="py-2 pr-2">Time</th>
+            <th class="py-2 pr-2">Category</th>
+            <th class="py-2 pr-2">Title</th>
+            <th class="py-2 pr-2">Channel</th>
+            <th class="py-2 pr-2">Status</th>
+            <th class="py-2 pr-2">Detail</th>
+          </tr>
+        </thead>
+        <tbody id="notifHistory"></tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<script>
+(function(){
+  const member = localStorage.getItem('username') || '{{ current_member_name }}';
+  const categorySelect = document.getElementById('notifCategory');
+  const unreadOnly = document.getElementById('notifUnreadOnly');
+  const markAllReadBtn = document.getElementById('notifMarkAllRead');
+  const feed = document.getElementById('notifFeed');
+  const historyBody = document.getElementById('notifHistory');
+
+  function toast(msg, type='info'){ if(window.globalToast) globalToast(msg, type); }
+  function esc(v){ return String(v || '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+  function formatDateTime(iso){ try { return new Date(iso).toLocaleString(); } catch(_) { return iso || ''; } }
+
+  async function loadFeed(){
+    const eventType = categorySelect.value || '';
+    const unreadFlag = unreadOnly.checked ? '&unread_only=true' : '';
+    const url = `/api/notifications?member=${encodeURIComponent(member)}${eventType ? `&event_type=${encodeURIComponent(eventType)}` : ''}${unreadFlag}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to load notifications');
+
+    const existing = new Set(Array.from(categorySelect.options).map(o => o.value));
+    (data.categories || []).forEach(cat => {
+      if (!cat || existing.has(cat)) return;
+      const opt = document.createElement('option');
+      opt.value = cat;
+      opt.textContent = cat;
+      categorySelect.appendChild(opt);
+    });
+
+    const items = data.items || [];
+    if (!items.length) {
+      feed.innerHTML = '<div class="text-sm text-gray-500">No notifications found.</div>';
+      return;
+    }
+
+    feed.innerHTML = items.map(item => `
+      <div class="p-3 rounded-xl border ${item.is_read ? 'border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-900/30' : 'border-indigo-300 dark:border-indigo-600 bg-indigo-50/70 dark:bg-indigo-900/20'}" data-notification-id="${item.id}">
+        <div class="flex items-start justify-between gap-2">
+          <div>
+            <div class="text-xs text-gray-500">${esc(item.event_type)} • ${esc(formatDateTime(item.created_at))}</div>
+            <div class="font-semibold text-sm mt-0.5">${esc(item.title)}</div>
+            <div class="text-sm text-gray-600 dark:text-gray-300 mt-1">${esc(item.message)}</div>
+          </div>
+          <div class="flex items-center gap-2">
+            ${item.is_read ? '<span class="text-xs text-gray-500">Read</span>' : `<button type="button" class="btn btn-secondary text-xs notif-read-btn" data-id="${item.id}">Mark Read</button>`}
+          </div>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  async function loadHistory(){
+    const eventType = categorySelect.value || '';
+    const url = `/api/notifications/history?member=${encodeURIComponent(member)}${eventType ? `&event_type=${encodeURIComponent(eventType)}` : ''}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to load delivery history');
+
+    const rows = data.items || [];
+    historyBody.innerHTML = rows.length ? rows.map(row => `
+      <tr class="border-b border-gray-100 dark:border-gray-800">
+        <td class="py-2 pr-2 whitespace-nowrap">${esc(formatDateTime(row.created_at))}</td>
+        <td class="py-2 pr-2">${esc(row.event_type)}</td>
+        <td class="py-2 pr-2">${esc(row.title)}</td>
+        <td class="py-2 pr-2">${esc(row.channel)}</td>
+        <td class="py-2 pr-2">${esc(row.status)}</td>
+        <td class="py-2 pr-2">${esc(row.detail)}</td>
+      </tr>
+    `).join('') : '<tr><td colspan="6" class="py-3 text-gray-500">No delivery history found.</td></tr>';
+  }
+
+  async function markRead(id){
+    const res = await fetch(`/api/notifications/${id}/read`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ member })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to mark notification as read');
+  }
+
+  async function markAllRead(){
+    const eventType = categorySelect.value || '';
+    const res = await fetch('/api/notifications/mark-read', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ member, event_type: eventType })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to mark notifications as read');
+    return data.count || 0;
+  }
+
+  document.addEventListener('click', async (event) => {
+    const btn = event.target.closest('.notif-read-btn');
+    if (!btn) return;
+    try {
+      const id = Number(btn.getAttribute('data-id'));
+      await markRead(id);
+      const card = feed.querySelector(`[data-notification-id="${id}"]`);
+      if (card) card.remove();
+      if (!feed.querySelector('[data-notification-id]')) {
+        feed.innerHTML = '<div class="text-sm text-gray-500">No notifications found.</div>';
+      }
+      await loadHistory();
+      toast('Marked as read', 'success');
+    } catch (err) {
+      toast(err.message || 'Failed', 'error');
+    }
+  });
+
+  categorySelect.addEventListener('change', async () => {
+    try {
+      await loadFeed();
+      await loadHistory();
+    } catch (err) {
+      toast(err.message || 'Failed loading notifications', 'error');
+    }
+  });
+
+  unreadOnly.addEventListener('change', async () => {
+    try {
+      await loadFeed();
+    } catch (err) {
+      toast(err.message || 'Failed loading notifications', 'error');
+    }
+  });
+
+  markAllReadBtn.addEventListener('click', async () => {
+    try {
+      const count = await markAllRead();
+      await loadFeed();
+      await loadHistory();
+      toast(`Marked ${count} notification(s) as read`, 'success');
+    } catch (err) {
+      toast(err.message || 'Failed marking notifications', 'error');
+    }
+  });
+
+  (async function init(){
+    try {
+      await loadFeed();
+      await loadHistory();
+    } catch (err) {
+      toast(err.message || 'Failed to load notifications', 'error');
+    }
+  })();
+})();
+</script>
+{% endblock %}

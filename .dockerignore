@@ -1,19 +1,49 @@
+# Python cache/artifacts
 __pycache__/
+**/__pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.py[cod]
+
+# Local DB/log/runtime artifacts
 *.db
 *.sqlite3
 *.log
 *.env
-*.git
-*.gitignore
-*.DS_Store
+
+# VCS / editor / CI metadata
+.git/
+.github/
+.gitignore
+.vscode/
+.DS_Store
+
+# Local environments / caches / tests
 .venv/
 .pytest_cache/
-tests/
 htmlcov/
 .coverage
 coverage.xml
+tests/
+
+# Node artifacts
 node_modules/
 package-lock.json
+
+# Generated build artifacts (can be very large)
+build/
+**/build/
+flutter/build/
+android-companion/build/
+flutter/.dart_tool/
+
+# Large local content not needed in image build context
+temp/
+data/
+media/
+pdfs/
+uploads/
+
+# Docs and planning notes (not required at runtime)
+*.md

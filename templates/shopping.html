@@ -1,49 +1,13 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="mx-auto">
-    <h2 class="text-xl font-bold mb-4">Shopping List</h2>
-    <form method="POST" id="shoppingForm" class="mb-2">
-        <div class="grid grid-cols-1 md:grid-cols-12 gap-3">
-            <div class="md:col-span-4">
-                <label class="block text-sm text-gray-600 dark:text-gray-300 mb-1">Item</label>
-                <div class="relative h-11">
-                    <input type="text" name="item" id="itemInput" class="w-full h-full p-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-blue-500" placeholder="Add item..." required autocomplete="off">
-                    <!-- Autofill dropdown anchored to input width -->
-                    <div id="itemAutoFill" class="absolute left-0 right-0 z-10 mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow max-h-72 overflow-auto hidden"></div>
-                </div>
-            </div>
-            <div class="md:col-span-2">
-                <label class="block text-sm text-gray-600 dark:text-gray-300 mb-1">Price</label>
-                <input type="number" name="price" id="priceInput" class="w-full h-11 p-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-blue-500" placeholder="$0.00" step="0.01" min="0">
-            </div>
-            <div class="md:col-span-1">
-                <label class="block text-sm text-gray-600 dark:text-gray-300 mb-1">Qty</label>
-                <input type="number" name="quantity" id="quantityInput" class="w-full h-11 p-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-blue-500" placeholder="1" value="1" step="0.1" min="0.1">
-            </div>
-            <div class="md:col-span-3">
-                <label class="block text-sm text-gray-600 dark:text-gray-300 mb-1">Tags (stores, categories)</label>
-                <div class="flex flex-wrap gap-2 rounded focus-within:ring-1 focus-within:ring-blue-500 items-start h-11" id="tagInputWrap">
-                    <input type="text" id="tagInput" class="flex-1 min-w-[140px] h-full p-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-blue-500" placeholder="Add tag and press Enter">
-                </div>
-                <input type="hidden" name="tags" id="tagsField" value="[]">
-                <div class="mt-2 flex flex-wrap gap-2 text-xs" id="tagLibrary"></div>
-            </div>
-            <div class="md:col-span-2">
-                <label class="block text-sm text-gray-600 dark:text-gray-300 mb-1 opacity-0">Action</label>
-                <input type="hidden" name="creator" id="creator">
-                <button type="submit" class="w-full btn btn-primary h-11">Add</button>
-            </div>
-        </div>
-    </form>
-
-    <div class="mb-4 flex flex-wrap gap-2 items-center">
-        <span class="text-sm text-gray-600">Filter by tag:</span>
-        <div id="tagFilters" class="flex flex-wrap gap-2"></div>
-        <button id="clearTagFilters" class="btn btn-secondary text-xs">Clear</button>
+<div class="mx-auto space-y-4">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+        <h2 class="text-xl font-bold">Shopping Lists</h2>
+        <button id="addListBtn" class="btn btn-primary">+ New List</button>
     </div>
-    
+
     {% if groceries_budget > 0 %}
-    <div class="mb-4 p-4 bg-gradient-to-r from-orange-50 to-amber-50 dark:from-orange-900/20 dark:to-amber-900/20 border border-orange-200 dark:border-orange-800 rounded-lg">
+    <div class="p-4 bg-gradient-to-r from-orange-50 to-amber-50 dark:from-orange-900/20 dark:to-amber-900/20 border border-orange-200 dark:border-orange-800 rounded-lg">
         <div class="flex items-center justify-between">
             <div>
                 <h3 class="text-sm font-semibold text-orange-800 dark:text-orange-300">Family Budget - Groceries</h3>
@@ -56,328 +20,857 @@
         </div>
     </div>
     {% endif %}
-    
-    <div id="cartTotal" class="mb-4 p-3 bg-blue-50 dark:bg-blue-900 rounded text-right">
-        <span class="text-sm text-gray-600 dark:text-gray-300">Total: </span>
-        <span class="text-xl font-bold text-blue-600 dark:text-blue-300" id="totalPrice">$0.00</span>
+
+    <div class="grid grid-cols-1 xl:grid-cols-[minmax(280px,360px)_minmax(0,1fr)] gap-4 items-start">
+        <aside class="card p-3 min-w-0">
+            <div class="text-sm font-semibold mb-2">Your Lists</div>
+            <div id="shoppingLists" class="space-y-2"></div>
+        </aside>
+
+        <section class="space-y-4 min-w-0">
+            <div class="card p-4 space-y-3">
+                <div class="text-sm font-semibold">Add Item</div>
+                <form id="addItemForm" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 xl:grid-cols-12 gap-3 items-end">
+                    <div class="sm:col-span-2 lg:col-span-3 xl:col-span-4 relative min-w-0">
+                        <label class="block text-xs text-gray-500 mb-1">Item</label>
+                        <input id="itemName" class="w-full h-11 p-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-blue-500" placeholder="Eggs" required autocomplete="off">
+                        <div id="repoTypeahead" class="hidden absolute z-20 left-0 right-0 mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow max-h-64 overflow-auto"></div>
+                    </div>
+                    <div class="lg:col-span-1 xl:col-span-2 min-w-0">
+                        <label class="block text-xs text-gray-500 mb-1">Store</label>
+                        <input id="itemStore" class="w-full h-11 p-2 border border-gray-300 dark:border-gray-600 rounded" placeholder="Drug Mart">
+                    </div>
+                    <div class="lg:col-span-1 xl:col-span-2 min-w-0">
+                        <label class="block text-xs text-gray-500 mb-1">Price</label>
+                        <input id="itemPrice" type="number" min="0" step="0.01" class="w-full h-11 p-2 border border-gray-300 dark:border-gray-600 rounded" placeholder="0.00">
+                    </div>
+                    <div class="lg:col-span-1 xl:col-span-2 min-w-0">
+                        <label class="block text-xs text-gray-500 mb-1">Qty</label>
+                        <input id="itemQty" type="number" min="0.1" step="0.1" value="1" class="w-full h-11 p-2 border border-gray-300 dark:border-gray-600 rounded">
+                    </div>
+                    <div class="sm:col-span-2 lg:col-span-1 xl:col-span-2 min-w-0">
+                        <label class="block text-xs text-gray-500 mb-1 opacity-0">Add</label>
+                        <button class="w-full h-11 btn btn-primary" type="submit">Add</button>
+                    </div>
+                </form>
+                <div id="bigPurchaseFields" class="hidden border border-indigo-200 dark:border-indigo-800 rounded-lg p-3 bg-indigo-50/60 dark:bg-indigo-900/10 space-y-3">
+                    <div class="text-xs font-semibold uppercase tracking-wide text-indigo-700 dark:text-indigo-300">Big Purchase Planning</div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                        <div>
+                            <label class="block text-xs text-gray-500 mb-1">Category</label>
+                            <select id="purchaseCategory" class="w-full h-11 p-2 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white">
+                                <option value="">Select</option>
+                                <option value="appliance">Appliance</option>
+                                <option value="furniture">Furniture</option>
+                                <option value="electronics">Electronics</option>
+                                <option value="other">Other</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-500 mb-1">Target Price</label>
+                            <input id="targetPrice" type="number" min="0" step="0.01" class="w-full h-11 p-2 border border-gray-300 dark:border-gray-600 rounded" placeholder="999.00">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-500 mb-1">Max Budget</label>
+                            <input id="budgetCeiling" type="number" min="0" step="0.01" class="w-full h-11 p-2 border border-gray-300 dark:border-gray-600 rounded" placeholder="1299.00">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-500 mb-1">Size / Dimensions</label>
+                            <input id="sizeRequirements" class="w-full h-11 p-2 border border-gray-300 dark:border-gray-600 rounded" placeholder="36in W x 30in D">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-500 mb-1">Planning Notes</label>
+                        <textarea id="planningNotes" rows="2" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded" placeholder="Color, outlet location, delivery window..."></textarea>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto] gap-3 items-end">
+                        <div>
+                            <label class="block text-xs text-gray-500 mb-1">Reference Photo</label>
+                            <input id="purchasePhotoInput" type="file" accept="image/*" capture="environment" class="w-full text-sm file:mr-3 file:px-3 file:py-2 file:rounded file:border-0 file:bg-blue-600 file:text-white hover:file:bg-blue-700">
+                        </div>
+                        <button id="uploadPurchasePhotoBtn" type="button" class="btn btn-secondary h-11">Upload Photo</button>
+                    </div>
+                    <div id="purchasePhotoStatus" class="text-xs text-gray-500"></div>
+                    <img id="purchasePhotoPreview" class="hidden max-h-40 rounded border border-gray-200 dark:border-gray-700" alt="Purchase preview">
+                </div>
+                <div id="addItemHint" class="text-xs text-gray-500">If item + price are entered, it is saved to your reusable item repo automatically.</div>
+            </div>
+
+            <div class="card p-4 min-w-0">
+                <div class="flex items-center justify-between gap-2 mb-3">
+                    <div class="font-semibold" id="activeListTitle">Items</div>
+                    <div class="text-sm"><span class="text-gray-500">Estimated total: </span><span id="activeTotal" class="font-bold text-blue-600 dark:text-blue-300">$0.00</span></div>
+                </div>
+                <ul id="itemsHost" class="space-y-2"></ul>
+            </div>
+        </section>
     </div>
 
-    <ul id="shoppingList" class="space-y-2">
-        {% for item in items %}
-        {% set tags = (item.tags or '[]') %}
-        <li class="card p-4 flex flex-col gap-2" data-id="{{ item.id }}" data-tags='{{ tags|safe }}' data-checked="{{ '1' if item.checked else '0' }}" data-price="{{ item.price or '' }}" data-quantity="{{ item.quantity or 1 }}">
-            <div class="flex flex-wrap gap-2 items-center">
-                <span class="flex-1 {% if item.checked %}line-through text-gray-400{% endif %}">{{ item.item }}{% if item.price %}<span class="text-sm text-gray-500 ml-2">${{ "%.2f"|format(item.price) }} {% if item.quantity != 1 %}× {{ "%.1f"|format(item.quantity) }}{% endif %}</span>{% endif %}</span>
-                <div class="hidden md:flex flex-wrap gap-2 item-tags" data-id="{{ item.id }}"></div>
-                <form method="POST" action="/shopping/check/{{ item.id }}">
-                    <button type="submit" class="btn {{ 'btn-secondary' if item.checked else 'btn-success' }}">
-                        {{ 'Purchased · Undo' if item.checked else 'Mark Purchased' }}
-                    </button>
-                </form>
-                <button type="button" class="btn btn-secondary edit-btn" data-id="{{ item.id }}">Edit</button>
-                <form method="POST" action="/shopping/delete/{{ item.id }}" class="delete-form" data-creator="{{ item.creator }}">
-                    <input type="hidden" name="user">
-                    <button type="submit" class="btn btn-danger" title="Delete"><i class="fa fa-times"></i></button>
-                </form>
-            </div>
-            <div class="flex flex-wrap gap-2 items-center justify-between text-xs text-gray-500">
-                <div>By {{ item.creator }} at {{ item.timestamp.strftime('%Y-%m-%d %H:%M') }}</div>
-                <div class="flex-1"></div>
-            </div>
-            <div class="md:hidden flex flex-wrap gap-2 items-center item-tags" data-id="{{ item.id }}"></div>
-        </li>
-        {% endfor %}
-    </ul>
+    <section class="card p-4 space-y-3">
+        <div class="flex items-center justify-between gap-2">
+            <h3 class="font-semibold">Saved Item Repo</h3>
+            <button id="addRepoBtn" class="btn btn-secondary text-xs">+ Add Repo Item</button>
+        </div>
+        <div class="flex flex-wrap gap-2">
+            <input id="repoSearch" class="flex-1 min-w-[220px] h-10 p-2 border border-gray-300 dark:border-gray-600 rounded" placeholder="Search repo items...">
+            <button id="repoRefresh" class="btn btn-secondary text-xs">Refresh</button>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="border-b border-gray-200 dark:border-gray-700 text-left">
+                        <th class="py-2">Item</th>
+                        <th class="py-2">Store</th>
+                        <th class="py-2">Price</th>
+                        <th class="py-2">Category</th>
+                        <th class="py-2 w-36">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="repoTable"></tbody>
+            </table>
+        </div>
+    </section>
 </div>
 
-{% block extra_head %}{% endblock %}
-<script src="{{ url_for('static', filename='js/tags.js') }}"></script>
-<script src="{{ url_for('static', filename='js/form_tags.js') }}"></script>
-<script id="shoppingSuggestions" type="application/json">{{ suggestions|tojson|safe }}</script>
+<div id="listModal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-4 w-full max-w-md">
+        <h4 id="listModalTitle" class="font-semibold mb-3">New List</h4>
+        <div class="space-y-3">
+            <input id="listNameInput" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded" placeholder="List name">
+            <div>
+                <label class="block text-xs text-gray-500 mb-1">Color</label>
+                <input id="listColorInput" type="color" value="#3B82F6" class="h-10 w-16 border border-gray-300 dark:border-gray-600 rounded">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-500 mb-1">List Type</label>
+                <select id="listTypeInput" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white">
+                    <option value="standard">Standard Shopping</option>
+                    <option value="big_purchase">Big Purchase Planner</option>
+                </select>
+            </div>
+        </div>
+        <div class="mt-4 flex justify-end gap-2">
+            <button id="listModalCancel" class="btn btn-secondary">Cancel</button>
+            <button id="listModalSave" class="btn btn-primary">Save</button>
+        </div>
+    </div>
+</div>
+
+<div id="repoModal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-4 w-full max-w-lg">
+        <h4 id="repoModalTitle" class="font-semibold mb-3">Repo Item</h4>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div class="md:col-span-2">
+                <label class="block text-xs text-gray-500 mb-1">Item</label>
+                <input id="repoNameInput" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded" placeholder="Eggs">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-500 mb-1">Store</label>
+                <input id="repoStoreInput" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded" placeholder="Drug Mart">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-500 mb-1">Price</label>
+                <input id="repoPriceInput" type="number" min="0" step="0.01" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded" placeholder="0.00">
+            </div>
+            <div class="md:col-span-2">
+                <label class="block text-xs text-gray-500 mb-1">Category</label>
+                <input id="repoCategoryInput" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded" placeholder="Dairy">
+            </div>
+        </div>
+        <div class="mt-4 flex justify-end gap-2">
+            <button id="repoModalCancel" class="btn btn-secondary">Cancel</button>
+            <button id="repoModalSave" class="btn btn-primary">Save</button>
+        </div>
+    </div>
+</div>
+
+<div id="deleteListModal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-4 w-full max-w-md">
+        <h4 class="font-semibold mb-2">Delete Shopping List</h4>
+        <p class="text-sm text-gray-600 dark:text-gray-300 mb-3">Choose what to do with items in <span id="deleteListName" class="font-semibold"></span>.</p>
+
+        <div class="space-y-2 text-sm">
+            <label class="flex items-start gap-2">
+                <input type="radio" name="deleteListStrategy" value="move" checked class="mt-1">
+                <span>Move items to another list</span>
+            </label>
+            <div class="pl-6">
+                <select id="deleteListTarget" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white"></select>
+            </div>
+
+            <label class="flex items-start gap-2">
+                <input type="radio" name="deleteListStrategy" value="delete_all" class="mt-1">
+                <span>Delete all items in this list</span>
+            </label>
+        </div>
+
+        <div class="mt-4 flex justify-end gap-2">
+            <button id="deleteListCancel" class="btn btn-secondary">Cancel</button>
+            <button id="deleteListConfirm" class="btn btn-danger">Delete List</button>
+        </div>
+    </div>
+</div>
+
 <script>
-// Initialize creator
-document.getElementById('creator').value = localStorage.getItem('username') || '';
-document.querySelectorAll('input[name="user"]').forEach(i=> i.value = localStorage.getItem('username') || '');
-
-// Scoped Tags for shopping
-const T = Tags.scoped('shopping');
-
-// Tag input handling for create form (reusable)
 (function(){
-    FormTags.initTagInputForm(T, {
-        formId: 'shoppingForm',
-        wrapId: 'tagInputWrap',
-        inputId: 'tagInput',
-        hiddenId: 'tagsField',
-        libraryId: 'tagLibrary'
-    });
-})();
+    const currentUser = localStorage.getItem('username') || '';
+    const adminName = '{{ config.admin_name }}';
 
-// Build filter chips from all known tags
-(function(){
-    const filterHost = document.getElementById('tagFilters');
-    const clearBtn = document.getElementById('clearTagFilters');
-    const selected = new Set();
-    function collectTags(){
-        const set = new Set();
-        document.querySelectorAll('#shoppingList li').forEach(li=>{
-            try{ (JSON.parse(li.dataset.tags||'[]')||[]).forEach(t=> set.add(t)); }catch(e){}
-        });
-        T.getAllKnownTags().forEach(t=> set.add(t));
-        return [...set].sort((a,b)=> a.localeCompare(b));
+    let state = {
+        lists: [],
+        activeListId: Number('{{ selected_list_id or 0 }}') || null,
+        activeItems: [],
+        repoItems: [],
+        selectedRepoId: null,
+        editingListId: null,
+        deletingListId: null,
+        editingRepoId: null,
+        pendingPurchasePhotoFilename: null,
+        pendingPurchasePhotoUrl: null,
+    };
+
+    const listHost = document.getElementById('shoppingLists');
+    const itemHost = document.getElementById('itemsHost');
+    const activeTitle = document.getElementById('activeListTitle');
+    const activeTotal = document.getElementById('activeTotal');
+
+    const listModal = document.getElementById('listModal');
+    const listNameInput = document.getElementById('listNameInput');
+    const listColorInput = document.getElementById('listColorInput');
+
+    const repoModal = document.getElementById('repoModal');
+    const repoNameInput = document.getElementById('repoNameInput');
+    const repoStoreInput = document.getElementById('repoStoreInput');
+    const repoPriceInput = document.getElementById('repoPriceInput');
+    const repoCategoryInput = document.getElementById('repoCategoryInput');
+
+    const deleteListModal = document.getElementById('deleteListModal');
+    const deleteListName = document.getElementById('deleteListName');
+    const deleteListTarget = document.getElementById('deleteListTarget');
+    const deleteListConfirm = document.getElementById('deleteListConfirm');
+    const deleteListCancel = document.getElementById('deleteListCancel');
+
+    const itemNameInput = document.getElementById('itemName');
+    const itemStoreInput = document.getElementById('itemStore');
+    const itemPriceInput = document.getElementById('itemPrice');
+    const itemQtyInput = document.getElementById('itemQty');
+    const repoTypeahead = document.getElementById('repoTypeahead');
+    const listTypeInput = document.getElementById('listTypeInput');
+
+    const bigPurchaseFields = document.getElementById('bigPurchaseFields');
+    const addItemHint = document.getElementById('addItemHint');
+    const purchaseCategoryInput = document.getElementById('purchaseCategory');
+    const targetPriceInput = document.getElementById('targetPrice');
+    const budgetCeilingInput = document.getElementById('budgetCeiling');
+    const sizeRequirementsInput = document.getElementById('sizeRequirements');
+    const planningNotesInput = document.getElementById('planningNotes');
+    const purchasePhotoInput = document.getElementById('purchasePhotoInput');
+    const uploadPurchasePhotoBtn = document.getElementById('uploadPurchasePhotoBtn');
+    const purchasePhotoStatus = document.getElementById('purchasePhotoStatus');
+    const purchasePhotoPreview = document.getElementById('purchasePhotoPreview');
+
+    function toast(msg, type='info') {
+        if (window.globalToast) window.globalToast(msg, type);
     }
-    function apply(){
-        const tags = [...selected];
-        document.querySelectorAll('#shoppingList li').forEach(li=>{
-            if(!tags.length){ li.classList.remove('hidden'); return; }
-            let matched=false; try{ const tg=JSON.parse(li.dataset.tags||'[]')||[]; matched = tg.some(t=>tags.includes(t)); }catch(e){}
-            li.classList.toggle('hidden', !matched);
-        });
-    }
-    function render(){
-        const all = collectTags();
-        filterHost.innerHTML='';
-        all.forEach(t=>{
-            const pill = T.makePill(t, ()=>{ if(selected.has(t)) selected.delete(t); else selected.add(t); render(); apply(); }, selected.has(t));
-            filterHost.appendChild(pill);
-        });
-        clearBtn.style.display = selected.size > 0 ? 'inline-block' : 'none';
-    }
-    clearBtn.addEventListener('click', ()=>{ selected.clear(); render(); apply(); });
-    T.onChange(()=> render());
-    render();
-})();
 
-// Item tags display (no inline add); update via Edit modal/API
-(function(){
-    const list = document.getElementById('shoppingList');
-    function renderItemTags(li){
-        const id = li.dataset.id;
-        let tags=[]; try{ tags = JSON.parse(li.dataset.tags||'[]')||[]; }catch(e){}
-        const hosts = li.querySelectorAll('.item-tags');
-        hosts.forEach(host=>{
-            host.innerHTML = '';
-            tags.forEach(t=> host.appendChild(T.makeFilledPill(t, null)));
-        });
-        // record known tags for library/filter
-        T.recordTags(tags);
+    function getActiveList() {
+        return state.lists.find(l => l.id === state.activeListId) || null;
     }
-    list.querySelectorAll('li').forEach(li=>{
-        renderItemTags(li);
-    });
-})();
 
-// Hide delete for non-owners (fallback; base template also handles)
-(function(){
-    const adminName='{{ config.admin_name }}';
-    const current=localStorage.getItem('username');
-    document.querySelectorAll('.delete-form').forEach(f=>{
-        const c=f.getAttribute('data-creator');
-        if(!(current===c||current===adminName||current==='Administrator'||current==='admin')) f.style.display='none';
-    });
-})();
-// Attach current user to suggestion buttons
-(function(){
-    const current = localStorage.getItem('username') || '';
-    document.querySelectorAll('form.inline input[name="creator"]').forEach(i=>{ i.value = current; });
-})();
+    function isBigPurchaseListActive() {
+        const active = getActiveList();
+        return !!active && (active.list_type || 'standard') === 'big_purchase';
+    }
 
-// Edit modal for item + tags
-(function(){
-        // Create modal once
-        const modal = document.createElement('div');
-        modal.id = 'editModal';
-        modal.className = 'fixed inset-0 hidden items-center justify-center bg-black/50 z-50';
-        modal.innerHTML = `
-            <div class="bg-white dark:bg-gray-800 rounded shadow max-w-lg w-full p-4">
-                <h3 class="text-lg font-semibold mb-3">Edit Item</h3>
-                <div class="mb-3">
-                    <label class="block text-sm mb-1">Item</label>
-                    <input type="text" id="editItemInput" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                </div>
-                <div>
-                    <label class="block text-sm mb-1">Tags</label>
-                    <div id="editTagWrap" class="flex flex-wrap gap-2 border border-gray-300 dark:border-gray-600 rounded p-2 focus-within:ring-1 focus-within:ring-blue-500">
-                        <input type="text" id="editTagInput" class="flex-1 min-w-[140px] outline-none bg-transparent" placeholder="Add tag and press Enter" />
-                    </div>
-                            <div class="mt-2 flex flex-wrap gap-2 text-xs" id="editTagLibrary"></div>
-                </div>
-                <div class="mt-4 flex justify-end gap-2">
-                    <button type="button" id="editCancel" class="btn btn-secondary">Cancel</button>
-                    <button type="button" id="editSave" class="btn btn-primary">Save</button>
-                </div>
-            </div>`;
-        document.body.appendChild(modal);
-        const editBtns = document.querySelectorAll('.edit-btn');
-        let currentId = null; let tags = [];
-        const itemInput = document.getElementById('editItemInput');
-        const tagWrap = document.getElementById('editTagWrap');
-        const tagInput = document.getElementById('editTagInput');
-        function render(){ T.renderPills(tagWrap, tags, (t)=>{ tags = tags.filter(x=>x!==t); render(); }); }
-        tagInput.addEventListener('keydown', (e)=>{
-            if(e.key==='Enter' || e.key===','){ e.preventDefault(); const v=tagInput.value.trim(); if(v && !tags.includes(v)){ tags.push(v); T.ensureColor(v); render(); } tagInput.value=''; }
-            if(e.key==='Backspace' && !tagInput.value && tags.length){ tags.pop(); render(); }
-        });
-            function open(id){
-            currentId = id;
-            const li = document.querySelector(`#shoppingList li[data-id="${id}"]`);
-            if(!li) return;
-            let tg=[]; try{ tg = JSON.parse(li.dataset.tags||'[]')||[]; }catch(e){}
-            tags = tg.slice(); render();
-            itemInput.value = li.querySelector('span.flex-1').textContent.trim();
-                // Render library in modal
-                const lib = document.getElementById('editTagLibrary');
-                T.renderLibrary(lib, (t)=>{ if(!tags.includes(t)){ tags.push(t); render(); }});
-            modal.classList.remove('hidden'); modal.classList.add('flex');
-            itemInput.focus();
+    function updateBigPurchaseUi() {
+        const show = isBigPurchaseListActive();
+        bigPurchaseFields.classList.toggle('hidden', !show);
+        addItemHint.textContent = show
+            ? 'Big purchase mode: attach photos and planning details for appliances, furniture, and other major items.'
+            : 'If item + price are entered, it is saved to your reusable item repo automatically.';
+    }
+
+    function resetBigPurchaseForm() {
+        purchaseCategoryInput.value = '';
+        targetPriceInput.value = '';
+        budgetCeilingInput.value = '';
+        sizeRequirementsInput.value = '';
+        planningNotesInput.value = '';
+        purchasePhotoInput.value = '';
+        purchasePhotoStatus.textContent = '';
+        purchasePhotoPreview.src = '';
+        purchasePhotoPreview.classList.add('hidden');
+        state.pendingPurchasePhotoFilename = null;
+        state.pendingPurchasePhotoUrl = null;
+    }
+
+    function setPurchasePhotoPreview(url) {
+        if (!url) {
+            purchasePhotoPreview.src = '';
+            purchasePhotoPreview.classList.add('hidden');
+            return;
         }
-        async function save(){
-            if(!currentId) return;
-            // Harvest any pending comma-separated tokens in the edit input
-            FormTags.harvestPendingInto(T, tagInput, tags);
-            const payload = { item: itemInput.value.trim(), tags: tags };
-            try{
-                const res = await fetch(`/api/shopping/${currentId}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
-                const data = await res.json();
-                if(data.ok){
-                    const li = document.querySelector(`#shoppingList li[data-id="${currentId}"]`);
-                    if(li){
-                        li.dataset.tags = JSON.stringify(data.item.tags||[]);
-                        li.querySelector('span.flex-1').textContent = data.item.item;
-                        const hosts = li.querySelectorAll('.item-tags');
-                        hosts.forEach(host=>{ host.innerHTML=''; (data.item.tags||[]).forEach(t=> host.appendChild(T.makePill(t))); });
-                                    T.recordTags(data.item.tags||[]);
-                                    refreshFiltersAndLibrary();
-                    }
-                    close();
-                }
-            }catch(e){ console.error(e); }
-        }
-        function close(){ modal.classList.add('hidden'); modal.classList.remove('flex'); currentId=null; }
-        document.getElementById('editCancel').addEventListener('click', close);
-        document.getElementById('editSave').addEventListener('click', save);
-        editBtns.forEach(btn=> btn.addEventListener('click', ()=> open(btn.dataset.id)));
-    })();
-
-// Build chips suggestions under the Item input (non-submitting; fills input)
-(function(){
-    const box = document.getElementById('itemAutoFill');
-    const input = document.getElementById('itemInput');
-    const HIDE_KEY = 'shopping:hidden_suggestions';
-    function getHidden(){ try{return new Set(JSON.parse(localStorage.getItem(HIDE_KEY)||'[]'));}catch(e){return new Set();} }
-    function setHidden(s){ try{ localStorage.setItem(HIDE_KEY, JSON.stringify([...s])); }catch(e){} }
-    let base = [];
-    try { base = JSON.parse(document.getElementById('shoppingSuggestions').textContent || '[]') || []; } catch(e) { base = []; }
-    function currentListItems(){
-        return [...document.querySelectorAll('#shoppingList li span.flex-1')].map(n=> n.textContent.trim().toLowerCase());
+        purchasePhotoPreview.src = url;
+        purchasePhotoPreview.classList.remove('hidden');
     }
-    function render(){
-        const q = input.value.trim().toLowerCase();
-        const hidden = getHidden();
-        const existing = new Set(currentListItems());
-        const list = base.filter(s=> !hidden.has(s) && !existing.has(s.toLowerCase()) && (!q || s.toLowerCase().includes(q))).slice(0,50);
-        if(!list.length){ box.classList.add('hidden'); box.innerHTML=''; return; }
-        box.innerHTML='';
-        list.forEach(s=>{
+
+    async function uploadSelectedPurchasePhoto() {
+        const file = purchasePhotoInput.files && purchasePhotoInput.files[0] ? purchasePhotoInput.files[0] : null;
+        if (!file) return true;
+
+        const formData = new FormData();
+        formData.append('photo', file);
+
+        purchasePhotoStatus.textContent = 'Uploading photo...';
+        const res = await fetch('/api/shopping/purchase-photo', {
+            method: 'POST',
+            body: formData,
+        });
+        const data = await res.json();
+        if (!data.ok) {
+            purchasePhotoStatus.textContent = '';
+            toast(data.error || 'Photo upload failed', 'error');
+            return false;
+        }
+
+        state.pendingPurchasePhotoFilename = data.filename || null;
+        state.pendingPurchasePhotoUrl = data.url || null;
+        setPurchasePhotoPreview(state.pendingPurchasePhotoUrl);
+        purchasePhotoStatus.textContent = 'Photo uploaded';
+        return true;
+    }
+
+    async function loadLists() {
+        const res = await fetch('/api/shopping/lists');
+        const data = await res.json();
+        if (!data.ok) return;
+        state.lists = data.lists || [];
+        if (!state.activeListId && state.lists.length) state.activeListId = state.lists[0].id;
+        if (state.activeListId && !state.lists.some(l => l.id === state.activeListId) && state.lists.length) {
+            state.activeListId = state.lists[0].id;
+        }
+        renderLists();
+        await loadItems();
+    }
+
+    function renderLists() {
+        listHost.innerHTML = '';
+        state.lists.forEach(lst => {
+            const listType = lst.list_type || 'standard';
+            const listTypeLabel = listType === 'big_purchase' ? 'Big Purchase' : 'Standard';
             const row = document.createElement('div');
-            row.className = 'flex items-center justify-between px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer select-none';
-            const text = document.createElement('div'); text.textContent = s; text.className='truncate pr-2 flex-1';
-            const del = document.createElement('button'); del.type='button'; del.title='Delete suggestion'; del.className='text-red-600'; del.innerHTML='<i class="fa fa-times"></i>';
-            del.addEventListener('click', async (e)=>{
-                e.stopPropagation();
-                // Hide locally and ask server to drop one history row for this suggestion (best effort)
-                const h=getHidden(); h.add(s); setHidden(h);
-                try{ await fetch('/api/shopping/history', { method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({item: s}) }); }catch(e){}
-                render();
+            row.className = `flex items-center gap-2 p-2 rounded border cursor-pointer ${state.activeListId === lst.id ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-200 dark:border-gray-700'}`;
+            row.innerHTML = `
+                <div class="w-3 h-3 rounded-full" style="background:${lst.color || '#3B82F6'}"></div>
+                <div class="flex-1 min-w-0">
+                    <div class="truncate font-medium">${escapeHtml(lst.name)}</div>
+                    <div class="text-[11px] text-gray-500">${escapeHtml(listTypeLabel)}</div>
+                    <div class="text-xs text-gray-500">${lst.active_count || 0} active · $${Number(lst.estimated_total || 0).toFixed(2)}</div>
+                </div>
+                <button class="btn btn-secondary text-xs list-edit" data-id="${lst.id}" title="Edit">Edit</button>
+                <button class="btn btn-danger text-xs list-del" data-id="${lst.id}" title="Delete">×</button>
+            `;
+            row.addEventListener('click', (e) => {
+                if (e.target.closest('.list-edit') || e.target.closest('.list-del')) return;
+                state.activeListId = lst.id;
+                renderLists();
+                loadItems();
             });
-            row.addEventListener('click', ()=>{ input.value = s; box.classList.add('hidden'); input.focus(); });
-            row.appendChild(text);
-            const actions=document.createElement('div'); actions.className='flex items-center gap-2'; actions.appendChild(del); row.appendChild(actions);
-            box.appendChild(row);
+            listHost.appendChild(row);
         });
-        box.classList.remove('hidden');
-    }
-    input.addEventListener('input', render);
-    input.addEventListener('focus', render);
-    document.addEventListener('click', (e)=>{ if(!box.contains(e.target) && e.target!==input){ box.classList.add('hidden'); }});
-    // Expose render globally so delete actions can refresh autofill
-    window.refreshShoppingAutofill = render;
-})();
 
-function refreshFiltersAndLibrary(){
-    // Rebuild tag filter list and library after changes
-    const filterHost = document.getElementById('tagFilters');
-    const allTags = new Set();
-    document.querySelectorAll('#shoppingList li').forEach(li=>{
-        try{ (JSON.parse(li.dataset.tags||'[]')||[]).forEach(t=>allTags.add(t)); }catch(e){}
+        listHost.querySelectorAll('.list-edit').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const listId = Number(btn.dataset.id);
+                const row = state.lists.find(l => l.id === listId);
+                if (!row) return;
+                state.editingListId = listId;
+                document.getElementById('listModalTitle').textContent = 'Edit List';
+                listNameInput.value = row.name || '';
+                listColorInput.value = row.color || '#3B82F6';
+                listTypeInput.value = row.list_type || 'standard';
+                openListModal();
+            });
+        });
+
+        listHost.querySelectorAll('.list-del').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const listId = Number(btn.dataset.id);
+                openDeleteListModal(listId);
+            });
+        });
+
+        updateBigPurchaseUi();
+    }
+
+    function openDeleteListModal(listId) {
+        const row = state.lists.find(l => l.id === listId);
+        if (!row) return;
+        state.deletingListId = listId;
+        deleteListName.textContent = row.name || 'this list';
+
+        const others = state.lists.filter(l => l.id !== listId);
+        deleteListTarget.innerHTML = '';
+        others.forEach(l => {
+            const option = document.createElement('option');
+            option.value = String(l.id);
+            option.textContent = l.name;
+            deleteListTarget.appendChild(option);
+        });
+
+        const moveRadio = document.querySelector('input[name="deleteListStrategy"][value="move"]');
+        const deleteAllRadio = document.querySelector('input[name="deleteListStrategy"][value="delete_all"]');
+        if (others.length === 0) {
+            if (deleteAllRadio) deleteAllRadio.checked = true;
+            if (moveRadio) moveRadio.disabled = true;
+            deleteListTarget.disabled = true;
+        } else {
+            if (moveRadio) moveRadio.disabled = false;
+            if (moveRadio) moveRadio.checked = true;
+            deleteListTarget.disabled = false;
+        }
+
+        deleteListModal.classList.remove('hidden');
+    }
+
+    function closeDeleteListModal() {
+        deleteListModal.classList.add('hidden');
+        state.deletingListId = null;
+    }
+
+    async function loadItems() {
+        if (!state.activeListId) return;
+        const res = await fetch(`/api/shopping/items?list_id=${state.activeListId}`);
+        const data = await res.json();
+        state.activeItems = (data.items || []);
+        const activeList = state.lists.find(l => l.id === state.activeListId);
+        activeTitle.textContent = activeList
+            ? `${activeList.name}${(activeList.list_type || 'standard') === 'big_purchase' ? ' · Big Purchases' : ''}`
+            : 'Items';
+        updateBigPurchaseUi();
+        renderItems();
+    }
+
+    function canDelete(item) {
+        return item.creator === currentUser || currentUser === adminName || currentUser === 'Administrator' || currentUser === 'admin';
+    }
+
+    function renderItems() {
+        itemHost.innerHTML = '';
+        let total = 0;
+
+        state.activeItems.forEach(item => {
+            if (!item.checked) total += (Number(item.price) || 0) * (Number(item.quantity) || 1);
+
+            const planningMeta = [];
+            if (item.purchase_category) planningMeta.push(`Type: ${escapeHtml(item.purchase_category)}`);
+            if (item.size_requirements) planningMeta.push(`Size: ${escapeHtml(item.size_requirements)}`);
+            if (item.target_price != null) planningMeta.push(`Target: $${Number(item.target_price).toFixed(2)}`);
+            if (item.budget_ceiling != null) planningMeta.push(`Budget cap: $${Number(item.budget_ceiling).toFixed(2)}`);
+
+            const li = document.createElement('li');
+            li.className = 'card p-3';
+            const checked = !!item.checked;
+            li.innerHTML = `
+                <div class="flex items-start gap-3">
+                    <input type="checkbox" class="mt-1 item-check" data-id="${item.id}" ${checked ? 'checked' : ''}>
+                    <div class="flex-1 min-w-0">
+                        <div class="${checked ? 'line-through text-gray-400' : ''}">${escapeHtml(item.item)}</div>
+                        <div class="text-xs text-gray-500 mt-1">
+                            ${(item.price != null ? '$' + Number(item.price).toFixed(2) : '$0.00')} × ${Number(item.quantity || 1).toFixed(1)}
+                            · ${escapeHtml(item.creator || 'Unknown')}
+                        </div>
+                        ${planningMeta.length ? `<div class="text-xs text-indigo-600 dark:text-indigo-300 mt-1">${planningMeta.join(' · ')}</div>` : ''}
+                        ${item.planning_notes ? `<div class="text-xs text-gray-600 dark:text-gray-300 mt-1">${escapeHtml(item.planning_notes)}</div>` : ''}
+                        ${item.purchase_photo_url ? `<img src="${escapeHtml(item.purchase_photo_url)}" alt="Purchase photo" class="mt-2 max-h-36 rounded border border-gray-200 dark:border-gray-700">` : ''}
+                    </div>
+                    <button class="btn btn-danger text-xs item-delete" data-id="${item.id}" ${canDelete(item) ? '' : 'style="display:none"'} title="Delete">×</button>
+                </div>
+            `;
+            itemHost.appendChild(li);
+        });
+
+        activeTotal.textContent = `$${total.toFixed(2)}`;
+
+        itemHost.querySelectorAll('.item-check').forEach(chk => {
+            chk.addEventListener('change', async () => {
+                const id = Number(chk.dataset.id);
+                await fetch(`/api/shopping/${id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ checked: chk.checked })
+                });
+                await loadItems();
+                await loadLists();
+            });
+        });
+
+        itemHost.querySelectorAll('.item-delete').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const id = Number(btn.dataset.id);
+                const res = await fetch(`/api/shopping/items/${id}?user=${encodeURIComponent(currentUser)}`, { method: 'DELETE' });
+                const data = await res.json();
+                if (!data.ok) {
+                    toast(data.error || 'Delete failed', 'error');
+                    return;
+                }
+                await loadItems();
+                await loadLists();
+            });
+        });
+    }
+
+    document.getElementById('addItemForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!state.activeListId) {
+            toast('Create a list first', 'error');
+            return;
+        }
+
+        const isBigPurchase = isBigPurchaseListActive();
+        if (isBigPurchase && purchasePhotoInput.files && purchasePhotoInput.files.length) {
+            const uploaded = await uploadSelectedPurchasePhoto();
+            if (!uploaded) return;
+        }
+
+        const payload = {
+            list_id: state.activeListId,
+            item: itemNameInput.value.trim(),
+            store: itemStoreInput.value.trim(),
+            price: itemPriceInput.value === '' ? null : Number(itemPriceInput.value),
+            quantity: itemQtyInput.value === '' ? 1 : Number(itemQtyInput.value),
+            creator: currentUser,
+            repo_item_id: state.selectedRepoId || null,
+        };
+
+        if (isBigPurchase) {
+            payload.purchase_category = purchaseCategoryInput.value || null;
+            payload.target_price = targetPriceInput.value === '' ? null : Number(targetPriceInput.value);
+            payload.budget_ceiling = budgetCeilingInput.value === '' ? null : Number(budgetCeilingInput.value);
+            payload.size_requirements = sizeRequirementsInput.value.trim() || null;
+            payload.planning_notes = planningNotesInput.value.trim() || null;
+            payload.purchase_photo_filename = state.pendingPurchasePhotoFilename || null;
+        }
+
+        const res = await fetch('/api/shopping/items', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!data.ok) {
+            toast(data.error || 'Could not add item', 'error');
+            return;
+        }
+
+        itemNameInput.value = '';
+        itemStoreInput.value = '';
+        itemPriceInput.value = '';
+        itemQtyInput.value = '1';
+        state.selectedRepoId = null;
+        if (isBigPurchase) resetBigPurchaseForm();
+        hideTypeahead();
+        await loadItems();
+        await loadLists();
+        await loadRepo();
     });
-    T.getAllKnownTags().forEach(t=> allTags.add(t));
-    filterHost.innerHTML='';
-    [...allTags].sort((a,b)=>a.localeCompare(b)).forEach(t=>{
-          const pill = T.makeFilledPill(t, null, false);
-          filterHost.appendChild(pill);
+
+    function openListModal() {
+        listModal.classList.remove('hidden');
+    }
+    function closeListModal() {
+        listModal.classList.add('hidden');
+        state.editingListId = null;
+        listNameInput.value = '';
+        listColorInput.value = '#3B82F6';
+        listTypeInput.value = 'standard';
+    }
+
+    document.getElementById('addListBtn').addEventListener('click', () => {
+        state.editingListId = null;
+        document.getElementById('listModalTitle').textContent = 'New List';
+        listNameInput.value = '';
+        listColorInput.value = '#3B82F6';
+        listTypeInput.value = 'standard';
+        openListModal();
     });
-    const lib = document.getElementById('tagLibrary');
-    T.renderLibrary(lib, (t)=>{
-        const hidden = document.getElementById('tagsField');
-        let tags=[]; try{ tags = JSON.parse(hidden.value||'[]'); }catch(e){}
-        if(!tags.includes(t)){
-            tags.push(t); hidden.value = JSON.stringify(tags);
-            const wrap = document.getElementById('tagInputWrap');
-            T.renderPills(wrap, tags, (rm)=>{ tags = tags.filter(x=>x!==rm); hidden.value=JSON.stringify(tags); T.renderPills(wrap, tags, ()=>{}); });
+
+    document.getElementById('listModalCancel').addEventListener('click', closeListModal);
+    document.getElementById('listModalSave').addEventListener('click', async () => {
+        const payload = {
+            name: listNameInput.value.trim(),
+            color: listColorInput.value,
+            list_type: listTypeInput.value || 'standard',
+            creator: currentUser,
+        };
+        if (!payload.name) {
+            toast('List name is required', 'error');
+            return;
+        }
+
+        let res;
+        if (state.editingListId) {
+            res = await fetch(`/api/shopping/lists/${state.editingListId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+        } else {
+            res = await fetch('/api/shopping/lists', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+        }
+        const data = await res.json();
+        if (!data.ok) {
+            toast(data.error || 'Could not save list', 'error');
+            return;
+        }
+
+        if (!state.editingListId && data.list?.id) state.activeListId = data.list.id;
+        closeListModal();
+        await loadLists();
+    });
+
+    function openRepoModal(editingItem = null) {
+        state.editingRepoId = editingItem ? editingItem.id : null;
+        document.getElementById('repoModalTitle').textContent = editingItem ? 'Edit Repo Item' : 'Add Repo Item';
+        repoNameInput.value = editingItem?.name || '';
+        repoStoreInput.value = editingItem?.store || '';
+        repoPriceInput.value = editingItem?.price ?? '';
+        repoCategoryInput.value = editingItem?.category || '';
+        repoModal.classList.remove('hidden');
+    }
+
+    function closeRepoModal() {
+        repoModal.classList.add('hidden');
+        state.editingRepoId = null;
+        repoNameInput.value = '';
+        repoStoreInput.value = '';
+        repoPriceInput.value = '';
+        repoCategoryInput.value = '';
+    }
+
+    async function loadRepo() {
+        const q = document.getElementById('repoSearch').value.trim();
+        const res = await fetch(`/api/shopping/repo?q=${encodeURIComponent(q)}`);
+        const data = await res.json();
+        state.repoItems = data.items || [];
+        renderRepoTable();
+    }
+
+    function renderRepoTable() {
+        const tbody = document.getElementById('repoTable');
+        tbody.innerHTML = '';
+        state.repoItems.forEach(item => {
+            const tr = document.createElement('tr');
+            tr.className = 'border-b border-gray-100 dark:border-gray-800';
+            tr.innerHTML = `
+                <td class="py-2">${escapeHtml(item.name || '')}</td>
+                <td class="py-2">${escapeHtml(item.store || '')}</td>
+                <td class="py-2">${item.price != null ? '$' + Number(item.price).toFixed(2) : ''}</td>
+                <td class="py-2">${escapeHtml(item.category || '')}</td>
+                <td class="py-2 flex gap-2">
+                    <button class="btn btn-secondary text-xs repo-edit" data-id="${item.id}">Edit</button>
+                    <button class="btn btn-danger text-xs repo-del" data-id="${item.id}">Delete</button>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+        tbody.querySelectorAll('.repo-edit').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const id = Number(btn.dataset.id);
+                const row = state.repoItems.find(r => r.id === id);
+                if (row) openRepoModal(row);
+            });
+        });
+
+        tbody.querySelectorAll('.repo-del').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const id = Number(btn.dataset.id);
+                const ok = window.uiConfirm
+                    ? await window.uiConfirm('Delete this saved repo item?', { title: 'Delete Saved Item', confirmText: 'Delete', danger: true })
+                    : confirm('Delete this saved repo item?');
+                if (!ok) return;
+                const res = await fetch(`/api/shopping/repo/${id}`, { method: 'DELETE' });
+                const data = await res.json();
+                if (!data.ok) {
+                    toast(data.error || 'Could not delete repo item', 'error');
+                    return;
+                }
+                await loadRepo();
+            });
+        });
+    }
+
+    document.getElementById('addRepoBtn').addEventListener('click', () => openRepoModal(null));
+    document.getElementById('repoModalCancel').addEventListener('click', closeRepoModal);
+    document.getElementById('repoModalSave').addEventListener('click', async () => {
+        const payload = {
+            name: repoNameInput.value.trim(),
+            store: repoStoreInput.value.trim(),
+            price: repoPriceInput.value === '' ? null : Number(repoPriceInput.value),
+            category: repoCategoryInput.value.trim(),
+            created_by: currentUser,
+        };
+        if (!payload.name) {
+            toast('Item name is required', 'error');
+            return;
+        }
+
+        let res;
+        if (state.editingRepoId) {
+            res = await fetch(`/api/shopping/repo/${state.editingRepoId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+        } else {
+            res = await fetch('/api/shopping/repo', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+        }
+        const data = await res.json();
+        if (!data.ok) {
+            toast(data.error || 'Could not save repo item', 'error');
+            return;
+        }
+        closeRepoModal();
+        await loadRepo();
+    });
+
+    document.getElementById('repoSearch').addEventListener('input', loadRepo);
+    document.getElementById('repoRefresh').addEventListener('click', loadRepo);
+
+    uploadPurchasePhotoBtn.addEventListener('click', async () => {
+        const uploaded = await uploadSelectedPurchasePhoto();
+        if (uploaded && state.pendingPurchasePhotoFilename) {
+            toast('Purchase photo uploaded', 'success');
         }
     });
-}
 
-// Refresh tag library when tags change anywhere in this scope
-T.onChange(()=> refreshFiltersAndLibrary());
-
-// Price autocomplete and total calculation
-(function(){
-    const itemInput = document.getElementById('itemInput');
-    const priceInput = document.getElementById('priceInput');
-    const quantityInput = document.getElementById('quantityInput');
-    const totalPriceEl = document.getElementById('totalPrice');
-    const shoppingList = document.getElementById('shoppingList');
-    
-    // Fetch and populate price when item is selected from autofill
-    itemInput.addEventListener('change', async ()=>{
-        const q = itemInput.value.trim();
-        if(!q) return;
-        try{
-            const res = await fetch(`/api/common-items/search?q=${encodeURIComponent(q)}`);
-            const items = await res.json();
-            if(items.length > 0){
-                const best = items[0];
-                if(best.price){
-                    priceInput.value = best.price;
-                }
-            }
-        }catch(e){}
+    purchasePhotoInput.addEventListener('change', () => {
+        purchasePhotoStatus.textContent = purchasePhotoInput.files?.length ? 'Photo selected. Click Upload Photo to attach.' : '';
+        const file = purchasePhotoInput.files && purchasePhotoInput.files[0] ? purchasePhotoInput.files[0] : null;
+        if (!file) {
+            setPurchasePhotoPreview(state.pendingPurchasePhotoUrl);
+            return;
+        }
+        const preview = URL.createObjectURL(file);
+        setPurchasePhotoPreview(preview);
     });
-    
-    // Calculate and display total
-    function updateTotal(){
-        let total = 0;
-        shoppingList.querySelectorAll('li:not(.hidden)').forEach(li=>{
-            if(li.dataset.checked === '1') return; // Skip purchased items
-            const price = parseFloat(li.dataset.price) || 0;
-            const qty = parseFloat(li.dataset.quantity) || 1;
-            total += price * qty;
+
+    deleteListCancel?.addEventListener('click', closeDeleteListModal);
+    deleteListModal?.addEventListener('click', (e) => {
+        if (e.target === deleteListModal) closeDeleteListModal();
+    });
+
+    document.querySelectorAll('input[name="deleteListStrategy"]').forEach(r => {
+        r.addEventListener('change', () => {
+            const strategy = document.querySelector('input[name="deleteListStrategy"]:checked')?.value || 'move';
+            deleteListTarget.disabled = strategy !== 'move';
         });
-        totalPriceEl.textContent = '$' + total.toFixed(2);
-    }
-    
-    // Update total when items change
-    new MutationObserver(updateTotal).observe(shoppingList, {childList: true, subtree: true, attributes: true, attributeFilter: ['data-checked', 'data-price', 'data-quantity']});
-    updateTotal();
-    
-    // Also recalculate when form is submitted (new item added)
-    const form = document.getElementById('shoppingForm');
-    const originalSubmit = form.onsubmit;
-    form.addEventListener('submit', ()=>{
-        setTimeout(updateTotal, 500);
     });
+
+    deleteListConfirm?.addEventListener('click', async () => {
+        const listId = Number(state.deletingListId || 0);
+        if (!listId) return;
+
+        const strategy = document.querySelector('input[name="deleteListStrategy"]:checked')?.value || 'move';
+        const payload = {
+            strategy,
+            target_list_id: strategy === 'move' ? Number(deleteListTarget.value || 0) : null,
+        };
+
+        const res = await fetch(`/api/shopping/lists/${listId}`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!data.ok) {
+            toast(data.error || 'Could not delete list', 'error');
+            return;
+        }
+
+        closeDeleteListModal();
+        if (state.activeListId === listId) {
+            state.activeListId = data.moved_to_list_id || null;
+        }
+        await loadLists();
+        await loadItems();
+        toast('List deleted', 'success');
+    });
+
+    let typeaheadAbort = null;
+    function hideTypeahead() {
+        repoTypeahead.classList.add('hidden');
+        repoTypeahead.innerHTML = '';
+    }
+
+    itemNameInput.addEventListener('input', async () => {
+        const q = itemNameInput.value.trim();
+        state.selectedRepoId = null;
+        if (!q) {
+            hideTypeahead();
+            return;
+        }
+        if (typeaheadAbort) typeaheadAbort.abort();
+        typeaheadAbort = new AbortController();
+
+        try {
+            const res = await fetch(`/api/shopping/repo?q=${encodeURIComponent(q)}`, { signal: typeaheadAbort.signal });
+            const data = await res.json();
+            const items = (data.items || []).slice(0, 8);
+            if (!items.length) {
+                hideTypeahead();
+                return;
+            }
+            repoTypeahead.innerHTML = '';
+            items.forEach(it => {
+                const row = document.createElement('button');
+                row.type = 'button';
+                row.className = 'w-full text-left px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700';
+                row.innerHTML = `<div class="font-medium">${escapeHtml(it.name)}</div><div class="text-xs text-gray-500">${escapeHtml(it.store || 'No store')} · ${it.price != null ? '$' + Number(it.price).toFixed(2) : 'No price'}</div>`;
+                row.addEventListener('click', () => {
+                    state.selectedRepoId = it.id;
+                    itemNameInput.value = it.name || '';
+                    itemStoreInput.value = it.store || '';
+                    itemPriceInput.value = it.price != null ? String(it.price) : '';
+                    hideTypeahead();
+                });
+                repoTypeahead.appendChild(row);
+            });
+            repoTypeahead.classList.remove('hidden');
+        } catch (e) {
+            if (e.name !== 'AbortError') hideTypeahead();
+        }
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!repoTypeahead.contains(e.target) && e.target !== itemNameInput) hideTypeahead();
+        if (e.target === listModal) closeListModal();
+        if (e.target === repoModal) closeRepoModal();
+        if (e.target === deleteListModal) closeDeleteListModal();
+    });
+
+    function escapeHtml(value) {
+        return String(value || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    loadLists();
+    loadRepo();
 })();
 </script>
 {% endblock %}

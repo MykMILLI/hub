@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/menu_group_welcome"
+        android:title="Welcome"
+        android:showAsAction="never">
+        <menu>
+            <item
+                android:id="@+id/action_welcome_home"
+                android:title="@string/menu_welcome_home"
+                android:showAsAction="never" />
+            <item
+                android:id="@+id/action_welcome_weather"
+                android:title="@string/menu_welcome_weather"
+                android:showAsAction="never" />
+            <item
+                android:id="@+id/action_welcome_post_update"
+                android:title="@string/menu_welcome_post_update"
+                android:showAsAction="never" />
+            <item
+                android:id="@+id/action_welcome_switch_user"
+                android:title="@string/menu_welcome_switch_user"
+                android:showAsAction="never" />
+            <item
+                android:id="@+id/action_welcome_profile_settings"
+                android:title="@string/menu_welcome_profile_settings"
+                android:showAsAction="never" />
+        </menu>
+    </item>
+
+    <item
+        android:id="@+id/menu_group_photo_sync"
+        android:title="Photo Sync"
+        android:showAsAction="never">
+        <menu>
+    <item
+        android:id="@+id/action_configure_sync"
+        android:title="Configure Photo Sync"
+        android:showAsAction="never" />
+    <item
+        android:id="@+id/action_pick_watch_folder"
+        android:title="Pick Watched Folder"
+        android:showAsAction="never" />
+    <item
+        android:id="@+id/action_sync_now"
+        android:title="Sync Photos Now"
+        android:showAsAction="never" />
+        </menu>
+    </item>
+</menu>

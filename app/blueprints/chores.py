@@ -109,6 +109,44 @@ def api_get_chores():
     return jsonify([to_dict(i) for i in items])
 
 
+@main_bp.route('/api/chores', methods=['POST'])
+def api_create_chore():
+    try:
+        data = request.get_json(force=True) or {}
+        description = sanitize_text(str(data.get('description', '')).strip())
+        creator = sanitize_text(str(data.get('creator', '')).strip())
+        raw_tags = data.get('tags', [])
+
+        if not description:
+            return jsonify({'ok': False, 'error': 'Description is required'}), 400
+        if not creator:
+            return jsonify({'ok': False, 'error': 'Creator is required'}), 400
+
+        tags = []
+        if isinstance(raw_tags, list):
+            for t in raw_tags:
+                if isinstance(t, str) and t.strip():
+                    tags.append(sanitize_text(t))
+
+        chore = Chore(description=description, creator=creator, tags=json.dumps(tags), done=bool(data.get('done', False)))
+        db.session.add(chore)
+        db.session.commit()
+
+        return jsonify({
+            'ok': True,
+            'item': {
+                'id': chore.id,
+                'description': chore.description,
+                'done': bool(chore.done),
+                'creator': chore.creator,
+                'timestamp': chore.timestamp.isoformat() if chore.timestamp else None,
+                'tags': tags,
+            },
+        })
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+
+
 @main_bp.route('/api/chores/<int:chore_id>', methods=['PUT'])
 def api_update_chore(chore_id):
     chore = Chore.query.get_or_404(chore_id)
@@ -118,6 +156,8 @@ def api_update_chore(chore_id):
         raw_tags = data.get('tags', [])
         if isinstance(desc, str):
             chore.description = sanitize_text(desc)
+        if 'done' in data:
+            chore.done = bool(data.get('done'))
         tags = []
         if isinstance(raw_tags, list):
             for t in raw_tags:
@@ -125,6 +165,33 @@ def api_update_chore(chore_id):
                     tags.append(sanitize_text(t))
         chore.tags = json.dumps(tags)
         db.session.commit()
-        return jsonify({"ok": True, "item": {"id": chore.id, "description": chore.description, "tags": tags}})
+        return jsonify({"ok": True, "item": {"id": chore.id, "description": chore.description, "done": bool(chore.done), "tags": tags}})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 400
+
+
+@main_bp.route('/api/chores/<int:chore_id>/done', methods=['POST'])
+def api_set_chore_done(chore_id):
+    chore = Chore.query.get_or_404(chore_id)
+    try:
+        data = request.get_json(force=True) or {}
+        chore.done = bool(data.get('done'))
+        db.session.commit()
+        return jsonify({'ok': True, 'item': {'id': chore.id, 'done': bool(chore.done)}})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+
+
+@main_bp.route('/api/chores/<int:chore_id>', methods=['DELETE'])
+def api_delete_chore(chore_id):
+    chore = Chore.query.get_or_404(chore_id)
+    user = sanitize_text((request.args.get('user') or (request.get_json(silent=True) or {}).get('user') or '').strip())
+    admin_name = current_app.config['HOMEHUB_CONFIG'].get('admin_name', 'Administrator')
+    admin_aliases = {admin_name, 'Administrator', 'admin'}
+
+    if user not in admin_aliases and user != chore.creator:
+        return jsonify({'ok': False, 'error': 'Permission denied'}), 403
+
+    db.session.delete(chore)
+    db.session.commit()
+    return jsonify({'ok': True})

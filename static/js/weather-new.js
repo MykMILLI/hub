@@ -205,7 +205,8 @@
     // Global functions
     window.useGPSLocation = async function() {
         if (!navigator.geolocation) {
-            alert('Geolocation is not supported by your browser');
+            if (window.uiAlert) window.uiAlert('Geolocation is not supported by your browser', { title: 'GPS Not Supported' });
+            else alert('Geolocation is not supported by your browser');
             return;
         }
 
@@ -217,7 +218,16 @@
                     try {
                         // Get location name from coordinates
                         const nameResponse = await fetch(`/api/weather/location-name?latitude=${latitude}&longitude=${longitude}`);
-                        const nameData = await nameResponse.json();
+                        let locationName = '';
+                        if (nameResponse.ok) {
+                            const contentType = String(nameResponse.headers.get('content-type') || '').toLowerCase();
+                            if (contentType.includes('application/json')) {
+                                const nameData = await nameResponse.json();
+                                locationName = nameData.location_name || '';
+                            }
+                        } else {
+                            console.warn('Location name lookup failed, saving GPS coordinates only');
+                        }
 
                         // Save location
                         const response = await fetch('/api/weather/location', {
@@ -226,7 +236,7 @@
                             body: JSON.stringify({
                                 latitude,
                                 longitude,
-                                location_name: nameData.location_name || '',
+                                location_name: locationName,
                                 use_gps_location: true,
                             }),
                         });
@@ -234,6 +244,8 @@
                         if (response.ok) {
                             globalToast('Location updated from GPS', 'success');
                             fetchWeather();
+                        } else {
+                            globalToast('Failed to save GPS location', 'error');
                         }
                     } catch (error) {
                         console.error('Error saving GPS location:', error);

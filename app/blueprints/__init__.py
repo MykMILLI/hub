@@ -2,12 +2,23 @@ from flask import Blueprint, current_app, Response
 import json
 import os
 import subprocess
+from datetime import datetime, timezone
 
 # Single app-wide blueprint to preserve all existing URL paths and endpoint names
 main_bp = Blueprint('main', __name__)
 
 # Default SW cache version; can be overridden by env SW_CACHE_VERSION or git tag
 DEFAULT_SW_CACHE_VERSION = "1"
+
+
+@main_bp.route('/healthz')
+def healthz():
+  payload = {
+    'ok': True,
+    'service': 'homehub',
+    'timestamp': datetime.now(timezone.utc).isoformat(),
+  }
+  return Response(json.dumps(payload), mimetype='application/json')
 
 
 @main_bp.route('/manifest.webmanifest')
