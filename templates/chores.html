@@ -1,304 +1,597 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="mx-auto">
-    <h2 class="text-xl font-bold mb-4">To-Do / Chores</h2>
-    <form method="POST" id="choreForm" class="mb-2">
-        <div class="grid grid-cols-1 md:grid-cols-12 gap-3">
-            <div class="md:col-span-5">
-                <label class="block text-sm text-gray-600 dark:text-gray-300 mb-1">Chore</label>
-                <div class="relative h-11">
-                    <input type="text" name="description" id="choreInput" class="w-full h-full p-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-blue-500" placeholder="Add a chore..." required autocomplete="off">
-                    <div id="choreSuggestions" class="absolute left-0 right-0 z-10 mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded shadow hidden max-h-72 overflow-auto"></div>
-                </div>
-            </div>
-            <div class="md:col-span-4">
-                <label class="block text-sm text-gray-600 dark:text-gray-300 mb-1">Tags (assignees, context)</label>
-                <div class="flex flex-wrap gap-2 rounded  focus-within:ring-1 focus-within:ring-blue-500 items-start h-11" id="tagInputWrap">
-                    <input type="text" id="tagInput" class="flex-1 min-w-[140px] h-full p-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-blue-500" placeholder="Add tag and press Enter">
-                </div>
-                <input type="hidden" name="tags" id="tagsField" value="[]">
-                <div class="mt-2 flex flex-wrap gap-2 text-xs" id="tagLibrary"></div>
-            </div>
-            <div class="md:col-span-3">
-                <label class="block text-sm text-gray-600 dark:text-gray-300 mb-1 opacity-0">Action</label>
-                <input type="hidden" name="creator" id="creator">
-                <button type="submit" class="w-full btn btn-primary h-11">Add</button>
-            </div>
+<div class="mx-auto space-y-4 max-w-6xl">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="inline-flex rounded-full bg-gray-100 dark:bg-gray-800 p-1" role="tablist">
+            <button type="button" id="tabTodo" data-tab="todo" role="tab" class="tab-btn px-5 py-2 rounded-full text-sm font-semibold">To-Do</button>
+            <button type="button" id="tabChores" data-tab="chores" role="tab" class="tab-btn px-5 py-2 rounded-full text-sm font-semibold">Chores</button>
         </div>
-    </form>
-
-    <div class="mb-4 flex flex-wrap gap-2 items-center">
-        <span class="text-sm text-gray-600">Filter by tag:</span>
-        <div id="tagFilters" class="flex flex-wrap gap-2"></div>
-        <button id="clearTagFilters" class="btn btn-secondary text-xs">Clear</button>
+        <div id="taskStats" class="flex flex-wrap items-center gap-2"></div>
     </div>
 
-    <ul id="choreList" class="space-y-2">
-        {% for chore in chores %}
-        {% set tags = (chore.tags or '[]') %}
-        {% set creator_avatar = avatar_map.get(chore.creator, '') if avatar_map else '' %}
-        <li class="card p-4 flex flex-col gap-2" data-id="{{ chore.id }}" data-tags='{{ tags|safe }}' data-done="{{ '1' if chore.done else '0' }}">
-            <div class="flex flex-wrap gap-2 items-center">
-                <span class="flex-1 {% if chore.done %}line-through text-gray-400{% endif %}">{{ chore.description }}</span>
-                <div class="hidden md:flex flex-wrap gap-2 item-tags" data-id="{{ chore.id }}"></div>
-                <form method="POST" action="/chores/toggle/{{ chore.id }}">
-                    <button type="submit" class="btn {{ 'btn-secondary' if chore.done else 'btn-success' }}">
-                        {{ 'Completed · Undo' if chore.done else 'Mark Completed' }}
-                    </button>
-                </form>
-                <button type="button" class="btn btn-secondary edit-btn" data-id="{{ chore.id }}">Edit</button>
-                <form method="POST" action="/chores/delete/{{ chore.id }}" class="delete-form" data-creator="{{ chore.creator }}">
-                    <input type="hidden" name="user">
-                    <button type="submit" class="btn btn-danger" title="Delete"><i class="fa fa-times"></i></button>
-                </form>
+    <!-- To-Do tab (Microsoft To Do style) -->
+    <section id="todoPane" class="space-y-3">
+        <form id="quickAddForm" class="card p-2 flex items-center gap-2">
+            <span class="w-6 h-6 rounded-full border-2 border-indigo-500 flex-shrink-0 ml-2"></span>
+            <input id="quickAddInput" type="text" class="flex-1 p-2 bg-transparent outline-none text-base" placeholder="Add a task" autocomplete="off">
+            <button type="button" id="quickAddMore" class="btn btn-secondary">Details</button>
+            <button type="submit" class="btn btn-primary">Add</button>
+        </form>
+        <div class="flex flex-wrap items-center gap-2" id="todoFilters">
+            <button class="filter-btn filter-pill" data-filter="all">All</button>
+            <button class="filter-btn filter-pill" data-filter="mine">Mine</button>
+            <button class="filter-btn filter-pill" data-filter="open">Open</button>
+            <button class="filter-btn filter-pill" data-filter="completed">Completed</button>
+        </div>
+        <div id="todoList" class="space-y-2"></div>
+        <button type="button" id="toggleCompleted" class="text-sm font-semibold text-indigo-600 dark:text-indigo-300 hidden"></button>
+        <div id="todoDone" class="space-y-2 hidden"></div>
+    </section>
+
+    <!-- Chores tab (Skylight style) -->
+    <section id="chorePane" class="space-y-3 hidden">
+        <div class="flex items-center justify-between gap-3">
+            <p class="text-sm text-gray-500">Tap a circle to mark a chore done.</p>
+            <button id="addChoreBtn" type="button" class="btn btn-primary">+ Add chore</button>
+        </div>
+        <div id="choreBoard" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+    </section>
+
+    <div id="newTaskModal" class="hidden fixed inset-0 z-[60] flex items-center justify-center p-4 md:p-6">
+        <div id="newTaskModalBackdrop" class="absolute inset-0 bg-black/50"></div>
+        <div class="relative w-full max-w-xl max-h-[90vh] overflow-y-auto card p-4 md:p-5">
+            <div class="flex items-center justify-between gap-2">
+                <h3 id="newTaskModalTitle" class="text-lg font-bold">New Task</h3>
+                <button id="closeTaskModalBtn" type="button" class="btn btn-secondary">Close</button>
             </div>
-            <div class="flex flex-wrap gap-2 items-center justify-between text-xs text-gray-500">
-                <div class="inline-flex items-center gap-2 min-w-0">
-                    <span class="w-6 h-6 rounded-full border border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800 overflow-hidden inline-flex items-center justify-center text-[10px] font-bold text-gray-600 dark:text-gray-300 shrink-0">
-                        {% if creator_avatar %}
-                        <img src="{{ creator_avatar }}" alt="{{ chore.creator }} avatar" class="w-full h-full object-cover">
-                        {% else %}
-                        {{ (chore.creator or 'U')[:1].upper() }}
-                        {% endif %}
-                    </span>
-                    <span class="truncate">By {{ chore.creator }} at {{ chore.timestamp.strftime('%Y-%m-%d %H:%M') }}</span>
+            <form id="newTaskForm" class="mt-3 space-y-3">
+                <div>
+                    <label class="block text-xs text-gray-600 dark:text-gray-300 mb-1">Title</label>
+                    <input id="newTaskTitle" type="text" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded" required>
                 </div>
-                <div class="flex-1"></div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs text-gray-600 dark:text-gray-300 mb-1">Assign to</label>
+                        <input id="newTaskAssignee" type="text" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded" placeholder="Start typing a name" autocomplete="off">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-600 dark:text-gray-300 mb-1">Due date</label>
+                        <input id="newTaskDueDate" type="date" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded">
+                    </div>
+                </div>
+                <div class="pt-1 flex justify-end gap-2">
+                    <button id="cancelTaskModalBtn" type="button" class="btn btn-secondary">Cancel</button>
+                    <button id="createTaskModalBtn" type="submit" class="btn btn-primary">Create</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="editTaskModal" class="hidden fixed inset-0 z-[65] flex items-center justify-center p-4 md:p-6">
+        <div id="editTaskModalBackdrop" class="absolute inset-0 bg-black/55"></div>
+        <div class="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto card p-4 md:p-5">
+            <div class="flex items-center justify-between gap-2">
+                <h3 class="text-lg font-bold">Edit Details</h3>
+                <button id="closeEditTaskModalBtn" type="button" class="btn btn-secondary">Close</button>
             </div>
-            <div class="md:hidden flex flex-wrap gap-2 items-center item-tags" data-id="{{ chore.id }}"></div>
-        </li>
-        {% endfor %}
-    </ul>
+            <form id="editTaskForm" class="mt-3 space-y-3">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                    <div class="md:col-span-2">
+                        <label class="block text-xs mb-1">Title</label>
+                        <input id="editTaskTitle" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded" required>
+                    </div>
+                    <div>
+                        <label class="block text-xs mb-1">Assign to</label>
+                        <input id="editTaskAssignee" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded" placeholder="Start typing a name" autocomplete="off">
+                    </div>
+                    <div>
+                        <label class="block text-xs mb-1">Due date</label>
+                        <input id="editTaskDueDate" type="date" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded">
+                    </div>
+                    <div>
+                        <label class="block text-xs mb-1">Status</label>
+                        <select id="editTaskStatus" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded"></select>
+                    </div>
+                    <div>
+                        <label class="block text-xs mb-1">Mention people</label>
+                        <input id="editTaskMentions" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded" placeholder="Type @ to pick people" autocomplete="off">
+                    </div>
+                    <div class="md:col-span-2">
+                        <label class="block text-xs mb-1">Notes (type @ to mention)</label>
+                        <textarea id="editTaskDetailsHtml" rows="2" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded"></textarea>
+                    </div>
+                    <div class="md:col-span-2">
+                        <label class="block text-xs mb-1">Checklist</label>
+                        <div id="checklistEditor" class="space-y-1"></div>
+                        <button type="button" id="addChecklistItemBtn" class="mt-2 text-sm font-semibold text-indigo-600 dark:text-indigo-300">+ Add item</button>
+                    </div>
+                </div>
+                <div class="pt-1 flex justify-between gap-2">
+                    <button id="deleteEditTaskBtn" type="button" class="btn btn-danger">Delete</button>
+                    <div class="flex gap-2">
+                        <button id="cancelEditTaskModalBtn" type="button" class="btn btn-secondary">Cancel</button>
+                        <button id="saveEditTaskModalBtn" type="submit" class="btn btn-primary">Save</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
 </div>
 
-<script src="{{ url_for('static', filename='js/tags.js') }}"></script>
-<script src="{{ url_for('static', filename='js/form_tags.js') }}"></script>
+<style>
+    .tab-btn { color: #6b7280; transition: all .15s; }
+    .tab-btn.active { background: #4f46e5; color: #fff; box-shadow: 0 1px 4px rgba(79,70,229,.4); }
+    .stat-pill { display: inline-flex; align-items: center; gap: .4rem; padding: .35rem .8rem; border-radius: 9999px; font-weight: 700; font-size: .9rem; }
+    .stat-pill b { font-size: 1.15rem; }
+    .stat-tasks { background: #e0e7ff; color: #3730a3; }
+    .stat-open { background: #ffedd5; color: #9a3412; }
+    .stat-mine { background: #dcfce7; color: #166534; }
+    .filter-pill { padding: .35rem .9rem; border-radius: 9999px; font-size: .85rem; font-weight: 600; border: 1px solid #d1d5db; }
+    .filter-pill.active { background: #4f46e5; color: #fff; border-color: #4f46e5; }
+    .todo-row { display: flex; align-items: center; gap: .75rem; padding: .75rem 1rem; border-radius: .75rem; cursor: pointer; }
+    .todo-row:hover { filter: brightness(.97); }
+    .circle-check { appearance: none; -webkit-appearance: none; width: 1.5rem; height: 1.5rem; border-radius: 9999px; border: 2px solid #6366f1; flex-shrink: 0; cursor: pointer; position: relative; background: transparent; }
+    .circle-check:checked { background: #6366f1; }
+    .circle-check:checked::after { content: '✓'; color: #fff; position: absolute; inset: 0; text-align: center; font-size: .9rem; line-height: 1.3rem; }
+    .chore-col { border-radius: 1.25rem; overflow: hidden; }
+    .chore-card { display: flex; align-items: center; gap: .75rem; padding: .9rem 1rem; border-radius: 1rem; background: rgba(255,255,255,.75); color: #111827; cursor: pointer; }
+    .chore-card .circle-check { width: 2rem; height: 2rem; border-width: 3px; }
+    .chore-card .circle-check:checked::after { line-height: 1.7rem; font-size: 1.1rem; }
+    .avatar-dot { width: 2.75rem; height: 2.75rem; border-radius: 9999px; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; color: #fff; font-size: 1.15rem; flex-shrink: 0; }
+    .suggest-box { position: absolute; z-index: 80; min-width: 12rem; max-height: 13rem; overflow-y: auto; border-radius: .5rem; box-shadow: 0 8px 24px rgba(0,0,0,.2); border: 1px solid #d1d5db; background: #fff; color: #111827; }
+    .dark .suggest-box { background: #1f2937; color: #f3f4f6; border-color: #4b5563; }
+    .suggest-item { padding: .45rem .75rem; cursor: pointer; font-size: .9rem; }
+    .suggest-item.active, .suggest-item:hover { background: #4f46e5; color: #fff; }
+</style>
+
 <script>
-// Initialize creator
-document.getElementById('creator').value = localStorage.getItem('username') || '';
-document.querySelectorAll('input[name="user"]').forEach(i=> i.value = localStorage.getItem('username') || '');
+(() => {
+    const members = {{ members|tojson }};
+    const currentUser = localStorage.getItem('username') || {{ (current_member or config.admin_name or '')|tojson }};
+    const defaultStatuses = ['todo', 'in_progress', 'completed'];
+    const palette = ['#6366f1', '#ec4899', '#f59e0b', '#10b981', '#0ea5e9', '#ef4444', '#8b5cf6', '#14b8a6'];
+    const pastel = ['#e0e7ff', '#fce7f3', '#fef3c7', '#d1fae5', '#e0f2fe', '#fee2e2', '#ede9fe', '#ccfbf1'];
+    let availableStatuses = [...defaultStatuses];
+    let currentFilter = 'all';
+    let currentTab = new URLSearchParams(location.search).get('tab') === 'chores' ? 'chores' : 'todo';
+    let newTaskType = 'todo';
+    let editingTaskId = null;
+    let allTasks = [];
+    let showCompleted = false;
 
-// Scoped Tags for chores
-const T = Tags.scoped('chores');
+    const $ = (id) => document.getElementById(id);
+    const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const sameUser = (a, b) => String(a || '').toLowerCase() === String(b || '').toLowerCase();
+    const memberIndex = (name) => {
+        const i = members.findIndex(m => sameUser(m, name));
+        return i >= 0 ? i : Math.abs([...String(name)].reduce((h, c) => h * 31 + c.charCodeAt(0), 7)) % palette.length;
+    };
 
-// Tag input handling for create form (reusable)
-(function(){
-    FormTags.initTagInputForm(T, {
-        formId: 'choreForm',
-        wrapId: 'tagInputWrap',
-        inputId: 'tagInput',
-        hiddenId: 'tagsField',
-        libraryId: 'tagLibrary'
-    });
-})();
+    // ---------- autocomplete ----------
+    // mode: 'single' = whole value is a name (inline completion); 'mention' = @token in text; 'list' = comma separated names
+    function attachSuggest(input, mode) {
+        const box = document.createElement('div');
+        box.className = 'suggest-box hidden';
+        document.body.appendChild(box);
+        let items = [];
+        let active = 0;
+        let range = null;
 
-// Build filter chips from all known tags
-(function(){
-    const filterHost = document.getElementById('tagFilters');
-    const clearBtn = document.getElementById('clearTagFilters');
-    const selected = new Set();
-    function collectTags(){
-        const set = new Set();
-        document.querySelectorAll('#choreList li').forEach(li=>{
-            try{ (JSON.parse(li.dataset.tags||'[]')||[]).forEach(t=> set.add(t)); }catch(e){}
+        function tokenInfo() {
+            const pos = input.selectionStart;
+            const before = input.value.slice(0, pos);
+            if (mode === 'single') return { start: 0, end: input.value.length, query: input.value.trim() };
+            if (mode === 'list') {
+                const idx = Math.max(before.lastIndexOf(','), before.lastIndexOf('@'));
+                const q = before.slice(idx + 1).replace(/^\s+/, '');
+                return { start: pos - q.length, end: pos, query: q };
+            }
+            const m = before.match(/@([\w .'-]*)$/);
+            if (!m) return null;
+            return { start: pos - m[1].length, end: pos, query: m[1] };
+        }
+
+        function hide() { box.classList.add('hidden'); items = []; }
+
+        function place() {
+            const r = input.getBoundingClientRect();
+            box.style.left = (r.left + window.scrollX) + 'px';
+            box.style.top = (r.bottom + window.scrollY + 2) + 'px';
+            box.style.width = Math.max(r.width, 192) + 'px';
+        }
+
+        function render() {
+            box.innerHTML = items.map((n, i) => `<div class="suggest-item ${i === active ? 'active' : ''}" data-name="${esc(n)}">${esc(n)}</div>`).join('');
+            place();
+            box.classList.toggle('hidden', !items.length);
+        }
+
+        function choose(name) {
+            const info = range || tokenInfo();
+            if (!info) return;
+            let insert = name;
+            if (mode === 'mention') insert = name + ' ';
+            if (mode === 'list') insert = name + ', ';
+            input.value = input.value.slice(0, info.start) + insert + input.value.slice(info.end);
+            const caret = info.start + insert.length;
+            input.setSelectionRange(caret, caret);
+            hide();
+            input.focus();
+        }
+
+        function update(ev) {
+            const info = tokenInfo();
+            if (!info) return hide();
+            range = info;
+            const q = info.query.toLowerCase();
+            if (mode !== 'single' && !q && !/@$|,\s*$/.test(input.value.slice(0, input.selectionStart)) && mode === 'list') {
+                // empty list token: still show everyone
+            }
+            items = members.filter(n => n.toLowerCase().startsWith(q) || (q && n.toLowerCase().includes(q)))
+                .sort((a, b) => a.toLowerCase().startsWith(q) === b.toLowerCase().startsWith(q) ? 0 : a.toLowerCase().startsWith(q) ? -1 : 1);
+            if (mode === 'single' && items.length === 1 && items[0].toLowerCase() === q) items = [];
+            active = 0;
+            render();
+            // inline predictive completion for single-name fields
+            const typing = ev && ev.inputType && !ev.inputType.startsWith('delete');
+            if (mode === 'single' && typing && q && items.length && items[0].toLowerCase().startsWith(q) && input.selectionStart === input.value.length) {
+                const full = items[0];
+                input.value = full;
+                input.setSelectionRange(q.length, full.length);
+            }
+        }
+
+        input.addEventListener('input', update);
+        input.addEventListener('focus', () => { if (mode === 'single') update(); });
+        input.addEventListener('blur', () => setTimeout(hide, 150));
+        input.addEventListener('keydown', (ev) => {
+            if (box.classList.contains('hidden') || !items.length) return;
+            if (ev.key === 'ArrowDown') { ev.preventDefault(); active = (active + 1) % items.length; render(); }
+            else if (ev.key === 'ArrowUp') { ev.preventDefault(); active = (active - 1 + items.length) % items.length; render(); }
+            else if (ev.key === 'Enter' || ev.key === 'Tab') { ev.preventDefault(); choose(items[active]); }
+            else if (ev.key === 'Escape') { ev.stopPropagation(); hide(); }
         });
-        T.getAllKnownTags().forEach(t=> set.add(t));
-        return [...set].sort((a,b)=> a.localeCompare(b));
-    }
-    function apply(){
-        const tags = [...selected];
-        document.querySelectorAll('#choreList li').forEach(li=>{
-            if(!tags.length){ li.classList.remove('hidden'); return; }
-            let matched=false; try{ const tg=JSON.parse(li.dataset.tags||'[]')||[]; matched = tg.some(t=>tags.includes(t)); }catch(e){}
-            li.classList.toggle('hidden', !matched);
+        box.addEventListener('mousedown', (ev) => {
+            const el = ev.target.closest('.suggest-item');
+            if (!el) return;
+            ev.preventDefault();
+            choose(el.getAttribute('data-name'));
         });
     }
-    function render(){
-        const all = collectTags();
-        filterHost.innerHTML='';
-        all.forEach(t=>{
-            const pill = T.makePill(t, ()=>{ if(selected.has(t)) selected.delete(t); else selected.add(t); render(); apply(); }, selected.has(t));
-            filterHost.appendChild(pill);
+
+    // ---------- API ----------
+    async function fetchTasks() {
+        const res = await fetch('/api/chores?include_completed=1');
+        const data = await res.json();
+        return Array.isArray(data) ? data : [];
+    }
+
+    async function loadStatuses() {
+        try {
+            const res = await fetch('/api/chores/status-options');
+            const data = await res.json();
+            if (data.ok && Array.isArray(data.status_options)) {
+                availableStatuses = [...new Set([...defaultStatuses, ...data.status_options.map(normalizeStatus)])];
+            }
+        } catch (_) {}
+    }
+
+    function normalizeStatus(value) {
+        return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '') || 'todo';
+    }
+
+    async function createTask(description, type, assignee, dueDate) {
+        const res = await fetch('/api/chores', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                description, creator: currentUser, assignee: assignee || null, due_date: dueDate || null,
+                task_type: type, status: 'todo', status_options: availableStatuses,
+            }),
         });
-        clearBtn.style.display = selected.size > 0 ? 'inline-block' : 'none';
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to create task');
+        return data;
     }
-    clearBtn.addEventListener('click', ()=>{ selected.clear(); render(); apply(); });
-    T.onChange(()=> render());
-    render();
-})();
 
-// Per-item tags UI and update via API
-(function(){
-    const list = document.getElementById('choreList');
-    function renderItemTags(li){
-        const id = li.dataset.id;
-        let tags=[]; try{ tags = JSON.parse(li.dataset.tags||'[]')||[]; }catch(e){}
-        const hosts = li.querySelectorAll('.item-tags');
-        hosts.forEach(host=>{ host.innerHTML = ''; });
-        hosts.forEach(host=>{ tags.forEach(t=> host.appendChild(T.makeFilledPill(t))); });
-        T.recordTags(tags);
+    async function updateTask(taskId, payload) {
+        const res = await fetch(`/api/chores/${taskId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...payload, actor: currentUser }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || 'Update failed');
+        return data.item;
     }
-    list.querySelectorAll('li').forEach(li=>{
-        renderItemTags(li);
-    });
-})();
 
-// Hide delete for non-owners (fallback)
-(function(){
-    const adminName='{{ config.admin_name }}';
-    const current=localStorage.getItem('username');
-    document.querySelectorAll('.delete-form').forEach(f=>{
-        const c=f.getAttribute('data-creator');
-        if(!(current===c||current===adminName||current==='Administrator'||current==='admin')) f.style.display='none';
-    });
-})();
+    async function setDone(task, done) {
+        const res = await fetch(`/api/chores/${task.id}/done`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ done, actor: currentUser }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) { alert(data.error || 'Update failed'); return; }
+        await load();
+    }
 
-// Edit modal for chore + tags
-(function(){
-        const modal = document.createElement('div');
-        modal.id = 'editModal';
-        modal.className = 'fixed inset-0 hidden items-center justify-center bg-black/50 z-50';
-        modal.innerHTML = `
-            <div class="bg-white dark:bg-gray-800 rounded shadow max-w-lg w-full p-4">
-                <h3 class="text-lg font-semibold mb-3">Edit Chore</h3>
-                <div class="mb-3">
-                    <label class="block text-sm mb-1">Chore</label>
-                    <input type="text" id="editDescInput" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                </div>
-                <div>
-                    <label class="block text-sm mb-1">Tags</label>
-                    <div id="editTagWrap" class="flex flex-wrap gap-2 border border-gray-300 dark:border-gray-600 rounded p-2 focus-within:ring-1 focus-within:ring-blue-500">
-                        <input type="text" id="editTagInput" class="flex-1 min-w-[140px] outline-none bg-transparent" placeholder="Add tag and press Enter" />
+    async function removeTask(id) {
+        if (!confirm('Delete this task?')) return;
+        const res = await fetch(`/api/chores/${id}?user=${encodeURIComponent(currentUser)}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (!res.ok || !data.ok) { alert(data.error || 'Delete failed'); return; }
+        closeEditModal();
+        await load();
+    }
+
+    // ---------- rendering ----------
+    function tasksForTab() {
+        return allTasks.filter(t => (t.task_type === 'chore') === (currentTab === 'chores'));
+    }
+
+    function renderStats(list) {
+        const open = list.filter(t => !t.done).length;
+        const mine = list.filter(t => !t.done && sameUser(t.assignee, currentUser)).length;
+        $('taskStats').innerHTML =
+            `<span class="stat-pill stat-tasks"><b>${list.length}</b> Tasks</span>` +
+            `<span class="stat-pill stat-open"><b>${open}</b> Open</span>` +
+            `<span class="stat-pill stat-mine"><b>${mine}</b> Mine</span>`;
+    }
+
+    function filterTask(t) {
+        if (currentFilter === 'mine') return sameUser(t.assignee, currentUser);
+        if (currentFilter === 'open') return !t.done;
+        if (currentFilter === 'completed') return t.done;
+        return true;
+    }
+
+    function dueLabel(t) {
+        if (!t.due_date) return '';
+        const today = new Date().toISOString().slice(0, 10);
+        const overdue = !t.done && t.due_date < today;
+        return `<span class="${overdue ? 'text-red-600 font-semibold' : ''}">📅 ${esc(t.due_date)}${t.due_date === today ? ' (Today)' : ''}</span>`;
+    }
+
+    function todoRow(t) {
+        const steps = (t.checklist || []);
+        const stepInfo = steps.length ? `<span>${steps.filter(s => s.done).length} of ${steps.length} steps</span>` : '';
+        const who = t.assignee ? `<span>👤 ${esc(t.assignee)}</span>` : '';
+        const meta = [stepInfo, dueLabel(t), who].filter(Boolean).join('');
+        return `<div class="todo-row card" data-open="${t.id}">
+            <input type="checkbox" class="circle-check" data-done="${t.id}" ${t.done ? 'checked' : ''} aria-label="Complete task">
+            <div class="flex-1 min-w-0">
+                <div class="${t.done ? 'line-through text-gray-500' : 'font-medium'} truncate">${esc(t.description)}</div>
+                ${meta ? `<div class="text-xs text-gray-500 flex flex-wrap gap-3 mt-0.5">${meta}</div>` : ''}
+            </div>
+        </div>`;
+    }
+
+    function renderTodo(list) {
+        const filtered = list.filter(filterTask);
+        const open = filtered.filter(t => !t.done);
+        const done = filtered.filter(t => t.done);
+        $('todoList').innerHTML = open.length ? open.map(todoRow).join('') : '<div class="text-sm text-gray-500 p-3">Nothing to do. Add a task above.</div>';
+        const toggle = $('toggleCompleted');
+        toggle.classList.toggle('hidden', !done.length);
+        toggle.textContent = `${showCompleted ? '▾' : '▸'} Completed ${done.length}`;
+        $('todoDone').classList.toggle('hidden', !showCompleted || !done.length);
+        $('todoDone').innerHTML = done.map(todoRow).join('');
+    }
+
+    function renderChores(list) {
+        const names = [...members];
+        list.forEach(t => { if (t.assignee && !names.some(n => sameUser(n, t.assignee))) names.push(t.assignee); });
+        const cols = names.map(name => ({ name, items: list.filter(t => sameUser(t.assignee, name)) }));
+        const unassigned = list.filter(t => !t.assignee);
+        if (unassigned.length) cols.push({ name: '', items: unassigned });
+        $('choreBoard').innerHTML = cols.map(col => {
+            const idx = memberIndex(col.name || 'x');
+            const done = col.items.filter(t => t.done).length;
+            const pct = col.items.length ? Math.round(done / col.items.length * 100) : 0;
+            const cards = col.items.slice().sort((a, b) => Number(a.done) - Number(b.done)).map(t => `
+                <div class="chore-card" data-open="${t.id}">
+                    <input type="checkbox" class="circle-check" data-done="${t.id}" ${t.done ? 'checked' : ''} aria-label="Complete chore">
+                    <div class="flex-1 min-w-0">
+                        <div class="text-base font-semibold ${t.done ? 'line-through opacity-50' : ''}">${esc(t.description)}</div>
+                        ${t.due_date ? `<div class="text-xs text-gray-600">${dueLabel(t)}</div>` : ''}
                     </div>
-                            <div class="mt-2 flex flex-wrap gap-2 text-xs" id="editTagLibrary"></div>
+                </div>`).join('') || '<div class="text-sm text-gray-600 px-2 py-3">No chores yet.</div>';
+            return `<div class="chore-col p-3 space-y-3" style="background:${pastel[idx % pastel.length]}">
+                <div class="flex items-center gap-3">
+                    <span class="avatar-dot" style="background:${palette[idx % palette.length]}">${esc((col.name || '?').charAt(0).toUpperCase())}</span>
+                    <div class="flex-1 min-w-0">
+                        <div class="font-bold text-gray-900 truncate">${esc(col.name || 'Unassigned')}</div>
+                        <div class="text-xs text-gray-700">${done} of ${col.items.length} done</div>
+                    </div>
                 </div>
-                <div class="mt-4 flex justify-end gap-2">
-                    <button type="button" id="editCancel" class="btn btn-secondary">Cancel</button>
-                    <button type="button" id="editSave" class="btn btn-primary">Save</button>
-                </div>
+                <div class="h-2 rounded-full bg-white/70 overflow-hidden"><div class="h-full" style="width:${pct}%;background:${palette[idx % palette.length]}"></div></div>
+                <div class="space-y-2">${cards}</div>
             </div>`;
-        document.body.appendChild(modal);
-        const editBtns = document.querySelectorAll('.edit-btn');
-        let currentId = null; let tags = [];
-        const descInput = document.getElementById('editDescInput');
-        const tagWrap = document.getElementById('editTagWrap');
-        const tagInput = document.getElementById('editTagInput');
-        function render(){ T.renderPills(tagWrap, tags, (t)=>{ tags = tags.filter(x=>x!==t); render(); }); }
-        tagInput.addEventListener('keydown', (e)=>{
-            if(e.key==='Enter' || e.key===','){ e.preventDefault(); const v=tagInput.value.trim(); if(v && !tags.includes(v)){ tags.push(v); T.ensureColor(v); render(); } tagInput.value=''; }
-            if(e.key==='Backspace' && !tagInput.value && tags.length){ tags.pop(); render(); }
-        });
-            function open(id){
-            currentId = id;
-            const li = document.querySelector(`#choreList li[data-id="${id}"]`);
-            if(!li) return;
-            let tg=[]; try{ tg = JSON.parse(li.dataset.tags||'[]')||[]; }catch(e){}
-            tags = tg.slice(); render();
-            descInput.value = li.querySelector('span.flex-1').textContent.trim();
-                const lib = document.getElementById('editTagLibrary');
-                T.renderLibrary(lib, (t)=>{ if(!tags.includes(t)){ tags.push(t); render(); }});
-            modal.classList.remove('hidden'); modal.classList.add('flex');
-            descInput.focus();
-        }
-        async function save(){
-            if(!currentId) return;
-            FormTags.harvestPendingInto(T, tagInput, tags);
-            const payload = { description: descInput.value.trim(), tags: tags };
-            try{
-                const res = await fetch(`/api/chores/${currentId}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
-                const data = await res.json();
-                if(data.ok){
-                    const li = document.querySelector(`#choreList li[data-id="${currentId}"]`);
-                    if(li){
-                        li.dataset.tags = JSON.stringify(data.item.tags||[]);
-                        li.querySelector('span.flex-1').textContent = data.item.description;
-                        const hosts = li.querySelectorAll('.item-tags');
-                        hosts.forEach(host=>{ host.innerHTML=''; (data.item.tags||[]).forEach(t=> host.appendChild(T.makePill(t))); });
-                                    T.recordTags(data.item.tags||[]);
-                                    refreshFiltersAndLibrary();
-                    }
-                    close();
-                }
-            }catch(e){ console.error(e); }
-        }
-        function close(){ modal.classList.add('hidden'); modal.classList.remove('flex'); currentId=null; }
-        document.getElementById('editCancel').addEventListener('click', close);
-        document.getElementById('editSave').addEventListener('click', save);
-        editBtns.forEach(btn=> btn.addEventListener('click', ()=> open(btn.dataset.id)));
-})();
-
-function refreshFiltersAndLibrary(){
-    const filterHost = document.getElementById('tagFilters');
-    const allTags = new Set();
-    document.querySelectorAll('#choreList li').forEach(li=>{
-        try{ (JSON.parse(li.dataset.tags||'[]')||[]).forEach(t=>allTags.add(t)); }catch(e){}
-    });
-    T.getAllKnownTags().forEach(t=> allTags.add(t));
-    filterHost.innerHTML='';
-    [...allTags].sort((a,b)=>a.localeCompare(b)).forEach(t=>{
-          const pill = T.makeFilledPill(t, null, false);
-          filterHost.appendChild(pill);
-    });
-    const lib = document.getElementById('tagLibrary');
-    T.renderLibrary(lib, (t)=>{
-        const hidden = document.getElementById('tagsField');
-        let tags=[]; try{ tags = JSON.parse(hidden.value||'[]'); }catch(e){}
-        if(!tags.includes(t)){
-            tags.push(t); hidden.value = JSON.stringify(tags);
-            const wrap = document.getElementById('tagInputWrap');
-            T.renderPills(wrap, tags, (rm)=>{ tags = tags.filter(x=>x!==rm); hidden.value=JSON.stringify(tags); T.renderPills(wrap, tags, ()=>{}); });
-        }
-    });
-}
-
-T.onChange(()=> refreshFiltersAndLibrary());
-</script>
-<script>
-// Chore suggestions (mirror shopping): use persisted history + hide list
-(function(){
-    const box = document.getElementById('choreSuggestions');
-    const input = document.getElementById('choreInput');
-    const HIDE_KEY = 'chores:hidden_suggestions';
-    const BASE_KEY = 'chores:history_suggestions';
-    function getHidden(){ try{return new Set(JSON.parse(localStorage.getItem(HIDE_KEY)||'[]'));}catch(e){return new Set();} }
-    function setHidden(s){ try{ localStorage.setItem(HIDE_KEY, JSON.stringify([...s])); }catch(e){} }
-    function getBase(){ try{return JSON.parse(localStorage.getItem(BASE_KEY)||'[]')||[];}catch(e){return [];} }
-    function setBase(arr){ try{ localStorage.setItem(BASE_KEY, JSON.stringify(arr||[])); }catch(e){} }
-    // Seed base with current chores once (if empty)
-    (function seed(){ const base=getBase(); if(!base.length){ const seeds=[...document.querySelectorAll('#choreList li span.flex-1')].map(n=> n.textContent.trim()).filter(Boolean); if(seeds.length) setBase([...new Set(seeds)]);} })();
-    function render(){
-        const q = (input?.value||'').trim().toLowerCase();
-        const hidden = getHidden();
-        const base = getBase();
-        const existing = new Set([...document.querySelectorAll('#choreList li span.flex-1')]
-            .map(n=> n.textContent.trim().toLowerCase()));
-        const list = base
-            .filter(s=> !hidden.has(s)
-                        && !existing.has(s.toLowerCase())
-                        && (!q || s.toLowerCase().includes(q)))
-            .slice(0,50);
-        if(!list.length){ box.classList.add('hidden'); box.innerHTML=''; return; }
-        box.innerHTML='';
-        list.forEach(s=>{
-            const row = document.createElement('div');
-            row.className = 'flex items-center justify-between px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer select-none';
-            const text = document.createElement('div'); text.textContent = s; text.className='truncate pr-2 flex-1';
-            const del = document.createElement('button'); del.type='button'; del.title='Hide'; del.className='text-red-600'; del.innerHTML='<i class="fa fa-times"></i>';
-            del.addEventListener('click', (e)=>{ e.stopPropagation(); const h=getHidden(); h.add(s); setHidden(h); render(); });
-            row.appendChild(text); const actions=document.createElement('div'); actions.className='flex items-center gap-2'; actions.appendChild(del); row.appendChild(actions);
-            row.addEventListener('click', ()=>{ input.value = s; box.classList.add('hidden'); input.focus(); });
-            box.appendChild(row);
-        });
-        box.classList.remove('hidden');
+        }).join('');
     }
-    if(input){ input.addEventListener('input', render); input.addEventListener('focus', render); }
-    document.addEventListener('click', (e)=>{ if(!box.contains(e.target) && e.target!==input){ box.classList.add('hidden'); }});
-    // After successful form submit, add chore text to history base
-    const form = document.getElementById('choreForm');
-    form?.addEventListener('submit', ()=>{
-        const val = (input?.value||'').trim();
-        if(val){ const base = new Set(getBase()); base.add(val); setBase([...base]); }
+
+    function renderTabs() {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === currentTab));
+        document.querySelectorAll('.filter-btn').forEach(b => b.classList.toggle('active', b.dataset.filter === currentFilter));
+        $('todoPane').classList.toggle('hidden', currentTab !== 'todo');
+        $('chorePane').classList.toggle('hidden', currentTab !== 'chores');
+    }
+
+    async function load() {
+        allTasks = await fetchTasks();
+        const list = tasksForTab();
+        renderTabs();
+        renderStats(list);
+        if (currentTab === 'chores') renderChores(list); else renderTodo(list);
+    }
+
+    // ---------- new-task modal ----------
+    function openNewModal(type, title) {
+        newTaskType = type;
+        $('newTaskModalTitle').textContent = type === 'chore' ? 'New Chore' : 'New Task';
+        $('newTaskTitle').value = title || '';
+        $('newTaskAssignee').value = '';
+        $('newTaskDueDate').value = '';
+        $('newTaskModal').classList.remove('hidden');
+        setTimeout(() => $('newTaskTitle').focus(), 10);
+    }
+    const agendaParams = new URLSearchParams(location.search);
+    if (agendaParams.get('new') === '1') {
+        openNewModal(agendaParams.get('type') === 'chore' ? 'chore' : 'todo');
+        $('newTaskAssignee').value = agendaParams.get('assignee') || '';
+    }
+    const closeNewModal = () => $('newTaskModal').classList.add('hidden');
+
+    // ---------- edit modal ----------
+    function checklistRow(item) {
+        const row = document.createElement('div');
+        row.className = 'flex items-center gap-2 checklist-row';
+        row.innerHTML = `<input type="checkbox" class="circle-check cl-done" ${item && item.done ? 'checked' : ''} aria-label="Done">
+            <input type="text" class="cl-text flex-1 p-1.5 border border-gray-300 dark:border-gray-600 rounded bg-transparent" placeholder="Add a step" value="${esc(item ? item.text : '')}">
+            <button type="button" class="cl-remove text-gray-400 hover:text-red-500 px-2" aria-label="Remove item">✕</button>`;
+        row.querySelector('.cl-remove').addEventListener('click', () => row.remove());
+        row.querySelector('.cl-text').addEventListener('keydown', (ev) => {
+            if (ev.key === 'Enter') {
+                ev.preventDefault();
+                const next = checklistRow();
+                row.after(next);
+                next.querySelector('.cl-text').focus();
+            }
+        });
+        return row;
+    }
+
+    function readChecklist() {
+        return [...document.querySelectorAll('#checklistEditor .checklist-row')]
+            .map(r => ({ text: r.querySelector('.cl-text').value.trim(), done: r.querySelector('.cl-done').checked }))
+            .filter(i => i.text);
+    }
+
+    function openEditModal(task) {
+        editingTaskId = Number(task.id);
+        const statuses = [...new Set([...(task.status_options || []), ...availableStatuses].map(normalizeStatus))];
+        $('editTaskTitle').value = task.description || '';
+        $('editTaskStatus').innerHTML = statuses.map(s =>
+            `<option value="${esc(s)}" ${normalizeStatus(task.status) === s ? 'selected' : ''}>${esc(s.replace(/_/g, ' '))}</option>`).join('');
+        $('editTaskAssignee').value = task.assignee || '';
+        $('editTaskDueDate').value = task.due_date || '';
+        $('editTaskMentions').value = (task.mentions || []).map(m => '@' + m).join(', ');
+        $('editTaskDetailsHtml').value = task.details_html || '';
+        const editor = $('checklistEditor');
+        editor.innerHTML = '';
+        (task.checklist || []).forEach(i => editor.appendChild(checklistRow(i)));
+        $('editTaskModal').classList.remove('hidden');
+    }
+
+    function closeEditModal() {
+        $('editTaskModal').classList.add('hidden');
+        editingTaskId = null;
+    }
+
+    async function saveEdit() {
+        if (!editingTaskId) return;
+        const task = allTasks.find(t => Number(t.id) === editingTaskId) || {};
+        const mentions = String($('editTaskMentions').value).split(/[,\s]+/).map(v => v.replace(/^@+/, '').trim()).filter(Boolean);
+        const btn = $('saveEditTaskModalBtn');
+        btn.disabled = true;
+        try {
+            await updateTask(editingTaskId, {
+                description: $('editTaskTitle').value.trim() || task.description,
+                assignee: $('editTaskAssignee').value.trim() || null,
+                due_date: $('editTaskDueDate').value || null,
+                status: $('editTaskStatus').value,
+                mentions,
+                details_html: $('editTaskDetailsHtml').value,
+                checklist: readChecklist(),
+            });
+            closeEditModal();
+            await load();
+        } catch (err) {
+            alert(String(err.message || err));
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    // ---------- events ----------
+    function setTab(tab) {
+        currentTab = tab;
+        const url = new URL(location.href);
+        url.searchParams.set('tab', tab);
+        history.replaceState(null, '', url);
+        load();
+    }
+
+    document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
+    document.querySelectorAll('.filter-btn').forEach(b => b.addEventListener('click', () => { currentFilter = b.dataset.filter; load(); }));
+    $('toggleCompleted').addEventListener('click', () => { showCompleted = !showCompleted; load(); });
+    $('addChoreBtn').addEventListener('click', () => openNewModal('chore'));
+    $('quickAddMore').addEventListener('click', () => openNewModal('todo', $('quickAddInput').value.trim()));
+
+    $('quickAddForm').addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const text = $('quickAddInput').value.trim();
+        if (!text) return;
+        try {
+            await createTask(text, 'todo', '', '');
+            $('quickAddInput').value = '';
+            await load();
+        } catch (err) { alert(String(err.message || err)); }
     });
+
+    $('newTaskForm').addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const btn = $('createTaskModalBtn');
+        btn.disabled = true;
+        try {
+            await createTask($('newTaskTitle').value.trim(), newTaskType, $('newTaskAssignee').value.trim(), $('newTaskDueDate').value);
+            $('quickAddInput').value = '';
+            closeNewModal();
+            await load();
+        } catch (err) { alert(String(err.message || err)); }
+        finally { btn.disabled = false; }
+    });
+
+    ['closeTaskModalBtn', 'cancelTaskModalBtn', 'newTaskModalBackdrop'].forEach(id => $(id).addEventListener('click', closeNewModal));
+    ['closeEditTaskModalBtn', 'cancelEditTaskModalBtn', 'editTaskModalBackdrop'].forEach(id => $(id).addEventListener('click', closeEditModal));
+    $('editTaskForm').addEventListener('submit', (ev) => { ev.preventDefault(); saveEdit(); });
+    $('deleteEditTaskBtn').addEventListener('click', () => { if (editingTaskId) removeTask(editingTaskId); });
+    $('addChecklistItemBtn').addEventListener('click', () => {
+        const row = checklistRow();
+        $('checklistEditor').appendChild(row);
+        row.querySelector('.cl-text').focus();
+    });
+
+    document.addEventListener('click', (ev) => {
+        const check = ev.target.closest('[data-done]');
+        if (check) {
+            ev.stopPropagation();
+            const task = allTasks.find(t => Number(t.id) === Number(check.dataset.done));
+            if (task) setDone(task, check.checked);
+            return;
+        }
+        const row = ev.target.closest('[data-open]');
+        if (row) {
+            const task = allTasks.find(t => Number(t.id) === Number(row.dataset.open));
+            if (task) openEditModal(task);
+        }
+    });
+
+    document.addEventListener('keydown', (ev) => {
+        if (ev.key !== 'Escape') return;
+        if (!$('newTaskModal').classList.contains('hidden')) closeNewModal();
+        if (!$('editTaskModal').classList.contains('hidden')) closeEditModal();
+    });
+
+    attachSuggest($('newTaskAssignee'), 'single');
+    attachSuggest($('editTaskAssignee'), 'single');
+    attachSuggest($('editTaskMentions'), 'list');
+    attachSuggest($('editTaskDetailsHtml'), 'mention');
+    attachSuggest($('quickAddInput'), 'mention');
+    attachSuggest($('newTaskTitle'), 'mention');
+
+    loadStatuses().then(load);
 })();
 </script>
 {% endblock %}

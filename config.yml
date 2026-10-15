@@ -9,6 +9,7 @@ feature_toggles:
   chores: true
   expense_tracker: true
   expiry_tracker: true
+  home_assistant: true
   media_downloader: true
   notes: true
   pdf_compressor: true
@@ -20,7 +21,11 @@ feature_toggles:
   url_shortener: true
   who_is_home: true
 instance_name: My Home Hub
+home_assistant:
+  auto_login_url: ''
+  url: https://home.millitop.net
 menu_visibility:
+  home_assistant: true
   media_downloader: false
   pdf_compressor: false
   url_shortener: false

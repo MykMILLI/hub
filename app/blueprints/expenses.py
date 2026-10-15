@@ -4,6 +4,8 @@ import calendar as _calendar
 import json
 import os
 import math
+import hashlib
+from types import SimpleNamespace
 from collections import defaultdict
 from uuid import uuid4
 from werkzeug.utils import secure_filename
@@ -12,7 +14,7 @@ from ..models import (
     FamilyBudget, BudgetCategory, SharedExpense, DebtAccount, DebtPayment,
     FinancialGoal, GoalContribution, PlaidAccount, PlaidTransaction,
     FamilyMember, RecurringIncome, RecurringBillPayment, ActivityLog,
-    SharedRecurringBill, SharedRecurringBillParticipant,
+    SharedRecurringBill, SharedRecurringBillParticipant, TransactionCategoryRule,
 )
 from ..security import sanitize_text
 from ..blueprints import main_bp
@@ -24,6 +26,235 @@ from ..activity import log_activity
 
 logger = logging.getLogger(__name__)
 HUB_SAVINGS_NOTE_PREFIX = '[hub-savings]'
+
+
+def _matches_category_rule(value: str, match_type: str, needle: str) -> bool:
+    hay = (value or '').strip().lower()
+    ndl = (needle or '').strip().lower()
+    if not hay or not ndl:
+        return False
+    t = (match_type or 'contains').strip().lower()
+    if t == 'equals':
+        return hay == ndl
+    if t == 'startswith':
+        return hay.startswith(ndl)
+    if t == 'endswith':
+        return hay.endswith(ndl)
+    if t == 'normalized_equals':
+        norm_hay = ' '.join(''.join(ch if ch.isalnum() else ' ' for ch in hay).split())
+        norm_ndl = ' '.join(''.join(ch if ch.isalnum() else ' ' for ch in ndl).split())
+        return bool(norm_hay and norm_ndl and norm_hay == norm_ndl)
+    return ndl in hay
+
+
+def _apply_expense_category_rules(*, title: str = '', merchant: str = '', description: str = '', fallback: str = '') -> str:
+    rules = (
+        TransactionCategoryRule.query
+        .filter_by(active=True)
+        .order_by(TransactionCategoryRule.priority.asc(), TransactionCategoryRule.id.asc())
+        .all()
+    )
+    for rule in rules:
+        field = (rule.match_field or 'merchant').strip().lower()
+        source = merchant
+        if field in {'description', 'title'}:
+            source = description or title
+        if _matches_category_rule(source or '', rule.match_type or 'contains', rule.match_value or ''):
+            category = sanitize_text(rule.category or '').strip()
+            if category:
+                return category
+    return fallback
+
+
+def _is_transfer_like(text: str | None, category: str | None = None) -> bool:
+    blob = f"{text or ''} {(category or '')}".lower()
+    transfer_markers = (
+        'transfer', 'xfer', 'zelle', 'venmo cashout', 'internal transfer', 'ach transfer', 'payment from', 'payment to'
+    )
+    return any(marker in blob for marker in transfer_markers)
+
+
+def _is_refund_like(text: str | None, amount: float, category: str | None = None) -> bool:
+    blob = f"{text or ''} {(category or '')}".lower()
+    if amount < 0:
+        return True
+    refund_markers = ('refund', 'reversal', 'chargeback', 'adjustment credit', 'credit')
+    return any(marker in blob for marker in refund_markers)
+
+
+def _plaid_spending_amount(row: PlaidTransaction, *, include_pending: bool = False) -> float:
+    if not include_pending and bool(row.pending):
+        return 0.0
+    amount = float(row.amount or 0.0)
+    text = f"{row.merchant or ''} {row.description or ''}"
+    if _is_transfer_like(text, row.category):
+        return 0.0
+    if _is_refund_like(text, amount, row.category):
+        return 0.0
+    return max(amount, 0.0)
+
+
+def _budget_category_spent_map(year_value: int, month_value: int) -> dict[str, float]:
+    history = _build_month_history(year_value, month_value)
+    totals: dict[str, float] = defaultdict(float)
+    for item in history.get('items', []):
+        if not bool(item.get('include_in_family_total', True)):
+            continue
+        if (item.get('entry_type') or '') not in {'expense', 'debt_due'}:
+            continue
+        category = (item.get('category') or 'Uncategorized').strip() or 'Uncategorized'
+        totals[category] += float(item.get('paid_amount', 0.0) or 0.0) + float(item.get('due_amount', 0.0) or 0.0)
+    return {k: round(float(v), 2) for k, v in totals.items()}
+
+
+def _refresh_budget_category_spent_for_period(year_value: int, month_value: int) -> None:
+    budget = FamilyBudget.query.filter_by(year=year_value, month=month_value).first()
+    if not budget:
+        return
+
+    totals = _budget_category_spent_map(year_value, month_value)
+
+    for cat in budget.categories:
+        key = (cat.category_name or '').strip() or 'Uncategorized'
+        cat.spent_amount = round(float(totals.get(key, 0.0)), 2)
+    db.session.flush()
+
+
+def _sync_budget_for_entry_date(entry_date: date | None) -> None:
+    if not entry_date:
+        return
+    _refresh_budget_category_spent_for_period(int(entry_date.year), int(entry_date.month))
+
+
+def _is_privacy_mode() -> bool:
+    value = (request.args.get('privacy') or '').strip().lower()
+    return value in {'1', 'true', 'yes', 'on'}
+
+
+def _privacy_bucket(seed: str, low: int, high: int, step: int = 1000) -> float:
+    digest = hashlib.sha256(seed.encode('utf-8')).hexdigest()
+    n = int(digest[:8], 16)
+    span = max(high - low, step)
+    raw = low + (n % span)
+    return float((raw // step) * step)
+
+
+def _privacy_mask_payload(payload: dict) -> dict:
+    masked = json.loads(json.dumps(payload or {}))
+    items = list((masked.get('history') or {}).get('items') or [])
+
+    income_total = 0.0
+    expense_total = 0.0
+    for item in items:
+        entry_type = (item.get('entry_type') or '').strip()
+        seed = f"{entry_type}:{item.get('id')}:{item.get('date')}"
+        if entry_type == 'income':
+            shown = _privacy_bucket(seed, 10000, 150000)
+            item['charged_amount'] = shown
+            item['amount'] = shown
+            item['paid_amount'] = shown
+            item['due_amount'] = 0.0
+            if 'amount_paid' in item:
+                item['amount_paid'] = shown
+            if 'remaining_amount' in item:
+                item['remaining_amount'] = 0.0
+            if 'effective_amount' in item:
+                item['effective_amount'] = shown
+            income_total += shown
+        else:
+            shown = _privacy_bucket(seed, 10000, 100000)
+            item['charged_amount'] = shown
+            item['amount'] = shown
+            item['paid_amount'] = shown
+            item['due_amount'] = 0.0
+            if 'amount_paid' in item:
+                item['amount_paid'] = shown
+            if 'remaining_amount' in item:
+                item['remaining_amount'] = 0.0
+            if 'effective_amount' in item:
+                item['effective_amount'] = shown
+            expense_total += shown
+
+    if 'history' in masked:
+        masked['history']['items'] = items
+        masked['history']['totals'] = {
+            'income_total': income_total,
+            'income_paid_total': income_total,
+            'income_due_total': 0.0,
+            'expenses_total': expense_total,
+            'expenses_charged_total': expense_total,
+            'expenses_paid_total': expense_total,
+            'expenses_due_total': 0.0,
+            'net_total': income_total - expense_total,
+            'net_paid_total': income_total - expense_total,
+            'net_due_total': 0.0,
+            'projected_income_total': 0.0,
+        }
+        masked['history']['accounting'] = {
+            'income': {
+                'paid_total': income_total,
+                'due_total': 0.0,
+                'expected_total': income_total,
+                'paid_by_member': {'Family': income_total},
+                'due_by_member': {'Family': 0.0},
+            },
+            'expenses': {
+                'charged_total': expense_total,
+                'paid_total': expense_total,
+                'due_total': 0.0,
+                'expected_total': expense_total,
+                'paid_by_member': {'Family': expense_total},
+                'due_by_member': {'Family': 0.0},
+            },
+            'net': {
+                'paid_total': income_total - expense_total,
+                'expected_total': income_total - expense_total,
+                'due_total': 0.0,
+            },
+            'members': [
+                {
+                    'name': 'Family',
+                    'income_paid': income_total,
+                    'income_due': 0.0,
+                    'income_expected': income_total,
+                    'expense_charged': expense_total,
+                    'expense_paid': expense_total,
+                    'expense_due': 0.0,
+                    'expense_expected': expense_total,
+                    'net_paid': income_total - expense_total,
+                    'net_expected': income_total - expense_total,
+                }
+            ],
+        }
+
+    if 'summary' in masked:
+        masked['summary']['total_this_month'] = income_total - expense_total
+        masked['summary']['per_payer'] = {'Family': expense_total}
+        masked['summary']['per_category'] = {'Household': expense_total}
+        masked['summary']['top_category'] = 'Household'
+
+    if 'by_date' in masked:
+        for _, block in (masked.get('by_date') or {}).items():
+            rows = block.get('entries') or []
+            day_total = 0.0
+            for idx, row in enumerate(rows):
+                seed = f"bydate:{row.get('id')}:{row.get('date')}:{idx}"
+                shown = _privacy_bucket(seed, 10000, 120000, 1000)
+                row['amount'] = shown
+                row['charged_amount'] = shown
+                row['paid_amount'] = shown
+                row['due_amount'] = 0.0
+                if 'amount_paid' in row:
+                    row['amount_paid'] = shown
+                if 'remaining_amount' in row:
+                    row['remaining_amount'] = 0.0
+                if 'effective_amount' in row:
+                    row['effective_amount'] = shown
+                if 'unit_price' in row and row.get('unit_price') is not None:
+                    row['unit_price'] = shown
+                day_total += shown
+            block['total'] = day_total
+    return masked
 
 
 def _is_admin_user(user: str) -> bool:
@@ -586,21 +817,11 @@ def _debt_priority_metrics(debt: DebtAccount, ref_date: date | None = None) -> d
 
 
 def _family_income_expenses_for_month(y: int, m: int) -> tuple[float, float]:
-    month_start, month_end = _month_start_end(y, m)
-    expenses = ExpenseEntry.query.filter(
-        ExpenseEntry.date >= month_start,
-        ExpenseEntry.date <= month_end,
-    ).all()
-    incomes = IncomeEntry.query.filter(
-        IncomeEntry.date >= month_start,
-        IncomeEntry.date <= month_end,
-    ).all()
-
-    included_expenses = [e for e in expenses if bool(getattr(e, 'include_in_family_total', True))]
-    expense_breakdown = _expense_breakdown_for_entries(included_expenses)
-    expenses_total = float(expense_breakdown.get('paid_total', 0.0)) + float(expense_breakdown.get('due_total', 0.0))
-    income_total = sum(float(i.amount or 0) for i in incomes if bool(i.include_in_family_total))
-    return income_total, expenses_total
+    snapshot = _monthly_finance_snapshot(y, m)
+    return (
+        float(snapshot['family']['income']['expected_total']),
+        float(snapshot['family']['expenses']['expected_total']),
+    )
 
 
 def _generate_recurring_entries_until(today: date | None = None, auto_commit: bool = True) -> None:
@@ -1129,6 +1350,48 @@ def _build_month_history(y: int, m: int) -> dict:
     }
 
 
+def _monthly_finance_snapshot(y: int, m: int, member: str | None = None) -> dict:
+    """Single source-of-truth month accounting used by summary/collab/analytics."""
+    history = _build_month_history(y, m)
+    items = history.get('items', [])
+    family_accounting = history.get('accounting') or _aggregate_month_accounting(items)
+
+    clean_member = (member or '').strip()
+    if clean_member:
+        member_accounting = _aggregate_month_accounting(
+            items,
+            member_filter=clean_member,
+            family_only=False,
+        )
+    else:
+        member_accounting = {
+            'income': {'paid_total': 0.0, 'due_total': 0.0, 'expected_total': 0.0, 'paid_by_member': {}, 'due_by_member': {}},
+            'expenses': {'charged_total': 0.0, 'paid_total': 0.0, 'due_total': 0.0, 'expected_total': 0.0, 'paid_by_member': {}, 'due_by_member': {}},
+            'net': {'paid_total': 0.0, 'expected_total': 0.0, 'due_total': 0.0},
+            'members': [],
+        }
+
+    budget = FamilyBudget.query.filter_by(month=m, year=y).first()
+    budget_categories = _budget_category_spent_map(y, m)
+    budget_spent = float(sum(budget_categories.values()))
+    budget_total = float(budget.total_amount) if budget else 0.0
+
+    return {
+        'period': {'year': y, 'month': m},
+        'history': history,
+        'family': family_accounting,
+        'member': member_accounting,
+        'budget': {
+            'row': budget,
+            'total': budget_total,
+            'spent': budget_spent,
+            'remaining': (budget_total - budget_spent) if budget else 0.0,
+            'has_budget': bool(budget),
+            'categories': budget_categories,
+        },
+    }
+
+
 def _build_month_payload(y: int, m: int) -> dict:
     month_start, month_end = _month_start_end(y, m)
 
@@ -1344,6 +1607,7 @@ def expenses():
             unit_price = request.form.get('unit_price'); quantity = request.form.get('quantity')
             up = float(unit_price) if unit_price else None
             q = float(quantity) if quantity else None
+            category = _apply_expense_category_rules(title=title, description=title, fallback=category)
             entry = ExpenseEntry(
                 date=d,
                 title=title,
@@ -1355,6 +1619,7 @@ def expenses():
                 include_in_family_total=(not is_personal),
             )
             db.session.add(entry)
+            _sync_budget_for_entry_date(d)
             db.session.commit()
 
             if not is_personal:
@@ -1376,6 +1641,9 @@ def expenses():
     y, m = selected_year, selected_month
 
     payload = _build_month_payload(y, m)
+    privacy_mode = _is_privacy_mode()
+    if privacy_mode:
+        payload = _privacy_mask_payload(payload)
     rules = RecurringExpense.query.order_by(RecurringExpense.timestamp.desc()).all()
     recurring_income_schedules = RecurringIncome.query.filter_by(active=True).order_by(RecurringIncome.created_at.desc()).all()
     recurring_income_cards = []
@@ -1405,6 +1673,22 @@ def expenses():
         IncomeEntry.date >= month_start,
         IncomeEntry.date <= month_end
     ).order_by(IncomeEntry.date.desc()).all()
+
+    if privacy_mode:
+        masked_rows = []
+        for idx, row in enumerate(income_entries):
+            fake = _privacy_bucket(f"income-entry:{row.id}:{idx}:{row.date}", 10000, 100000)
+            masked_rows.append(SimpleNamespace(
+                id=row.id,
+                date=row.date,
+                title=row.title,
+                source=row.source,
+                amount=fake,
+                recipient=row.recipient,
+                include_in_family_total=row.include_in_family_total,
+                needs_confirmation=row.needs_confirmation,
+            ))
+        income_entries = masked_rows
     
     config = current_app.config['HOMEHUB_CONFIG']
     return render_template(
@@ -1415,6 +1699,7 @@ def expenses():
         config=config,
         expenses_json=json.dumps(payload),
         income_entries=income_entries,
+        privacy_mode=privacy_mode,
         today=today,
         now=datetime.utcnow(),
     )
@@ -1476,7 +1761,10 @@ def delete_expense_entry(entry_id):
     if not (user in admin_aliases or user == (entry.payer or '')):
         flash('Not allowed to delete entry.', 'error')
         return redirect(url_for('main.expenses'))
+    affected_date = entry.date
     db.session.delete(entry)
+    db.session.flush()
+    _sync_budget_for_entry_date(affected_date)
     db.session.commit()
     log_activity(
         actor=user,
@@ -1621,19 +1909,24 @@ def get_pending_income_confirmations():
         IncomeEntry.recipient == member,
     ).order_by(IncomeEntry.date.asc(), IncomeEntry.id.asc()).all()
 
+    privacy_mode = _is_privacy_mode()
+    items = []
+    for idx, r in enumerate(rows):
+        amount_value = float(r.amount or 0)
+        if privacy_mode:
+            amount_value = _privacy_bucket(f"pending-income:{r.id}:{idx}", 10000, 100000, 1000)
+        items.append({
+            'id': r.id,
+            'date': r.date.isoformat() if r.date else None,
+            'title': r.title,
+            'source': r.source,
+            'amount': amount_value,
+            'recipient': r.recipient,
+        })
+
     return jsonify({
         'ok': True,
-        'items': [
-            {
-                'id': r.id,
-                'date': r.date.isoformat() if r.date else None,
-                'title': r.title,
-                'source': r.source,
-                'amount': float(r.amount or 0),
-                'recipient': r.recipient,
-            }
-            for r in rows
-        ]
+        'items': items
     })
 
 
@@ -1809,6 +2102,8 @@ def api_expenses_month():
     _generate_recurring_entries_until(max(date.today(), month_end))
     _generate_recurring_income_until(date.today())
     payload = _build_month_payload(y, m)
+    if _is_privacy_mode():
+        payload = _privacy_mask_payload(payload)
     return jsonify(payload)
 
 
@@ -1858,12 +2153,19 @@ def api_expenses_all():
     total_charged = 0.0
     total_paid = 0.0
     total_due = 0.0
+    privacy_mode = _is_privacy_mode()
 
-    for row in rows:
+    for idx, row in enumerate(rows):
         charged_amount = max(float(row.amount or 0.0), 0.0)
         paid_amount = max(_entry_paid_amount(row), 0.0)
         due_amount = max(_entry_due_amount(row), 0.0)
         recurring = bool(row.recurring_id)
+
+        if privacy_mode:
+            masked = _privacy_bucket(f"all-expense:{row.id}:{idx}", 10000, 150000, 1000)
+            charged_amount = masked
+            paid_amount = masked
+            due_amount = 0.0
 
         if recurring:
             if due_amount <= 0.0001:
@@ -1979,6 +2281,7 @@ def api_expenses_quick_add():
                 include_in_family_total=(scope == 'family'),
             )
             db.session.add(entry)
+            _sync_budget_for_entry_date(entry_date)
             db.session.commit()
 
             if add_to_timeline:
@@ -2031,6 +2334,7 @@ def api_expenses_quick_add():
                     recurring_id=rule.id,
                 )
                 db.session.add(first_entry)
+            _sync_budget_for_entry_date(entry_date)
 
             db.session.commit()
 
@@ -2140,15 +2444,9 @@ def api_finance_summary():
     _generate_recurring_income_until(date.today())
 
     member = sanitize_text(request.args.get('member', '') or '')
-    history = _build_month_history(y, m)
-    items = history.get('items', [])
-    family_accounting = _aggregate_month_accounting(items)
-    member_accounting = _aggregate_month_accounting(items, member_filter=member, family_only=False) if member else {
-        'income': {'paid_total': 0.0, 'due_total': 0.0, 'expected_total': 0.0, 'paid_by_member': {}, 'due_by_member': {}},
-        'expenses': {'charged_total': 0.0, 'paid_total': 0.0, 'due_total': 0.0, 'expected_total': 0.0, 'paid_by_member': {}, 'due_by_member': {}},
-        'net': {'paid_total': 0.0, 'expected_total': 0.0, 'due_total': 0.0},
-        'members': [],
-    }
+    snapshot = _monthly_finance_snapshot(y, m, member=member)
+    family_accounting = snapshot.get('family', {})
+    member_accounting = snapshot.get('member', {})
 
     family_income_paid_total = float(family_accounting.get('income', {}).get('paid_total', 0.0))
     family_income_due_total = float(family_accounting.get('income', {}).get('due_total', 0.0))
@@ -2160,10 +2458,10 @@ def api_finance_summary():
     shared_expenses_total = 0.0
 
     # Family budget
-    budget = FamilyBudget.query.filter_by(month=m, year=y).first()
-    budget_total = float(budget.total_amount) if budget else 0.0
-    budget_spent = family_expenses_total + shared_expenses_total
-    budget_remaining = budget_total - budget_spent if budget else 0.0
+    budget_total = float(snapshot.get('budget', {}).get('total', 0.0))
+    budget_spent = float(snapshot.get('budget', {}).get('spent', 0.0))
+    budget_remaining = float(snapshot.get('budget', {}).get('remaining', 0.0))
+    has_budget = bool(snapshot.get('budget', {}).get('has_budget', False))
 
     # Member/personal
     member_expenses_charged_total = float(member_accounting.get('expenses', {}).get('charged_total', 0.0))
@@ -2174,7 +2472,7 @@ def api_finance_summary():
     member_income_due_total = float(member_accounting.get('income', {}).get('due_total', 0.0))
     member_income_total = float(member_accounting.get('income', {}).get('expected_total', 0.0))
 
-    return jsonify({
+    response = {
         'period': {'year': y, 'month': m},
         'family': {
             'income_total': family_income_total,
@@ -2195,7 +2493,7 @@ def api_finance_summary():
                 'total': budget_total,
                 'spent': budget_spent,
                 'remaining': budget_remaining,
-                'has_budget': bool(budget),
+                'has_budget': has_budget,
             }
         },
         'member': {
@@ -2210,7 +2508,52 @@ def api_finance_summary():
             'net_total': member_income_total - member_expenses_total,
             'net_paid_total': member_income_paid_total - member_expenses_paid_total,
         }
-    })
+    }
+
+    if _is_privacy_mode():
+        base_seed = f"finance:{y}:{m}:{member or 'family'}"
+        fam_income = _privacy_bucket(base_seed + ':fam:income', 100000, 1200000, 10000)
+        fam_expenses = _privacy_bucket(base_seed + ':fam:expense', 10000, 700000, 10000)
+        fam_net = fam_income - fam_expenses
+        response['family'].update({
+            'income_total': fam_income,
+            'income_paid_total': fam_income,
+            'income_due_total': 0.0,
+            'expenses_total': fam_expenses,
+            'expenses_paid_total': fam_expenses,
+            'expenses_due_total': 0.0,
+            'expenses_charged_total': fam_expenses,
+            'shared_expenses_total': 0.0,
+            'net_total': fam_net,
+            'net_paid_total': fam_net,
+            'income_paid_by_member': {'Family': fam_income},
+            'income_due_by_member': {'Family': 0.0},
+            'expenses_paid_by_member': {'Family': fam_expenses},
+            'expenses_due_by_member': {'Family': 0.0},
+        })
+        if response['family'].get('budget', {}).get('has_budget'):
+            budget_total = float(response['family']['budget'].get('total') or 0.0)
+            if budget_total <= 0:
+                budget_total = _privacy_bucket(base_seed + ':budget', 100000, 900000, 10000)
+            response['family']['budget']['total'] = budget_total
+            response['family']['budget']['spent'] = min(fam_expenses, budget_total)
+            response['family']['budget']['remaining'] = max(budget_total - response['family']['budget']['spent'], 0.0)
+
+        member_income = _privacy_bucket(base_seed + ':member:income', 10000, 200000, 1000)
+        member_expenses = _privacy_bucket(base_seed + ':member:expense', 10000, 180000, 1000)
+        response['member'].update({
+            'income_total': member_income,
+            'income_paid_total': member_income,
+            'income_due_total': 0.0,
+            'expenses_total': member_expenses,
+            'expenses_paid_total': member_expenses,
+            'expenses_due_total': 0.0,
+            'expenses_charged_total': member_expenses,
+            'net_total': member_income - member_expenses,
+            'net_paid_total': member_income - member_expenses,
+        })
+
+    return jsonify(response)
 
 
 @main_bp.route('/api/expenses/collaboration', methods=['GET'])
@@ -2255,9 +2598,10 @@ def api_expenses_collaboration():
             'net_paid': income_paid_total - expense_paid_total,
         })
 
-    month_history = _build_month_history(y, m)
+    month_snapshot = _monthly_finance_snapshot(y, m)
+    month_history = month_snapshot.get('history', {})
     month_items = month_history.get('items', [])
-    month_accounting = month_history.get('accounting', _aggregate_month_accounting(month_items))
+    month_accounting = month_snapshot.get('family', {})
 
     shared_income_actual = float(month_accounting.get('income', {}).get('paid_total', 0.0))
     shared_income_projected = float(month_accounting.get('income', {}).get('due_total', 0.0))
@@ -2313,7 +2657,7 @@ def api_expenses_collaboration():
             'settled': True,
         })
 
-    return jsonify({
+    response = {
         'period': {'year': y, 'month': m},
         'summary': {
             'shared_income_total': round(shared_income_total, 2),
@@ -2335,7 +2679,86 @@ def api_expenses_collaboration():
         'members': member_rows,
         'settlements': sorted(settlements, key=lambda x: x['amount'], reverse=True),
         'shared_recent': shared_recent,
-    })
+    }
+
+    if _is_privacy_mode():
+        seed = f"collab:{y}:{m}"
+        fake_income = _privacy_bucket(seed + ':income', 100000, 1200000, 10000)
+        fake_expenses = _privacy_bucket(seed + ':expenses', 10000, 800000, 10000)
+        fake_savings = _privacy_bucket(seed + ':savings', 10000, 400000, 10000)
+        response['summary'].update({
+            'shared_income_total': fake_income,
+            'shared_income_actual': fake_income,
+            'shared_income_projected': 0.0,
+            'shared_expenses_total': fake_expenses,
+            'shared_expenses_paid_total': fake_expenses,
+            'shared_expenses_due_total': 0.0,
+            'savings_total': fake_savings,
+        })
+        response['categories'] = [
+            {'name': 'Housing', 'amount': round(fake_expenses * 0.4, 2)},
+            {'name': 'Food', 'amount': round(fake_expenses * 0.3, 2)},
+            {'name': 'Transport', 'amount': round(fake_expenses * 0.2, 2)},
+            {'name': 'Other', 'amount': round(fake_expenses * 0.1, 2)},
+        ]
+        response['members'] = [
+            {
+                'name': row.get('name') or f"Member {idx+1}",
+                'income': round(fake_income / max(len(member_rows), 1), 2),
+                'income_actual': round(fake_income / max(len(member_rows), 1), 2),
+                'projected_income': 0.0,
+                'income_projected_total': round(fake_income / max(len(member_rows), 1), 2),
+                'expenses': round(fake_expenses / max(len(member_rows), 1), 2),
+                'expenses_paid': round(fake_expenses / max(len(member_rows), 1), 2),
+                'expenses_due': 0.0,
+                'shared_balance': 0.0,
+                'net': round((fake_income - fake_expenses) / max(len(member_rows), 1), 2),
+                'net_actual': round((fake_income - fake_expenses) / max(len(member_rows), 1), 2),
+                'net_projected': round((fake_income - fake_expenses) / max(len(member_rows), 1), 2),
+            }
+            for idx, row in enumerate(member_rows or [{'name': 'Family'}])
+        ]
+        response['shared_recent'] = []
+        response['settlements'] = []
+        response['accounting'] = {
+            'income': {
+                'paid_total': fake_income,
+                'due_total': 0.0,
+                'expected_total': fake_income,
+                'paid_by_member': {'Family': fake_income},
+                'due_by_member': {'Family': 0.0},
+            },
+            'expenses': {
+                'charged_total': fake_expenses,
+                'paid_total': fake_expenses,
+                'due_total': 0.0,
+                'expected_total': fake_expenses,
+                'paid_by_member': {'Family': fake_expenses},
+                'due_by_member': {'Family': 0.0},
+            },
+            'net': {
+                'paid_total': fake_income - fake_expenses,
+                'expected_total': fake_income - fake_expenses,
+                'due_total': 0.0,
+            },
+            'members': response['members'],
+        }
+        response['trend'] = [
+            {
+                'year': point.get('year'),
+                'month': point.get('month'),
+                'label': point.get('label'),
+                'income': _privacy_bucket(f"{seed}:trend:income:{point.get('year')}:{point.get('month')}", 100000, 1200000, 10000),
+                'income_paid': _privacy_bucket(f"{seed}:trend:income:{point.get('year')}:{point.get('month')}", 100000, 1200000, 10000),
+                'expenses': _privacy_bucket(f"{seed}:trend:expense:{point.get('year')}:{point.get('month')}", 10000, 800000, 10000),
+                'expenses_paid': _privacy_bucket(f"{seed}:trend:expense:{point.get('year')}:{point.get('month')}", 10000, 800000, 10000),
+                'net': _privacy_bucket(f"{seed}:trend:net:{point.get('year')}:{point.get('month')}", -200000, 400000, 10000),
+                'net_paid': _privacy_bucket(f"{seed}:trend:net:{point.get('year')}:{point.get('month')}", -200000, 400000, 10000),
+            }
+            for point in trend
+        ]
+
+    return jsonify(response)
 
 
 @main_bp.route('/api/expenses/debt-workflow', methods=['GET'])
@@ -2451,7 +2874,7 @@ def api_debt_workflow_snapshot():
             'remaining_amount': _entry_remaining_amount(entry),
         })
 
-    return jsonify({
+    response = {
         'period': {'year': y, 'month': m},
         'snapshot': {
             'total_outstanding_debt': total_outstanding_debt,
@@ -2469,7 +2892,29 @@ def api_debt_workflow_snapshot():
         },
         'debts': debts_payload,
         'due_items': due_items_payload,
-    })
+    }
+
+    if _is_privacy_mode():
+        seed = f"debt:{y}:{m}"
+        fake_due_30 = _privacy_bucket(seed + ':due30', 10000, 500000, 10000)
+        fake_debt = _privacy_bucket(seed + ':total', 100000, 1000000, 10000)
+        response['snapshot'].update({
+            'total_outstanding_debt': fake_debt,
+            'due_in_7_days': round(fake_due_30 * 0.25, 2),
+            'due_in_14_days': round(fake_due_30 * 0.5, 2),
+            'due_in_30_days': fake_due_30,
+            'due_in_90_days': round(fake_due_30 * 2, 2),
+            'due_in_365_days': round(fake_due_30 * 6, 2),
+            'due_in_window_days': fake_due_30,
+            'unpaid_recurring_this_month': fake_due_30,
+            'free_cash_this_month': _privacy_bucket(seed + ':cash', 10000, 300000, 10000),
+            'total_past_due_debt': round(fake_due_30 * 0.2, 2),
+            'high_priority_debts': 1,
+        })
+        response['debts'] = []
+        response['due_items'] = []
+
+    return jsonify(response)
 
 
 @main_bp.route('/api/expenses/debt-workflow/impact', methods=['POST'])
@@ -2631,14 +3076,19 @@ def api_delete_expense_entry(entry_id: int):
     try:
         recurring_id = entry.recurring_id
         if recurring_id and delete_mode == 'all':
+            affected_dates = {row.date for row in ExpenseEntry.query.filter_by(recurring_id=recurring_id).all() if row.date}
             deleted_count = ExpenseEntry.query.filter_by(recurring_id=recurring_id).delete(synchronize_session=False)
             RecurringBillPayment.query.filter_by(recurring_expense_id=recurring_id).delete(synchronize_session=False)
             rule = RecurringExpense.query.get(recurring_id)
             if rule:
                 db.session.delete(rule)
+            for dt in sorted(affected_dates):
+                _sync_budget_for_entry_date(dt)
             message = f'Deleted recurring series ({deleted_count} entr{"y" if deleted_count == 1 else "ies"})'
         else:
+            affected_date = entry.date
             db.session.delete(entry)
+            _sync_budget_for_entry_date(affected_date)
             message = 'Expense deleted'
         db.session.commit()
         return jsonify({'ok': True, 'message': message}), 200
@@ -2754,6 +3204,10 @@ def api_mark_expense_entry_paid(entry_id: int):
         row.paid_date = datetime.combine(payment_date, datetime.min.time()) if has_any_payment else None
 
         _recalculate_recurring_series_balances(int(entry.recurring_id))
+
+        _sync_budget_for_entry_date(entry.date)
+        if moved_remaining_to:
+            _sync_budget_for_entry_date(moved_remaining_to)
 
         db.session.commit()
 
@@ -2882,12 +3336,18 @@ def api_update_recurring_amount(recurring_id: int):
         ExpenseEntry.recurring_id == recurring_id,
         ExpenseEntry.date >= effective_date,
     ).all()
+    touched_dates: set[date] = set()
     for row in future_rows:
         paid = float(getattr(row, 'amount_paid', 0.0) or 0.0)
         row.amount = max(new_amount, paid)
+        if row.date:
+            touched_dates.add(row.date)
         touched += 1
 
     _recalculate_recurring_series_balances(recurring_id)
+
+    for dt in touched_dates:
+        _sync_budget_for_entry_date(dt)
 
     db.session.commit()
 
@@ -3317,12 +3777,12 @@ def list_budgets():
         FamilyBudget.year.desc(),
         FamilyBudget.month.desc()
     ).paginate(page=page, per_page=per_page)
-    
+
     result = []
     for budget in budgets.items:
-        spent_total = sum(
-            float(cat.spent_amount or 0) for cat in budget.categories
-        )
+        _refresh_budget_category_spent_for_period(int(budget.year), int(budget.month))
+        spent_map = _budget_category_spent_map(int(budget.year), int(budget.month))
+        spent_total = float(sum(spent_map.values()))
         result.append({
             'id': budget.id,
             'name': budget.budget_name,
@@ -3386,20 +3846,23 @@ def create_budget():
 def get_budget(budget_id):
     """Get detailed budget with categories and spending"""
     budget = FamilyBudget.query.get_or_404(budget_id)
+    _refresh_budget_category_spent_for_period(int(budget.year), int(budget.month))
+    spent_map = _budget_category_spent_map(int(budget.year), int(budget.month))
     
     categories = []
     total_spent = 0
     for cat in budget.categories:
+        cat_spent = float(spent_map.get((cat.category_name or '').strip() or 'Uncategorized', 0.0))
         cat_data = {
             'id': cat.id,
             'name': cat.category_name,
             'allocated': float(cat.allocated_amount),
-            'spent': float(cat.spent_amount or 0),
-            'remaining': float(cat.allocated_amount) - float(cat.spent_amount or 0),
-            'percentage': (float(cat.spent_amount or 0) / float(cat.allocated_amount) * 100) if cat.allocated_amount > 0 else 0,
+            'spent': cat_spent,
+            'remaining': float(cat.allocated_amount) - cat_spent,
+            'percentage': (cat_spent / float(cat.allocated_amount) * 100) if cat.allocated_amount > 0 else 0,
         }
         categories.append(cat_data)
-        total_spent += float(cat.spent_amount or 0)
+        total_spent += cat_spent
     
     return jsonify({
         'id': budget.id,
@@ -3629,6 +4092,9 @@ def create_shared_expense():
             db.session.flush()
             created_entry_ids.append(budget_entry.id)
 
+    if track_in_budgets:
+        _sync_budget_for_entry_date(expense_date)
+
     db.session.commit()
 
     log_activity(
@@ -3808,6 +4274,7 @@ def create_shared_recurring_bill():
 
     # Keep this endpoint atomic: avoid nested commit inside recurring generation.
     _generate_recurring_entries_until(max(date.today(), start_date), auto_commit=False)
+    _sync_budget_for_entry_date(start_date)
 
     log_activity(
         actor=created_by,
@@ -4299,6 +4766,138 @@ def add_goal_contribution(goal_id):
     }), 201
 
 
+@main_bp.route('/api/expenses/category-rules', methods=['GET'])
+def list_category_rules():
+    rows = (
+        TransactionCategoryRule.query
+        .order_by(TransactionCategoryRule.priority.asc(), TransactionCategoryRule.id.asc())
+        .all()
+    )
+    return jsonify({
+        'ok': True,
+        'rules': [
+            {
+                'id': row.id,
+                'rule_name': row.rule_name,
+                'match_field': row.match_field,
+                'match_type': row.match_type,
+                'match_value': row.match_value,
+                'category': row.category,
+                'active': bool(row.active),
+                'priority': int(row.priority or 100),
+                'created_by': row.created_by,
+            }
+            for row in rows
+        ]
+    })
+
+
+@main_bp.route('/api/expenses/category-rules', methods=['POST'])
+@_require_auth()
+def create_category_rule():
+    data = request.get_json() or {}
+    rule_name = sanitize_text(data.get('rule_name', '')).strip() or 'Rule'
+    match_field = sanitize_text(data.get('match_field', 'merchant')).strip().lower()
+    match_type = sanitize_text(data.get('match_type', 'contains')).strip().lower()
+    match_value = sanitize_text(data.get('match_value', '')).strip()
+    category = sanitize_text(data.get('category', '')).strip()
+    created_by = sanitize_text(data.get('created_by', session.get('current_member', '') or 'Administrator')).strip() or 'Administrator'
+    priority = int(data.get('priority', 100) or 100)
+
+    if match_field not in {'merchant', 'description', 'title'}:
+        return jsonify({'ok': False, 'error': 'match_field must be merchant, description, or title'}), 400
+    if match_type not in {'contains', 'equals', 'startswith', 'endswith', 'normalized_equals'}:
+        return jsonify({'ok': False, 'error': 'match_type must be contains, equals, startswith, endswith, or normalized_equals'}), 400
+    if not match_value or not category:
+        return jsonify({'ok': False, 'error': 'match_value and category are required'}), 400
+
+    row = TransactionCategoryRule(
+        rule_name=rule_name,
+        match_field=match_field,
+        match_type=match_type,
+        match_value=match_value,
+        category=category,
+        active=bool(data.get('active', True)),
+        priority=priority,
+        created_by=created_by,
+    )
+    db.session.add(row)
+    db.session.commit()
+    return jsonify({'ok': True, 'id': row.id, 'message': 'Category rule created'}), 201
+
+
+@main_bp.route('/api/expenses/category-rules/<int:rule_id>', methods=['DELETE'])
+@_require_auth()
+def delete_category_rule(rule_id: int):
+    row = TransactionCategoryRule.query.get_or_404(rule_id)
+    db.session.delete(row)
+    db.session.commit()
+    return jsonify({'ok': True, 'message': 'Category rule deleted'})
+
+
+@main_bp.route('/api/expenses/plaid/transactions/<int:tx_id>/category', methods=['POST'])
+@_require_auth()
+def set_plaid_transaction_category(tx_id: int):
+    """Override one Plaid transaction category and optionally persist a reusable rule."""
+    row = PlaidTransaction.query.get_or_404(tx_id)
+    data = request.get_json(silent=True) or {}
+    category = sanitize_text(data.get('category', '')).strip()
+    if not category:
+        return jsonify({'ok': False, 'error': 'category is required'}), 400
+
+    persist_override = bool(data.get('persist_override', True))
+    created_by = sanitize_text(data.get('created_by', '')).strip() or sanitize_text(session.get('current_member', '')).strip() or 'Administrator'
+
+    row.category = category
+    rule_id = None
+    if persist_override:
+        merchant = sanitize_text(row.merchant or '').strip()
+        description = sanitize_text(row.description or '').strip()
+        if merchant:
+            match_field = 'merchant'
+            match_type = 'normalized_equals'
+            match_value = merchant
+        else:
+            match_field = 'description'
+            match_type = 'contains'
+            match_value = description[:120]
+
+        if match_value:
+            existing = TransactionCategoryRule.query.filter_by(
+                match_field=match_field,
+                match_type=match_type,
+                match_value=match_value,
+                category=category,
+                active=True,
+            ).first()
+            if existing:
+                rule_id = existing.id
+            else:
+                rule = TransactionCategoryRule(
+                    rule_name=f"Auto override: {merchant or description or 'Plaid transaction'}",
+                    match_field=match_field,
+                    match_type=match_type,
+                    match_value=match_value,
+                    category=category,
+                    active=True,
+                    priority=50,
+                    created_by=created_by,
+                )
+                db.session.add(rule)
+                db.session.flush()
+                rule_id = rule.id
+
+    db.session.commit()
+    return jsonify({
+        'ok': True,
+        'message': 'Transaction category updated',
+        'transaction_id': row.id,
+        'category': row.category,
+        'persist_override': persist_override,
+        'rule_id': rule_id,
+    })
+
+
 # ==================== PLAID INTEGRATION ====================
 
 @main_bp.route('/expenses/plaid/sdk.js', methods=['GET'])
@@ -4373,15 +4972,19 @@ def exchange_plaid_token():
 def list_plaid_accounts():
     """Get linked Plaid accounts"""
     accounts = PlaidAccount.query.filter_by(active=True).all()
+    privacy_mode = _is_privacy_mode()
     
     result = []
     for account in accounts:
+        balance_value = float(account.balance) if account.balance else 0
+        if privacy_mode:
+            balance_value = _privacy_bucket(f"plaid-account:{account.id}", 1000, 120000, 1000)
         result.append({
             'id': account.id,
             'user': account.user,
             'account_name': account.account_name,
             'account_type': account.account_type,
-            'balance': float(account.balance) if account.balance else 0,
+            'balance': balance_value,
             'currency': account.currency,
             'synced_at': account.synced_at.isoformat() if account.synced_at else None,
         })
@@ -4423,13 +5026,21 @@ def get_plaid_transactions(account_id):
     )
     
     result = []
+    privacy_mode = _is_privacy_mode()
     for trans in transactions:
+        amount_value = float(trans.amount)
+        description_value = trans.description
+        merchant_value = trans.merchant
+        if privacy_mode:
+            amount_value = _privacy_bucket(f"plaid-tx:{trans.id}", 5, 500, 5)
+            description_value = 'Transaction'
+            merchant_value = None
         result.append({
             'id': trans.id,
             'date': trans.transaction_date.isoformat(),
-            'amount': float(trans.amount),
-            'description': trans.description,
-            'merchant': trans.merchant,
+            'amount': amount_value,
+            'description': description_value,
+            'merchant': merchant_value,
             'category': trans.category,
             'pending': trans.pending,
         })
@@ -4452,41 +5063,43 @@ def disconnect_plaid_account(account_id):
 @main_bp.route('/expenses/analytics/summary', methods=['GET'])
 def get_analytics_summary():
     """Get comprehensive financial analytics summary"""
-    today = date.today()
-    month_start = date(today.year, today.month, 1)
-    month_end = date(today.year, today.month, 28) if today.month == 2 else \
-                date(today.year, today.month if today.month < 12 else 1, 
-                     30 if today.month in [4,6,9,11] else 31)
-    
-    current_budget = FamilyBudget.query.filter_by(
-        month=today.month,
-        year=today.year
-    ).first()
-    
-    month_expenses = ExpenseEntry.query.filter(
-        ExpenseEntry.date >= month_start,
-        ExpenseEntry.date <= month_end
-    ).all()
-    
+    try:
+        y, m = _parse_year_month_query()
+    except ValueError:
+        return jsonify({'error': 'Invalid month parameter. Must be an integer between 1 and 12.'}), 400
+
+    _, month_end = _month_start_end(y, m)
+    _generate_recurring_entries_until(max(date.today(), month_end))
+    _generate_recurring_income_until(date.today())
+
+    month_snapshot = _monthly_finance_snapshot(y, m)
+    month_history = month_snapshot.get('history', {})
+    accounting = month_snapshot.get('family', {})
+    expense_paid = float(accounting.get('expenses', {}).get('paid_total', 0.0))
+    expense_due = float(accounting.get('expenses', {}).get('due_total', 0.0))
+    expense_charged = float(accounting.get('expenses', {}).get('charged_total', 0.0))
+
+    current_budget = month_snapshot.get('budget', {}).get('row')
+    if current_budget:
+        _refresh_budget_category_spent_for_period(int(y), int(m))
+
     active_debts = DebtAccount.query.filter_by(active=True).all()
     goals = FinancialGoal.query.filter_by(active=True).all()
-    shared_expenses = SharedExpense.query.filter(
-        SharedExpense.date >= month_start,
-        SharedExpense.date <= month_end
-    ).all()
-    
-    month_expense_total = sum(float(e.amount or 0) for e in month_expenses)
-    shared_expense_total = sum(float(e.total_amount) for e in shared_expenses)
-    total_debt = sum(float(d.current_balance) for d in active_debts)
-    goal_total_target = sum(float(g.target_amount) for g in goals)
-    goal_total_current = sum(float(g.current_amount) for g in goals)
-    
-    return jsonify({
-        'period': f"{today.month}/{today.year}",
+    goal_total_target = sum(float(g.target_amount or 0) for g in goals)
+    goal_total_current = sum(float(g.current_amount or 0) for g in goals)
+    total_debt = sum(float(d.current_balance or 0) for d in active_debts)
+    linked_accounts = PlaidAccount.query.filter_by(active=True).all()
+    linked_balance = sum(float(a.balance or 0.0) for a in linked_accounts)
+
+    response = {
+        'period': f"{m}/{y}",
         'budget': {
             'total': float(current_budget.total_amount) if current_budget else 0,
-            'spent': month_expense_total + shared_expense_total,
-            'remaining': float(current_budget.total_amount) - (month_expense_total + shared_expense_total) if current_budget else 0,
+            'spent': expense_paid + expense_due,
+            'paid': expense_paid,
+            'due': expense_due,
+            'charged': expense_charged,
+            'remaining': float(current_budget.total_amount) - (expense_paid + expense_due) if current_budget else 0,
         },
         'debts': {
             'active_count': len(active_debts),
@@ -4499,10 +5112,48 @@ def get_analytics_summary():
             'progress': (goal_total_current / goal_total_target * 100) if goal_total_target > 0 else 0,
         },
         'transactions': {
-            'individual': len(month_expenses),
-            'shared': len(shared_expenses),
-        }
-    })
+            'individual': len([x for x in (month_history.get('items') or []) if (x.get('entry_type') or '') == 'expense']),
+            'shared': len([x for x in (month_history.get('items') or []) if bool(x.get('is_shared_bill'))]),
+        },
+        'accounts': {
+            'linked_count': len(linked_accounts),
+            'linked_balance': linked_balance,
+        },
+        'position': {
+            'net_cashflow': float(accounting.get('net', {}).get('expected_total', 0.0)),
+            'net_worth_proxy': linked_balance - total_debt,
+        },
+    }
+
+    if _is_privacy_mode():
+        seed = f"analytics:{y}:{m}"
+        fake_budget_total = _privacy_bucket(seed + ':budget', 100000, 800000, 10000)
+        fake_budget_spent = _privacy_bucket(seed + ':spent', 10000, int(fake_budget_total), 10000)
+        fake_debt = _privacy_bucket(seed + ':debt', 10000, 600000, 10000)
+        fake_goal_target = _privacy_bucket(seed + ':goal-target', 100000, 1000000, 10000)
+        fake_goal_current = min(_privacy_bucket(seed + ':goal-current', 10000, 900000, 10000), fake_goal_target)
+        fake_balance = _privacy_bucket(seed + ':balance', 10000, 900000, 10000)
+        response['budget'].update({
+            'total': fake_budget_total,
+            'spent': fake_budget_spent,
+            'paid': fake_budget_spent,
+            'due': 0.0,
+            'charged': fake_budget_spent,
+            'remaining': max(fake_budget_total - fake_budget_spent, 0.0),
+        })
+        response['debts']['total_balance'] = fake_debt
+        response['goals'].update({
+            'target_total': fake_goal_target,
+            'current_total': fake_goal_current,
+            'progress': (fake_goal_current / fake_goal_target * 100) if fake_goal_target > 0 else 0,
+        })
+        response['accounts']['linked_balance'] = fake_balance
+        response['position'].update({
+            'net_cashflow': fake_goal_current - fake_budget_spent,
+            'net_worth_proxy': fake_balance - fake_debt,
+        })
+
+    return jsonify(response)
 
 
 # ==================== PLAID ACCOUNT ANALYTICS ====================
@@ -4513,10 +5164,13 @@ def get_accounts_summary():
     accounts = PlaidAccount.query.filter_by(active=True).all()
     
     total_balance = 0
+    privacy_mode = _is_privacy_mode()
     account_details = []
     
     for account in accounts:
         balance = float(account.balance) if account.balance else 0
+        if privacy_mode:
+            balance = _privacy_bucket(f"plaid-analytics:{account.id}", 1000, 200000, 1000)
         total_balance += balance
         
         # Get recent transactions for this account
@@ -4570,11 +5224,14 @@ def get_account_summary(account_id):
     # Category breakdown
     category_breakdown = {}
     for trans in month_trans:
+        spend_amount = _plaid_spending_amount(trans, include_pending=False)
+        if spend_amount <= 0:
+            continue
         category = trans.category or 'Uncategorized'
         if category not in category_breakdown:
             category_breakdown[category] = {'count': 0, 'total': 0}
         category_breakdown[category]['count'] += 1
-        category_breakdown[category]['total'] += float(trans.amount)
+        category_breakdown[category]['total'] += spend_amount
     
     # Sort by total
     sorted_categories = sorted(
@@ -4583,10 +5240,10 @@ def get_account_summary(account_id):
         reverse=True
     )
     
-    month_total = sum(float(t.amount) for t in month_trans)
-    year_total = sum(float(t.amount) for t in year_trans)
+    month_total = sum(_plaid_spending_amount(t, include_pending=False) for t in month_trans)
+    year_total = sum(_plaid_spending_amount(t, include_pending=False) for t in year_trans)
     
-    return jsonify({
+    response = {
         'account': {
             'id': account.id,
             'name': account.account_name,
@@ -4615,7 +5272,21 @@ def get_account_summary(account_id):
             }
             for cat, data in sorted_categories[:10]
         ],
-    })
+    }
+
+    if _is_privacy_mode():
+        seed = f"plaid-account-summary:{account.id}"
+        fake_balance = _privacy_bucket(seed + ':balance', 1000, 150000, 1000)
+        fake_month = _privacy_bucket(seed + ':month', 1000, 50000, 1000)
+        fake_year = _privacy_bucket(seed + ':year', int(fake_month), 200000, 1000)
+        response['account']['balance'] = fake_balance
+        response['period']['month']['total_spent'] = fake_month
+        response['period']['month']['average_transaction'] = fake_month / max(response['period']['month']['total_transactions'], 1)
+        response['period']['year']['total_spent'] = fake_year
+        response['period']['year']['average_transaction'] = fake_year / max(response['period']['year']['total_transactions'], 1)
+        response['top_categories'] = []
+
+    return jsonify(response)
 
 
 @main_bp.route('/expenses/accounts/<int:account_id>/transactions', methods=['GET'])
@@ -4653,13 +5324,21 @@ def get_account_transactions(account_id):
     paginated = query.paginate(page=page, per_page=per_page)
     
     transactions = []
-    for trans in paginated.items:
+    privacy_mode = _is_privacy_mode()
+    for idx, trans in enumerate(paginated.items):
+        amount_value = float(trans.amount)
+        description_value = trans.description
+        merchant_value = trans.merchant
+        if privacy_mode:
+            amount_value = _privacy_bucket(f"acct-tx:{trans.id}:{idx}", 5, 500, 5)
+            description_value = 'Transaction'
+            merchant_value = None
         transactions.append({
             'id': trans.id,
             'date': trans.transaction_date.isoformat(),
-            'amount': float(trans.amount),
-            'description': trans.description,
-            'merchant': trans.merchant,
+            'amount': amount_value,
+            'description': description_value,
+            'merchant': merchant_value,
             'category': trans.category,
             'pending': trans.pending,
         })
@@ -4694,6 +5373,9 @@ def get_account_expenses_by_category(account_id):
     # Build category breakdown
     categories = {}
     for trans in transactions:
+        spend_amount = _plaid_spending_amount(trans, include_pending=False)
+        if spend_amount <= 0:
+            continue
         category = trans.category or 'Uncategorized'
         if category not in categories:
             categories[category] = {
@@ -4702,10 +5384,10 @@ def get_account_expenses_by_category(account_id):
                 'transactions': []
             }
         categories[category]['count'] += 1
-        categories[category]['total'] += float(trans.amount)
+        categories[category]['total'] += spend_amount
         categories[category]['transactions'].append({
             'date': trans.transaction_date.isoformat(),
-            'amount': float(trans.amount),
+            'amount': spend_amount,
             'description': trans.description,
             'merchant': trans.merchant,
         })
@@ -4717,7 +5399,7 @@ def get_account_expenses_by_category(account_id):
         reverse=True
     )
     
-    return jsonify({
+    response = {
         'account': {
             'id': account.id,
             'name': account.account_name,
@@ -4734,7 +5416,19 @@ def get_account_expenses_by_category(account_id):
             for cat, data in sorted_categories
         ],
         'total_spent': sum(c['total'] for c in categories.values()),
-    })
+    }
+
+    if _is_privacy_mode():
+        seed = f"acct-cat:{account.id}:{today.year}:{today.month}"
+        fake_total = _privacy_bucket(seed, 1000, 70000, 1000)
+        response['categories'] = [
+            {'name': 'Household', 'count': 3, 'total': round(fake_total * 0.5, 2), 'average_per_transaction': round((fake_total * 0.5) / 3, 2), 'percentage': 50.0},
+            {'name': 'Food', 'count': 2, 'total': round(fake_total * 0.3, 2), 'average_per_transaction': round((fake_total * 0.3) / 2, 2), 'percentage': 30.0},
+            {'name': 'Other', 'count': 2, 'total': round(fake_total * 0.2, 2), 'average_per_transaction': round((fake_total * 0.2) / 2, 2), 'percentage': 20.0},
+        ]
+        response['total_spent'] = fake_total
+
+    return jsonify(response)
 
 
 @main_bp.route('/expenses/budget/family', methods=['GET', 'POST'])
@@ -4747,6 +5441,12 @@ def manage_family_budget():
             month=today.month,
             year=today.year
         ).first()
+
+        if budget:
+            _refresh_budget_category_spent_for_period(int(budget.year), int(budget.month))
+            spent_map = _budget_category_spent_map(int(budget.year), int(budget.month))
+        else:
+            spent_map = {}
         
         if not budget:
             return jsonify({'error': 'No budget for current month'}), 404
@@ -4754,7 +5454,7 @@ def manage_family_budget():
         categories = []
         total_spent = 0
         for cat in budget.categories:
-            cat_spent = float(cat.spent_amount or 0)
+            cat_spent = float(spent_map.get((cat.category_name or '').strip() or 'Uncategorized', 0.0))
             total_spent += cat_spent
             categories.append({
                 'id': cat.id,

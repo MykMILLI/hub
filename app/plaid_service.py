@@ -18,12 +18,62 @@ try:
 except ImportError:
     PLAID_AVAILABLE = False
 
-from .models import db, PlaidAccount, PlaidTransaction
+from .models import db, PlaidAccount, PlaidTransaction, TransactionCategoryRule
 from datetime import datetime, timedelta
 import os
 import logging
+import re
 
 logger = logging.getLogger(__name__)
+
+
+def _plaid_scalar(value):
+    """Convert Plaid SDK enum/model scalars into DB-serializable primitives."""
+    if value is None:
+        return None
+    if hasattr(value, 'value'):
+        return value.value
+    return value
+
+
+def _normalize_rule_text(value: str | None) -> str:
+    raw = (value or '').strip().lower()
+    if not raw:
+        return ''
+    raw = re.sub(r'[^a-z0-9]+', ' ', raw)
+    return re.sub(r'\s+', ' ', raw).strip()
+
+
+def _matches_rule(value: str, match_type: str, needle: str) -> bool:
+    hay = (value or '').strip().lower()
+    ndl = (needle or '').strip().lower()
+    if not hay or not ndl:
+        return False
+    t = (match_type or 'contains').strip().lower()
+    if t == 'equals':
+        return hay == ndl
+    if t == 'startswith':
+        return hay.startswith(ndl)
+    if t == 'endswith':
+        return hay.endswith(ndl)
+    if t == 'normalized_equals':
+        return _normalize_rule_text(hay) == _normalize_rule_text(ndl)
+    return ndl in hay
+
+
+def _apply_transaction_category_rule(merchant: str | None, description: str | None, existing: str | None) -> str | None:
+    rules = (
+        TransactionCategoryRule.query
+        .filter_by(active=True)
+        .order_by(TransactionCategoryRule.priority.asc(), TransactionCategoryRule.id.asc())
+        .all()
+    )
+    for rule in rules:
+        field = (rule.match_field or 'merchant').strip().lower()
+        source = description if field in {'description', 'title'} else merchant
+        if _matches_rule(source or '', rule.match_type or 'contains', rule.match_value or ''):
+            return (rule.category or existing or '').strip() or existing
+    return existing
 
 class PlaidService:
     """Service for Plaid API interactions"""
@@ -126,28 +176,37 @@ class PlaidService:
             response = self.client.item_public_token_exchange(request)
             
             access_token = response.access_token
-            item_id = response.item_id
+            plaid_item_id = response.item_id
 
             # Fetch account details
             accounts_request = AccountsGetRequest(access_token=access_token)
             accounts_response = self.client.accounts_get(accounts_request)
 
-            # Store each account
+            # Store or update each account idempotently.
+            # One Plaid item can contain many accounts, so row identity is item+account.
             plaid_accounts = []
             for account in accounts_response.accounts:
-                plaid_account = PlaidAccount(
-                    user=user,
-                    access_token=access_token,
-                    item_id=item_id,
-                    account_id=account.account_id,
-                    account_name=account.name,
-                    account_type=account.type,
-                    account_subtype=account.subtype,
-                    balance=account.balances.current,
-                    currency=account.balances.iso_currency_code or 'USD',
-                    synced_at=datetime.utcnow(),
-                )
-                db.session.add(plaid_account)
+                item_account_key = f"{plaid_item_id}:{account.account_id}"
+                plaid_account = PlaidAccount.query.filter_by(item_account_key=item_account_key).first()
+                if not plaid_account:
+                    plaid_account = PlaidAccount.query.filter_by(account_id=account.account_id).first()
+                if not plaid_account:
+                    plaid_account = PlaidAccount(item_account_key=item_account_key, account_id=account.account_id)
+                    db.session.add(plaid_account)
+
+                plaid_account.user = user
+                plaid_account.access_token = access_token
+                plaid_account.plaid_item_id = plaid_item_id
+                plaid_account.item_account_key = item_account_key
+                # Keep legacy item_id unique-safe for existing deployed schema.
+                plaid_account.item_id = item_account_key
+                plaid_account.account_name = account.name
+                plaid_account.account_type = _plaid_scalar(account.type)
+                plaid_account.account_subtype = _plaid_scalar(account.subtype)
+                plaid_account.balance = account.balances.current
+                plaid_account.currency = account.balances.iso_currency_code or 'USD'
+                plaid_account.active = True
+                plaid_account.synced_at = datetime.utcnow()
                 plaid_accounts.append(plaid_account)
 
             db.session.commit()
@@ -159,12 +218,13 @@ class PlaidService:
             db.session.rollback()
             raise
 
-    def sync_transactions(self, plaid_account_id: int, days_back: int = 30):
+    def sync_transactions(self, plaid_account_id: int, days_back: int | None = None):
         """Sync transactions from Plaid for an account
         
         Args:
             plaid_account_id: Database ID of PlaidAccount
-            days_back: Number of days to fetch (default 30)
+            days_back: Optional explicit lookback days. If omitted, performs
+                dynamic incremental sync with overlap, and deeper initial history.
             
         Returns:
             Number of new transactions synced
@@ -177,50 +237,79 @@ class PlaidService:
             if not plaid_account or not plaid_account.active:
                 return 0
 
-            # Calculate date range
             end_date = datetime.now().date()
-            start_date = end_date - timedelta(days=days_back)
+            if days_back and int(days_back) > 0:
+                start_date = end_date - timedelta(days=int(days_back))
+            else:
+                # Daily-driver default: initial sync pulls deep history; later syncs are incremental with overlap.
+                latest_date = (
+                    db.session.query(db.func.max(PlaidTransaction.transaction_date))
+                    .filter(PlaidTransaction.plaid_account_id == plaid_account.id)
+                    .scalar()
+                )
+                if latest_date:
+                    start_date = latest_date - timedelta(days=14)
+                else:
+                    start_date = end_date - timedelta(days=730)
 
-            # Fetch transactions
-            request = TransactionsGetRequest(
-                access_token=plaid_account.access_token,
-                start_date=start_date,
-                end_date=end_date,
-                options={
-                    'account_ids': [plaid_account.account_id],
-                    'count': 250,
-                    'offset': 0,
-                },
-            )
+            # Fetch transactions with pagination to avoid partial imports.
+            all_transactions = []
+            offset = 0
+            page_size = 250
+            total = None
+            while total is None or offset < total:
+                request = TransactionsGetRequest(
+                    access_token=plaid_account.access_token,
+                    start_date=start_date,
+                    end_date=end_date,
+                    options={
+                        'account_ids': [plaid_account.account_id],
+                        'count': page_size,
+                        'offset': offset,
+                    },
+                )
+                response = self.client.transactions_get(request)
+                page = list(response.transactions or [])
+                total = int(getattr(response, 'total_transactions', len(page)) or len(page))
+                all_transactions.extend(page)
+                if not page:
+                    break
+                offset += len(page)
 
-            response = self.client.transactions_get(request)
-            transactions = response.transactions
-
-            # Store transactions that don't already exist
+            # Upsert transactions to preserve pending->posted transitions without duplicates.
             new_count = 0
-            for trans in transactions:
-                existing = PlaidTransaction.query.filter_by(
-                    plaid_transaction_id=trans.transaction_id
-                ).first()
-                
+            latest_transaction = None
+            for trans in all_transactions:
+                category = trans.personal_finance_category.primary if trans.personal_finance_category else None
+                category = _apply_transaction_category_rule(trans.merchant_name, trans.name, category)
+                existing = PlaidTransaction.query.filter_by(plaid_transaction_id=trans.transaction_id).first()
+
                 if not existing:
-                    plaid_trans = PlaidTransaction(
+                    existing = PlaidTransaction(
                         plaid_account_id=plaid_account.id,
                         plaid_transaction_id=trans.transaction_id,
-                        transaction_date=trans.date,
-                        posted_date=trans.posted_date,
-                        amount=trans.amount,
-                        currency=trans.iso_currency_code or 'USD',
-                        description=trans.name,
-                        merchant=trans.merchant_name or 'Unknown',
-                        category=trans.personal_finance_category.primary if trans.personal_finance_category else None,
-                        pending=trans.pending,
                     )
-                    db.session.add(plaid_trans)
+                    db.session.add(existing)
                     new_count += 1
+
+                existing.plaid_account_id = plaid_account.id
+                existing.transaction_date = trans.date
+                existing.posted_date = trans.posted_date
+                existing.amount = trans.amount
+                existing.currency = trans.iso_currency_code or 'USD'
+                existing.description = trans.name
+                existing.merchant = trans.merchant_name or 'Unknown'
+                existing.category = category
+                existing.pending = bool(trans.pending)
+                existing.synced_at = datetime.utcnow()
+
+                if latest_transaction is None or (trans.date and trans.date >= latest_transaction.date):
+                    latest_transaction = trans
 
             # Update sync timestamp
             plaid_account.synced_at = datetime.utcnow()
+            if latest_transaction is not None:
+                plaid_account.last_transaction_id = latest_transaction.transaction_id
             db.session.commit()
 
             logger.info(f"Synced {new_count} new transactions for account {plaid_account_id}")

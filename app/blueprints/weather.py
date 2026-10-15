@@ -2,6 +2,43 @@ from flask import jsonify, request, current_app, session
 from ..services.weather_service import WeatherService
 from ..blueprints import main_bp
 from dataclasses import asdict
+from typing import Optional
+from ..models import FamilyMember, db
+from ..security import sanitize_text
+
+
+def _current_member_name() -> str:
+    member = sanitize_text(session.get('current_member') or '').strip()
+    if member:
+        return member
+    return sanitize_text(current_app.config.get('HOMEHUB_CONFIG', {}).get('admin_name', 'Administrator')).strip() or 'Administrator'
+
+
+def _member_weather_payload(row: Optional[FamilyMember]) -> dict:
+    if not row:
+        return {}
+    if row.weather_latitude is None or row.weather_longitude is None:
+        return {}
+    return {
+        'latitude': float(row.weather_latitude),
+        'longitude': float(row.weather_longitude),
+        'location_name': str(row.weather_location_name or ''),
+        'use_gps_location': bool(row.weather_use_gps_location),
+    }
+
+
+def _ensure_member_row(member_name: str) -> Optional[FamilyMember]:
+    clean_name = sanitize_text(member_name or '').strip()
+    if not clean_name:
+        return None
+    row = FamilyMember.query.filter_by(name=clean_name).first()
+    if row:
+        return row
+    admin_name = sanitize_text(current_app.config.get('HOMEHUB_CONFIG', {}).get('admin_name', 'Administrator')).strip() or 'Administrator'
+    row = FamilyMember(name=clean_name, role='admin' if clean_name == admin_name else 'standard')
+    db.session.add(row)
+    db.session.flush()
+    return row
 
 
 @main_bp.route('/api/weather', methods=['GET'])
@@ -91,9 +128,17 @@ def manage_location():
         JSON with location data
     """
     try:
+        member_name = _current_member_name()
+        member_row = FamilyMember.query.filter_by(name=member_name).first() if member_name else None
+
         if request.method == 'GET':
-            # Retrieve location from session
-            location = session.get('weather_location', {})
+            location = _member_weather_payload(member_row)
+            if not location:
+                # Backward compatibility with session-only storage.
+                location = session.get('weather_location', {}) if isinstance(session.get('weather_location', {}), dict) else {}
+            if location:
+                session['weather_location'] = location
+                session.modified = True
             return jsonify(location)
         
         else:  # POST
@@ -103,16 +148,28 @@ def manage_location():
             if 'latitude' not in data or 'longitude' not in data:
                 return jsonify({'error': 'Missing latitude or longitude'}), 400
             
-            # Store in session
-            session['weather_location'] = {
+            location = {
                 'latitude': float(data['latitude']),
                 'longitude': float(data['longitude']),
                 'location_name': str(data.get('location_name', '')),
                 'use_gps_location': bool(data.get('use_gps_location', False)),
             }
+
+            if not member_row:
+                member_row = _ensure_member_row(member_name)
+
+            if member_row:
+                member_row.weather_latitude = location['latitude']
+                member_row.weather_longitude = location['longitude']
+                member_row.weather_location_name = location['location_name']
+                member_row.weather_use_gps_location = location['use_gps_location']
+                db.session.commit()
+
+            # Keep session copy for current request cycle + legacy clients.
+            session['weather_location'] = location
             session.modified = True
             
-            return jsonify(session['weather_location'])
+            return jsonify(location)
     
     except (ValueError, TypeError) as e:
         return jsonify({'error': 'Invalid data format'}), 400

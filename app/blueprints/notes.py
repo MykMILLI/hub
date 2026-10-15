@@ -156,6 +156,7 @@ def _card_to_dict(card: ProjectCard) -> dict:
         'title': card.title,
         'description': card.description or '',
         'priority': card.priority or 'normal',
+        'start_date': card.start_date.strftime('%Y-%m-%d') if card.start_date else '',
         'due_date': card.due_date.strftime('%Y-%m-%d') if card.due_date else '',
         'position': int(card.position or 0),
         'creator': card.creator,
@@ -207,11 +208,10 @@ def _member_names() -> list[str]:
     return []
 
 
-@main_bp.route('/notes', methods=['GET'])
-def notes():
+def _render_notes_page(selected_project_key: str = '', selected_space_key: str = '', page_mode: str = 'workspace'):
     member = _current_member_name()
-    selected_project_key = sanitize_text(request.args.get('project_key') or '').strip().upper()
-    selected_space_key = sanitize_text(request.args.get('space_key') or '').strip().upper()
+    selected_project_key = sanitize_text(selected_project_key or '').strip().upper()
+    selected_space_key = sanitize_text(selected_space_key or '').strip().upper()
 
     all_templates = WorkspaceTemplate.query.filter_by(is_public=True).order_by(WorkspaceTemplate.created_at.desc()).all()
     all_projects = WorkspaceProject.query.order_by(WorkspaceProject.updated_at.desc()).all()
@@ -283,6 +283,18 @@ def notes():
         pages_by_space=pages_by_space,
         selected_project_key=selected_project_key,
         selected_space_key=selected_space_key,
+        page_mode=page_mode,
+    )
+
+
+@main_bp.route('/notes', methods=['GET'])
+def notes():
+    selected_project_key = sanitize_text(request.args.get('project_key') or '').strip().upper()
+    selected_space_key = sanitize_text(request.args.get('space_key') or '').strip().upper()
+    return _render_notes_page(
+        selected_project_key=selected_project_key,
+        selected_space_key=selected_space_key,
+        page_mode='workspace',
     )
 
 
@@ -356,13 +368,13 @@ def api_workspaces_overview():
 @main_bp.route('/projects/<project_key>', methods=['GET'])
 def project_by_key(project_key: str):
     clean_key = sanitize_text(project_key or '').strip().upper()
-    return redirect(url_for('main.notes', project_key=clean_key))
+    return _render_notes_page(selected_project_key=clean_key, page_mode='project-detail')
 
 
 @main_bp.route('/spaces/<space_key>', methods=['GET'])
 def space_by_key(space_key: str):
     clean_key = sanitize_text(space_key or '').strip().upper()
-    return redirect(url_for('main.notes', space_key=clean_key))
+    return _render_notes_page(selected_space_key=clean_key, page_mode='space-detail')
 
 
 @main_bp.route('/api/workspaces/templates', methods=['POST'])
@@ -477,6 +489,29 @@ def api_wizard_create_workspace():
         )
         db.session.add(project)
         db.session.flush()
+        if not linked_space_id:
+            space_key = _next_unique_key(_normalize_key('', f'{name} Wiki'), 'workspace_space', 'space_key')
+            linked_space = WorkspaceSpace(
+                name=f'{name} Wiki',
+                space_key=space_key,
+                description=f'Project wiki for {name}',
+                visibility=visibility,
+                allowed_members_json=json.dumps(allowed_members),
+                created_by=member,
+                share_token=secrets.token_urlsafe(24),
+                linked_project_id=project.id,
+            )
+            db.session.add(linked_space)
+            db.session.flush()
+            db.session.add(SpacePage(
+                space_id=linked_space.id,
+                title='Project overview',
+                content=f'<h2>{sanitize_text(name)}</h2><p>Project documentation and decisions.</p>',
+                media_json='[]',
+                created_by=member,
+                updated_by=member,
+            ))
+            project.linked_space_id = linked_space.id
 
         template_config = _safe_json_load(template.config_json, {}) if template and template.template_type == 'project' else {}
         incoming_columns = data.get('columns')
@@ -521,12 +556,24 @@ def api_wizard_create_workspace():
                     due_date = datetime.strptime(due_raw, '%Y-%m-%d').date()
                 except Exception:
                     due_date = None
+            start_date = None
+            start_raw = sanitize_text(raw_card.get('start_date') or '').strip()
+            if start_raw:
+                try:
+                    start_date = datetime.strptime(start_raw, '%Y-%m-%d').date()
+                except Exception:
+                    start_date = None
+            if not start_date:
+                start_date = due_date
+            if start_date and due_date and start_date > due_date:
+                start_date = due_date
             db.session.add(ProjectCard(
                 project_id=project.id,
                 column_id=target_col.id,
                 title=title,
                 description=sanitize_html(raw_card.get('description') or ''),
                 priority=priority,
+                start_date=start_date,
                 due_date=due_date,
                 position=card_index,
                 creator=member,
@@ -679,6 +726,17 @@ def api_create_project_card(project_id: int):
             due_date = datetime.strptime(due_raw, '%Y-%m-%d').date()
         except Exception:
             due_date = None
+    start_date = None
+    start_raw = sanitize_text(data.get('start_date') or '').strip()
+    if start_raw:
+        try:
+            start_date = datetime.strptime(start_raw, '%Y-%m-%d').date()
+        except Exception:
+            start_date = None
+    if not start_date:
+        start_date = due_date
+    if start_date and due_date and start_date > due_date:
+        start_date = due_date
 
     max_pos = db.session.query(db.func.max(ProjectCard.position)).filter_by(project_id=project.id, column_id=col.id).scalar()
     next_pos = int(max_pos or -1) + 1
@@ -689,6 +747,7 @@ def api_create_project_card(project_id: int):
         title=title,
         description=sanitize_html(data.get('description') or ''),
         priority=priority,
+        start_date=start_date,
         due_date=due_date,
         position=next_pos,
         creator=member,
@@ -729,6 +788,71 @@ def api_move_card(card_id: int):
         card.position = max(0, target_position)
     db.session.commit()
     return jsonify({'ok': True})
+
+
+@main_bp.route('/api/workspaces/cards/<int:card_id>', methods=['PUT'])
+def api_update_card(card_id: int):
+    card = ProjectCard.query.get_or_404(card_id)
+    project = WorkspaceProject.query.get_or_404(card.project_id)
+    member = _current_member_name()
+    if not _can_write_project(project, member):
+        return jsonify({'ok': False, 'error': 'Not allowed'}), 403
+
+    data = request.get_json(silent=True) or {}
+
+    if 'title' in data:
+        title = sanitize_text(data.get('title') or '').strip()
+        if not title:
+            return jsonify({'ok': False, 'error': 'Card title is required'}), 400
+        card.title = title
+
+    if 'description' in data:
+        card.description = sanitize_html(data.get('description') or '')
+
+    if 'priority' in data:
+        priority = sanitize_text(data.get('priority') or 'normal').strip().lower()
+        if priority not in ALLOWED_PRIORITIES:
+            priority = 'normal'
+        card.priority = priority
+
+    if 'start_date' in data:
+        start_raw = sanitize_text(data.get('start_date') or '').strip()
+        if start_raw:
+            try:
+                card.start_date = datetime.strptime(start_raw, '%Y-%m-%d').date()
+            except Exception:
+                return jsonify({'ok': False, 'error': 'Invalid start_date format. Use YYYY-MM-DD'}), 400
+        else:
+            card.start_date = None
+
+    if 'due_date' in data:
+        due_raw = sanitize_text(data.get('due_date') or '').strip()
+        if due_raw:
+            try:
+                card.due_date = datetime.strptime(due_raw, '%Y-%m-%d').date()
+            except Exception:
+                return jsonify({'ok': False, 'error': 'Invalid due_date format. Use YYYY-MM-DD'}), 400
+        else:
+            card.due_date = None
+
+    if 'column_id' in data:
+        try:
+            target_column_id = int(data.get('column_id'))
+        except Exception:
+            return jsonify({'ok': False, 'error': 'Valid column_id is required'}), 400
+        target_column = ProjectColumn.query.filter_by(id=target_column_id, project_id=project.id).first()
+        if not target_column:
+            return jsonify({'ok': False, 'error': 'Target column not found'}), 404
+        if card.column_id != target_column.id:
+            card.column_id = target_column.id
+            max_pos = db.session.query(db.func.max(ProjectCard.position)).filter_by(project_id=project.id, column_id=target_column.id).scalar()
+            card.position = int(max_pos or -1) + 1
+
+    if card.start_date and card.due_date and card.start_date > card.due_date:
+        return jsonify({'ok': False, 'error': 'start_date cannot be after due_date'}), 400
+
+    db.session.commit()
+    return jsonify({'ok': True, 'card': _card_to_dict(card)})
 
 
 @main_bp.route('/api/workspaces/cards/<int:card_id>/delete', methods=['POST'])

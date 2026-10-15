@@ -86,9 +86,40 @@
         .main-content .sticky.top-0 {
             top: 0.25rem;
         }
+        .main-content .sticky.top-0 > .glass {
+            padding: 0.5rem;
+            gap: 0.35rem;
+        }
+        .main-content .sticky.top-0 > .glass > a,
+        #openLauncher {
+            min-width: 2.5rem;
+            padding-left: 0.7rem;
+            padding-right: 0.7rem;
+        }
+        .main-content .sticky.top-0 .text-5xl {
+            font-size: 1.15rem;
+            line-height: 1.2;
+            text-align: left;
+        }
+        #profileSwitcherBtn {
+            min-width: 0;
+            padding-right: 0.45rem;
+        }
+        #profileSwitcherValue {
+            max-width: 4.75rem;
+        }
         .btn, button.btn, a.btn {
             min-height: 2.5rem;
+            min-width: 2.5rem;
         }
+        .main-content { min-width: 0; overflow-x: hidden; }
+        .main-content > * { min-width: 0; }
+        .card { border-radius: 1rem; }
+        .modal, [class*="fixed"][class*="inset-0"] { padding: .75rem; }
+        .modal > *, [class*="fixed"][class*="inset-0"] > .card { max-height: calc(100dvh - 1.5rem); overflow-y: auto; }
+        table { max-width: 100%; }
+        .overflow-x-auto { -webkit-overflow-scrolling: touch; }
+        input, select, textarea { font-size: 16px; }
     }
     </style>
     <link rel="manifest" href="/manifest.webmanifest">
@@ -175,10 +206,15 @@
                 {% if config.menu_visibility.get('media_downloader', true) and config.feature_toggles.get('media_downloader') %}<a href="/media" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Media Downloader" data-menu="media_downloader"><i class="fa-solid fa-download w-5 text-center"></i><span class="nav-label">Media Downloader</span></a>{% endif %}
                 {% if config.menu_visibility.get('pdf_compressor', true) and config.feature_toggles.get('pdf_compressor') %}<a href="/pdfs" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="PDF Compressor" data-menu="pdf_compressor"><i class="fa-solid fa-file-pdf w-5 text-center"></i><span class="nav-label">PDF Compressor</span></a>{% endif %}
                 {% if config.menu_visibility.get('qr_generator', true) and config.feature_toggles.get('qr_generator') %}<a href="/qr" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="QR Generator" data-menu="qr_generator"><i class="fa-solid fa-qrcode w-5 text-center"></i><span class="nav-label">QR Generator</span></a>{% endif %}
-                {% if config.menu_visibility.get('expense_tracker', true) and config.feature_toggles.get('expense_tracker', true) %}<a href="/expenses" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Expense & Money Tracker" data-menu="expense_tracker"><i class="fa-solid fa-wallet w-5 text-center"></i><span class="nav-label">Expense & Money Tracker</span></a>{% endif %}
+                {# Disabled per request: Expense & Money Tracker #}
+                {# {% if config.menu_visibility.get('expense_tracker', true) and config.feature_toggles.get('expense_tracker', true) %}<a href="/expenses" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Expense & Money Tracker" data-menu="expense_tracker"><i class="fa-solid fa-wallet w-5 text-center"></i><span class="nav-label">Expense & Money Tracker</span></a>{% endif %} #}
                 {% if config.menu_visibility.get('shared_calendar', true) and config.feature_toggles.get('shared_calendar', true) %}<a href="/calendar" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Family Calendar" data-menu="shared_calendar"><i class="fa-solid fa-calendar-days w-5 text-center"></i><span class="nav-label">Family Calendar</span></a>{% endif %}
+                {% if config.menu_visibility.get('daily_agenda', true) and config.feature_toggles.get('daily_agenda', true) %}<a href="/daily-agenda" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Daily Agenda" data-menu="daily_agenda"><i class="fa-solid fa-route w-5 text-center"></i><span class="nav-label">Daily Agenda</span></a>{% endif %}
                 {% if config.menu_visibility.get('meal_planner', true) and config.feature_toggles.get('meal_planner', true) %}<a href="/meal-planner" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Meal Planner" data-menu="meal_planner"><i class="fa-solid fa-bowl-food w-5 text-center"></i><span class="nav-label">Meal Planner</span></a>{% endif %}
-                {% if config.menu_visibility.get('photos', true) and config.feature_toggles.get('photos', true) %}<a href="/upload#family-photos" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Family Photos" data-menu="photos"><i class="fa-solid fa-images w-5 text-center"></i><span class="nav-label">Family Photos</span></a>{% endif %}
+                {# Disabled per request: Home Assistant #}
+                {# {% if config.menu_visibility.get('home_assistant', true) and config.feature_toggles.get('home_assistant', true) %}<a href="/home-assistant" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Home Assistant" data-menu="home_assistant"><i class="fa-solid fa-house-signal w-5 text-center"></i><span class="nav-label">Home Assistant</span></a>{% endif %} #}
+                {# Disabled per request: Interactive Slideshow #}
+                {# {% if config.menu_visibility.get('photos', true) and config.feature_toggles.get('photos', true) %}<a href="/photos/slideshow" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Interactive Slideshow" data-menu="photos"><i class="fa-solid fa-images w-5 text-center"></i><span class="nav-label">Interactive Slideshow</span></a>{% endif %} #}
                 {% if config.menu_visibility.get('notifications', true) and config.feature_toggles.get('notifications', true) %}<a href="/notifications" class="glass-sm flex items-center gap-3 py-2 px-4 rounded-xl sidebar-link hover:scale-105 transition-m3" title="Notifications" data-menu="notifications"><i class="fa-solid fa-bell w-5 text-center"></i><span class="nav-label">Notifications</span></a>{% endif %}
             </nav>
             <div class="border-t border-white/20 p-4">
@@ -227,32 +263,27 @@
             <div class="max-w-none md:max-w-none mx-auto">
                 <div class="sticky top-0 z-20 mb-6">
                     <div class="glass p-4 rounded-2xl flex items-center gap-2">
+                        <a href="/" class="glass px-4 py-2 rounded-xl hover:shadow-lg transition-m3 font-medium" title="Back to Welcome" aria-label="Back to Welcome"><i class="fa-solid fa-house"></i></a>
                         <button id="openLauncher" class="bg-gradient-to-br from-m3-primary to-m3-secondary text-white px-4 py-2 rounded-xl hover:shadow-lg transition-m3 font-medium" aria-label="Open app launcher"><i class="fa-solid fa-grip"></i></button>
 
-                        <div class="flex-1 text-center font-semibold text-gray-800 dark:text-white truncate">
+                        <div class="flex-1 text-center font-extrabold text-5xl md:text-6xl leading-none text-gray-800 dark:text-white truncate">
                             {% if g.hub_settings %}{{ g.hub_settings.hub_name }}{% else %}{{ config.instance_name }}{% endif %}
                         </div>
 
                         <div class="flex items-center gap-2">
                             {% if not (hide_user_ui | default(false)) %}
-                            <div id="currentMemberAvatar" class="w-9 h-9 rounded-full border border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800 overflow-hidden flex items-center justify-center text-xs font-bold text-gray-600 dark:text-gray-300" title="Current member">
-                                {% if current_member_avatar %}
-                                <img src="{{ current_member_avatar }}" alt="Current member avatar" class="w-full h-full object-cover">
-                                {% else %}
-                                {{ (current_member or config.admin_name or 'U')[:1].upper() }}
-                                {% endif %}
-                            </div>
-                            {% endif %}
-                            <button id="themeToggle" class="glass px-3 py-2 rounded-xl hover:shadow-lg transition-m3 font-medium" title="Toggle dark mode" aria-label="Toggle dark mode">
-                                <i class="fa-solid fa-sun dark:hidden"></i><i class="fa-solid fa-moon hidden dark:inline"></i>
-                            </button>
-                            {% if not (hide_user_ui | default(false)) %}
-                            <div id="profileSwitcher" class="relative" title="Profile">
-                                <button id="profileSwitcherBtn" type="button" class="glass border border-gray-200/70 dark:border-gray-700/70 rounded-2xl px-3 py-2 hover:shadow-md transition-m3 min-w-[190px] text-left">
-                                    <span class="block text-[10px] leading-none uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1">Profile</span>
-                                    <span class="flex items-center justify-between gap-2">
-                                        <span id="profileSwitcherValue" class="text-sm font-semibold text-gray-800 dark:text-gray-100 truncate">{{ current_member or 'Guest' }}</span>
-                                        <i class="fa-solid fa-users text-[11px] text-gray-500 dark:text-gray-400"></i>
+                            <div id="profileSwitcher" class="relative">
+                                <button id="profileSwitcherBtn" type="button" class="glass border border-gray-200/70 dark:border-gray-700/70 rounded-full pl-1.5 pr-3 py-1.5 hover:shadow-md transition-m3 min-w-[170px] text-left" aria-label="Switch profile">
+                                    <span class="flex items-center gap-2">
+                                        <span id="currentMemberAvatar" class="w-8 h-8 rounded-full bg-indigo-100 dark:bg-gray-700 overflow-hidden flex items-center justify-center text-sm font-bold text-indigo-700 dark:text-gray-200 flex-shrink-0" title="Current member">
+                                            {% if current_member_avatar %}
+                                            <img src="{{ current_member_avatar }}" alt="Current member avatar" class="w-full h-full object-cover">
+                                            {% else %}
+                                            {{ (current_member or config.admin_name or 'U')[:1].upper() }}
+                                            {% endif %}
+                                        </span>
+                                        <span id="profileSwitcherValue" class="flex-1 text-sm font-semibold text-gray-800 dark:text-gray-100 truncate">{{ current_member or 'Guest' }}</span>
+                                        <i class="fa-solid fa-chevron-down text-[10px] text-gray-500 dark:text-gray-400"></i>
                                     </span>
                                 </button>
                                 <select id="userSwitcher" aria-label="Select profile" class="hidden" tabindex="-1" aria-hidden="true"></select>
@@ -439,6 +470,7 @@
             const switcher = document.getElementById('userSwitcher');
             if (switcher){
                 const adminName = '{{ config.admin_name }}';
+                const supabaseAuthEnabled = {{ 'true' if (config.get('supabase', {}).get('auth_enabled', false)) else 'false' }};
                 let familyMembersMeta = [];
                 let adminUsers = new Set([adminName, 'Administrator', 'admin']);
                 const profileSwitcherBtn = document.getElementById('profileSwitcherBtn');
@@ -516,7 +548,7 @@
 
                 async function performMemberLogout(){
                     try {
-                        await fetch('/api/member-logout', {
+                        await fetch('/api/auth/logout', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({})
@@ -528,6 +560,7 @@
                     renderCurrentMemberAvatar('');
                     closeUserPickerModal();
                     document.dispatchEvent(new CustomEvent('user-switched', { detail: { user: '' }}));
+                    window.location.href = '/login';
                 }
 
                 window.performMemberLogout = performMemberLogout;
@@ -627,6 +660,16 @@
                     const selectedMember = this.value;
                     const adminName = '{{ config.admin_name }}';
                     const adminUserSet = new Set(window.__homehubAdmins || [adminName, 'Administrator', 'admin']);
+
+                    if (supabaseAuthEnabled) {
+                        const currentUser = localStorage.getItem('username') || selectedMember;
+                        this.value = currentUser;
+                        setProfileSwitcherCurrent(currentUser);
+                        if (window.globalToast) {
+                            window.globalToast('Profile switching is disabled in Supabase auth mode. Use logout/login to switch accounts.', 'info');
+                        }
+                        return;
+                    }
                     
                     // Check selected member metadata and enforce PIN if set
                     try {
@@ -764,12 +807,21 @@
                 if (!allLinks.length) {
                     allLinks = Array.from(document.querySelectorAll('#sidebar a.sidebar-link'));
                 }
-                allLinks.forEach((link, index) => {
+                const dedupeSeen = new Set();
+                const links = allLinks.filter((link) => {
+                    const href = String(link.getAttribute('href') || '#').trim();
+                    const label = (link.querySelector('.nav-label')?.textContent || link.getAttribute('title') || '').trim().toLowerCase();
+                    const key = `${href}::${label}`;
+                    if (dedupeSeen.has(key)) return false;
+                    dedupeSeen.add(key);
+                    return true;
+                });
+
+                links.forEach((link, index) => {
                     if (!link.dataset.launcherId) {
                         link.dataset.launcherId = `launcher_${index}`;
                     }
                 });
-                const links = allLinks;
 
                 const baseItems = links.map((link, index) => ({
                     id: String(link.dataset.launcherId || `launcher_${index}`),
@@ -1081,6 +1133,201 @@
         htmlElement.setAttribute('data-theme', newTheme);
         localStorage.setItem('app-theme', newTheme);
     });
+})();
+</script>
+
+<script>
+(function () {
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('/sw.js').catch(() => {});
+        });
+    }
+
+    if (!('Notification' in window) || !('EventSource' in window)) {
+        return;
+    }
+
+    let source = null;
+    let reconnectTimer = null;
+    let lastUnread = Number(localStorage.getItem('homehub_pwa_last_unread') || '0') || 0;
+    let lastLatestId = Number(localStorage.getItem('homehub_pwa_last_latest_id') || '0') || 0;
+    let notificationsEnabled = true;
+    let browserNotificationsEnabled = true;
+
+    function currentMember() {
+        const stored = String(localStorage.getItem('username') || '').trim();
+        if (stored) return stored;
+        const shown = String(document.getElementById('profileSwitcherValue')?.textContent || '').trim();
+        if (shown && shown !== 'Guest') return shown;
+        return {{ (current_member or '')|tojson }};
+    }
+
+    async function showSystemNotification(title, body, tag, eventType) {
+        const url = eventType === 'chat_message' ? '/messages' : '/notifications';
+        const options = {
+            body,
+            tag,
+            icon: '/static/icons/icon-192.png',
+            badge: '/static/icons/icon-192.png',
+            data: { url },
+        };
+        if (Notification.permission === 'granted') {
+            try {
+                const reg = ('serviceWorker' in navigator) ? await navigator.serviceWorker.getRegistration() : null;
+                if (reg && reg.showNotification) {
+                    await reg.showNotification(title, options);
+                    return true;
+                }
+            } catch (_) {}
+            try {
+                const n = new Notification(title, options);
+                n.onclick = () => { window.focus(); window.location.href = url; n.close(); };
+                return true;
+            } catch (_) {}
+        }
+        if (window.globalToast) window.globalToast(`${title}: ${body}`, 'info');
+        return false;
+    }
+    window.homehubShowNotification = showSystemNotification;
+    window.homehubRequestNotificationPermission = async function () {
+        if (!('Notification' in window)) return 'unsupported';
+        if (Notification.permission !== 'default') return Notification.permission;
+        try { return await Notification.requestPermission(); } catch (_) { return Notification.permission; }
+    };
+
+    function persistMarker() {
+        localStorage.setItem('homehub_pwa_last_unread', String(lastUnread));
+        localStorage.setItem('homehub_pwa_last_latest_id', String(lastLatestId));
+    }
+
+    async function refreshNotificationPrefs(member) {
+        if (!member) return;
+        try {
+            const response = await fetch(`/api/notifications/preferences?member=${encodeURIComponent(member)}`);
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || !data.ok) {
+                return;
+            }
+            notificationsEnabled = data.notifications_enabled !== false;
+            browserNotificationsEnabled = data.browser_notifications_enabled !== false;
+            window.homehubNotificationPrefs = data;
+        } catch (_) {}
+    }
+
+    function maybeRequestPermission() {
+        if (!notificationsEnabled || !browserNotificationsEnabled) return;
+        if (Notification.permission !== 'default') return;
+        Notification.requestPermission().catch(() => {});
+    }
+
+    async function fetchLatestUnread(member) {
+        const uri = `/api/notifications?member=${encodeURIComponent(member)}&unread_only=1`;
+        const response = await fetch(uri);
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.ok || !Array.isArray(data.items) || !data.items.length) {
+            return null;
+        }
+        return data.items[0];
+    }
+
+    async function maybeShowBrowserNotification(payload) {
+        if (!notificationsEnabled || !browserNotificationsEnabled) {
+            return;
+        }
+
+        const unread = Number(payload?.unread_count || 0) || 0;
+        const latestId = Number(payload?.latest_id || 0) || 0;
+
+        if (unread < lastUnread) {
+            lastUnread = unread;
+            lastLatestId = latestId;
+            persistMarker();
+            return;
+        }
+
+        if (unread <= lastUnread && latestId <= lastLatestId) {
+            return;
+        }
+
+        lastUnread = unread;
+        lastLatestId = latestId;
+        persistMarker();
+
+        const member = currentMember();
+        if (!member) return;
+        const item = await fetchLatestUnread(member);
+        if (!item) return;
+
+        await showSystemNotification(
+            String(item.title || 'HomeHub Notification'),
+            String(item.message || 'You have a new HomeHub update.'),
+            `homehub-${item.id || latestId}`,
+            String(item.event_type || '')
+        );
+    }
+
+    async function connectEventStream() {
+        const member = currentMember();
+        if (!member) return;
+
+        await refreshNotificationPrefs(member);
+
+        if (source) {
+            try { source.close(); } catch (_) {}
+        }
+        source = new EventSource(`/api/stream/events?member=${encodeURIComponent(member)}`);
+
+        source.addEventListener('sync', (event) => {
+            const payload = JSON.parse(event.data || '{}');
+            const unread = Number(payload.notification_unread || 0) || 0;
+            const latestId = Number(payload.notification_latest_id || 0) || 0;
+            if (unread >= 0) {
+                lastUnread = unread;
+            }
+            if (latestId >= 0) {
+                lastLatestId = latestId;
+            }
+            persistMarker();
+        });
+
+        source.addEventListener('notifications', (event) => {
+            const payload = JSON.parse(event.data || '{}');
+            maybeShowBrowserNotification(payload).catch(() => {});
+        });
+
+        source.onerror = () => {
+            try { source.close(); } catch (_) {}
+            if (reconnectTimer) {
+                clearTimeout(reconnectTimer);
+            }
+            reconnectTimer = setTimeout(connectEventStream, 3000);
+        };
+    }
+
+    document.addEventListener('click', maybeRequestPermission, { once: true });
+    document.addEventListener('homehub-notification-prefs-updated', (event) => {
+        const prefs = event?.detail || {};
+        notificationsEnabled = prefs.notifications_enabled !== false;
+        browserNotificationsEnabled = prefs.browser_notifications_enabled !== false;
+    });
+    document.addEventListener('user-switched', () => {
+        connectEventStream();
+    });
+    connectEventStream();
+
+    // Polling safety net in case the event stream is blocked by a proxy or worker limits.
+    setInterval(async () => {
+        const member = currentMember();
+        if (!member || document.hidden) return;
+        try {
+            const response = await fetch(`/api/notifications?member=${encodeURIComponent(member)}&unread_only=1`);
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || !data.ok || !Array.isArray(data.items)) return;
+            const latestId = data.items.length ? Number(data.items[0].id) || 0 : lastLatestId;
+            await maybeShowBrowserNotification({ unread_count: data.items.length, latest_id: latestId });
+        } catch (_) {}
+    }, 20000);
 })();
 </script>
 
@@ -1567,6 +1814,29 @@
                         class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg text-base dark:bg-gray-700 dark:text-white placeholder-gray-400 dark:placeholder-gray-500">
                 </div>
             </div>
+
+            <div class="rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+                <label class="inline-flex items-start gap-3 cursor-pointer">
+                    <input type="checkbox" id="profileMiniSlideshowEnabled" class="mt-1 h-4 w-4">
+                    <span>
+                        <span class="block text-sm font-semibold text-gray-800 dark:text-gray-100">Show mini slideshow on Welcome page</span>
+                        <span class="block text-xs text-gray-500 dark:text-gray-400">Displays an auto-playing album preview above your timeline.</span>
+                    </span>
+                </label>
+            </div>
+
+            <div class="rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+                <div class="flex items-center justify-between gap-3">
+                    <span>
+                        <span class="block text-sm font-semibold text-gray-800 dark:text-gray-100">Dark mode</span>
+                        <span class="block text-xs text-gray-500 dark:text-gray-400">Use a darker color scheme throughout HomeHub.</span>
+                    </span>
+                    <button type="button" id="themeToggle" class="btn btn-secondary px-3 py-2" title="Toggle dark mode" aria-label="Toggle dark mode">
+                        <i class="fa-solid fa-sun dark:hidden"></i><i class="fa-solid fa-moon hidden dark:inline"></i>
+                        <span class="sr-only">Toggle dark mode</span>
+                    </button>
+                </div>
+            </div>
             
             <!-- Location/Status Section -->
             <div class="space-y-5">
@@ -1703,6 +1973,7 @@ function openMemberProfile(memberId, memberName, status, hasAvatar) {
                 document.getElementById('profileFavoriteColor').value = data.favorite_color || '';
                 document.getElementById('profileFavoriteSong').value = data.favorite_song || '';
                 document.getElementById('profileWishlistUrl').value = data.amazon_wishlist_url || '';
+                document.getElementById('profileMiniSlideshowEnabled').checked = !!data.mini_slideshow_enabled;
                 document.getElementById('profileCustomStatus').value = '';
                 selectedProfileStatus = null;
                 
@@ -1831,6 +2102,7 @@ async function saveMemberProfile() {
     const favoriteColorToSave = (document.getElementById('profileFavoriteColor')?.value || '').trim();
     const favoriteSongToSave = (document.getElementById('profileFavoriteSong')?.value || '').trim();
     const wishlistUrlToSave = (document.getElementById('profileWishlistUrl')?.value || '').trim();
+    const miniSlideshowEnabledToSave = !!document.getElementById('profileMiniSlideshowEnabled')?.checked;
     const statusToSave = customStatus || selectedProfileStatus || currentProfileData.status;
 
     if (emailToSave && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailToSave)) {
@@ -1850,6 +2122,7 @@ async function saveMemberProfile() {
                 favorite_color: favoriteColorToSave,
                 favorite_song: favoriteSongToSave,
                 amazon_wishlist_url: wishlistUrlToSave,
+                mini_slideshow_enabled: miniSlideshowEnabledToSave,
                 status: statusToSave
             })
         });

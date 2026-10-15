@@ -1,14 +1,19 @@
 import json
 import os
-import secrets
+import subprocess
 from datetime import datetime
 
-from flask import current_app, jsonify, redirect, request, send_from_directory, session
+from flask import current_app, jsonify, redirect, render_template, request, send_file, send_from_directory, session
+from PIL import ExifTags, Image
 from werkzeug.utils import secure_filename
 
 from ..blueprints import main_bp
-from ..models import FamilyMember, PhotoAlbum, PhotoAsset, PhotoWatchFolder, db
+from ..models import FamilyMember, PhotoAlbum, PhotoAsset, PhotoDownloadJob, PhotoWatchFolder, db
 from ..security import sanitize_text
+from ..services.media_dedupe import resolve_or_create_asset
+from ..services.media_fingerprint import save_upload_to_temp
+from ..services.media_storage import get_sync_temp_folder, move_temp_to_photo_storage, resolve_photo_asset_original_abs_path
+from ..services.photo_downloads import build_download_job_zip, create_download_job, get_zip_abs_path, job_to_dict, mark_expired_if_needed
 from ..services.notification_service import publish_notification
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -17,6 +22,104 @@ os.makedirs(PHOTO_UPLOAD_FOLDER, exist_ok=True)
 
 PHOTO_EXTS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.heic', '.heif'}
 VIDEO_EXTS = {'.mp4', '.webm', '.mov', '.m4v', '.avi', '.mkv'}
+
+_EXIF_TAG_NAME_TO_ID = {value: key for key, value in ExifTags.TAGS.items()}
+
+
+def _parse_capture_datetime(value: str | None) -> datetime | None:
+    raw = str(value or '').strip()
+    if not raw:
+        return None
+    for fmt in ('%Y:%m:%d %H:%M:%S', '%Y-%m-%d %H:%M:%S'):
+        try:
+            return datetime.strptime(raw, fmt)
+        except Exception:
+            continue
+    try:
+        return datetime.fromisoformat(raw.replace('Z', '+00:00')).replace(tzinfo=None)
+    except Exception:
+        return None
+
+
+def _extract_captured_at_from_image(path: str) -> datetime | None:
+    try:
+        with Image.open(path) as image:
+            exif = image.getexif()
+            if not exif:
+                return None
+            for key_name in ('DateTimeOriginal', 'DateTimeDigitized', 'DateTime'):
+                tag_id = _EXIF_TAG_NAME_TO_ID.get(key_name)
+                if not tag_id:
+                    continue
+                parsed = _parse_capture_datetime(exif.get(tag_id))
+                if parsed is not None:
+                    return parsed
+    except Exception:
+        return None
+    return None
+
+
+def _extract_captured_at_from_video(path: str) -> datetime | None:
+    # Best-effort probe using embedded media metadata when ffprobe exists.
+    cmd = [
+        'ffprobe',
+        '-v',
+        'quiet',
+        '-print_format',
+        'json',
+        '-show_entries',
+        'format_tags=creation_time:stream_tags=creation_time',
+        path,
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
+        if proc.returncode != 0:
+            return None
+        payload = json.loads(proc.stdout or '{}')
+        fmt_tags = (payload.get('format') or {}).get('tags') or {}
+        parsed = _parse_capture_datetime(fmt_tags.get('creation_time'))
+        if parsed is not None:
+            return parsed
+        streams = payload.get('streams') or []
+        for stream in streams:
+            tags = (stream or {}).get('tags') or {}
+            parsed = _parse_capture_datetime(tags.get('creation_time'))
+            if parsed is not None:
+                return parsed
+    except Exception:
+        return None
+    return None
+
+
+def _extract_captured_at_from_media(path: str, is_video: bool) -> datetime | None:
+    if is_video:
+        return _extract_captured_at_from_video(path)
+    return _extract_captured_at_from_image(path)
+
+
+def _asset_media_datetime(asset: PhotoAsset) -> datetime | None:
+    return asset.captured_at or asset.source_mtime_utc
+
+
+def _asset_capture_sort_key(asset: PhotoAsset, asc: bool = False) -> tuple[int, float, int]:
+    media_dt = _asset_media_datetime(asset)
+    if media_dt is None:
+        return (1, float('inf'), asset.id)
+    stamp = media_dt.timestamp()
+    if asc:
+        return (0, stamp, asset.id)
+    return (0, -stamp, -asset.id)
+
+
+def _parse_date_filter(value: str | None) -> datetime | None:
+    raw = sanitize_text(value or '').strip()
+    if not raw:
+        return None
+    try:
+        day = datetime.strptime(raw, '%Y-%m-%d')
+        return datetime(day.year, day.month, day.day)
+    except Exception:
+        return None
 
 
 def _current_member_name() -> str:
@@ -112,8 +215,13 @@ def _asset_to_dict(asset: PhotoAsset) -> dict:
         'is_video': bool(asset.is_video),
         'captured_at': asset.captured_at.isoformat() if asset.captured_at else None,
         'uploaded_at': asset.uploaded_at.isoformat() if asset.uploaded_at else None,
-        'download_url': f"/uploads/photos/{asset.filename}",
+        'download_url': f"/api/photos/assets/{asset.id}/download",
+        'original_download_url': f"/api/photos/assets/{asset.id}/download",
+        'stream_url': f"/api/photos/assets/{asset.id}/stream",
         'preview_url': f"/uploads/photos/preview/{asset.filename}",
+        'content_sha256': asset.content_sha256,
+        'origin_kind': asset.origin_kind,
+        'dedupe_reason': asset.dedupe_reason,
     }
 
 
@@ -139,7 +247,7 @@ def _album_to_dict(album: PhotoAlbum, member: str | None = None) -> dict:
 
 @main_bp.route('/photos', methods=['GET'])
 def photos_page():
-    return redirect('/upload#family-photos')
+    return redirect('/photos/slideshow')
 
 
 @main_bp.route('/photos/albums/<int:album_id>', methods=['GET'])
@@ -153,7 +261,29 @@ def photos_album_page(album_id: int):
 
 @main_bp.route('/photos/slideshow', methods=['GET'])
 def photos_slideshow_page():
-    return redirect('/upload#family-photos')
+    member = sanitize_text(request.args.get('member') or _current_member_name()).strip() or _current_member_name()
+    album_rows = PhotoAlbum.query.order_by(PhotoAlbum.updated_at.desc(), PhotoAlbum.id.desc()).all()
+    albums = []
+    for album in album_rows:
+        if not _can_view_album(album, member):
+            continue
+        row = _album_to_dict(album, member)
+        row['asset_count'] = PhotoAsset.query.filter_by(album_id=album.id).count()
+        albums.append(row)
+
+    selected_album_id = None
+    selected_raw = sanitize_text(request.args.get('album_id') or '').strip()
+    if selected_raw.isdigit():
+        selected_candidate = int(selected_raw)
+        if any(int(a.get('id') or 0) == selected_candidate for a in albums):
+            selected_album_id = selected_candidate
+
+    return render_template(
+        'photos_slideshow.html',
+        albums=albums,
+        selected_album_id=selected_album_id,
+        current_member_name=member,
+    )
 
 
 @main_bp.route('/uploads/photos/<filename>', methods=['GET'])
@@ -168,6 +298,166 @@ def photo_preview(filename: str):
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-Frame-Options'] = 'SAMEORIGIN'
     return response
+
+
+@main_bp.route('/api/photos/assets/<int:asset_id>/download', methods=['GET'])
+def api_photo_asset_download(asset_id: int):
+    member = sanitize_text(request.args.get('member') or '').strip() or _current_member_name()
+    asset = PhotoAsset.query.get(asset_id)
+    if not asset:
+        return jsonify({'ok': False, 'error': 'Asset not found'}), 404
+    if not _can_view_asset(asset, member):
+        return jsonify({'ok': False, 'error': 'Not allowed'}), 403
+
+    try:
+        abs_path = resolve_photo_asset_original_abs_path(asset)
+    except FileNotFoundError:
+        return jsonify({'ok': False, 'error': 'Original file missing'}), 404
+    except Exception:
+        return jsonify({'ok': False, 'error': 'Invalid original file path'}), 500
+
+    return send_file(
+        abs_path,
+        as_attachment=True,
+        download_name=asset.original_filename or asset.filename,
+        mimetype=asset.mime_type or None,
+        conditional=True,
+        etag=asset.content_sha256 or True,
+        last_modified=asset.uploaded_at,
+    )
+
+
+@main_bp.route('/api/photos/assets/<int:asset_id>/stream', methods=['GET'])
+def api_photo_asset_stream(asset_id: int):
+    member = sanitize_text(request.args.get('member') or '').strip() or _current_member_name()
+    asset = PhotoAsset.query.get(asset_id)
+    if not asset:
+        return jsonify({'ok': False, 'error': 'Asset not found'}), 404
+    if not _can_view_asset(asset, member):
+        return jsonify({'ok': False, 'error': 'Not allowed'}), 403
+
+    try:
+        abs_path = resolve_photo_asset_original_abs_path(asset)
+    except FileNotFoundError:
+        return jsonify({'ok': False, 'error': 'Original file missing'}), 404
+    except Exception:
+        return jsonify({'ok': False, 'error': 'Invalid original file path'}), 500
+
+    return send_file(
+        abs_path,
+        as_attachment=False,
+        download_name=asset.original_filename or asset.filename,
+        mimetype=asset.mime_type or None,
+        conditional=True,
+        etag=asset.content_sha256 or True,
+        last_modified=asset.uploaded_at,
+    )
+
+
+@main_bp.route('/api/photos/download-jobs', methods=['POST'])
+def api_photo_download_jobs_create():
+    member = _current_member_name()
+    data = request.get_json(force=True) or {}
+    mode = sanitize_text(data.get('mode') or 'selected_assets').strip().lower()
+    if mode not in {'selected_assets', 'album'}:
+        return jsonify({'ok': False, 'error': 'Invalid mode'}), 400
+
+    selected_assets: list[PhotoAsset] = []
+    album_id = None
+    if mode == 'album':
+        album_id = data.get('album_id')
+        try:
+            album_id = int(album_id)
+        except Exception:
+            return jsonify({'ok': False, 'error': 'album_id is required for album mode'}), 400
+        album = PhotoAlbum.query.get(album_id)
+        if not album:
+            return jsonify({'ok': False, 'error': 'Album not found'}), 404
+        if not _can_view_album(album, member):
+            return jsonify({'ok': False, 'error': 'Not allowed'}), 403
+        rows = PhotoAsset.query.filter_by(album_id=album.id).all()
+        selected_assets = [r for r in rows if _can_view_asset(r, member)]
+        selected_assets.sort(key=lambda row: _asset_capture_sort_key(row, asc=False))
+    else:
+        ids_raw = data.get('asset_ids') if isinstance(data.get('asset_ids'), list) else []
+        ids = []
+        for value in ids_raw:
+            try:
+                ids.append(int(value))
+            except Exception:
+                continue
+        ids = sorted(set(ids))
+        if not ids:
+            return jsonify({'ok': False, 'error': 'asset_ids is required for selected_assets mode'}), 400
+        rows = PhotoAsset.query.filter(PhotoAsset.id.in_(ids)).order_by(PhotoAsset.id.asc()).all()
+        if not rows:
+            return jsonify({'ok': False, 'error': 'Assets not found'}), 404
+        selected_assets = [r for r in rows if _can_view_asset(r, member)]
+
+    if not selected_assets:
+        return jsonify({'ok': False, 'error': 'No accessible assets found'}), 403
+
+    job = create_download_job(
+        requested_by_member=member,
+        mode=mode,
+        album_id=album_id,
+        assets=selected_assets,
+    )
+    build_download_job_zip(job)
+    return jsonify({'ok': True, 'job': job_to_dict(job)})
+
+
+def _can_access_download_job(job: PhotoDownloadJob, member: str) -> bool:
+    return _is_admin_member(member) or sanitize_text(job.requested_by_member or '').strip() == sanitize_text(member or '').strip()
+
+
+@main_bp.route('/api/photos/download-jobs/<int:job_id>', methods=['GET'])
+def api_photo_download_job_status(job_id: int):
+    member = sanitize_text(request.args.get('member') or '').strip() or _current_member_name()
+    job = PhotoDownloadJob.query.get(job_id)
+    if not job:
+        return jsonify({'ok': False, 'error': 'Job not found'}), 404
+    if not _can_access_download_job(job, member):
+        return jsonify({'ok': False, 'error': 'Not allowed'}), 403
+    mark_expired_if_needed(job)
+    return jsonify({'ok': True, 'job': job_to_dict(job)})
+
+
+@main_bp.route('/api/photos/download-jobs/<int:job_id>/file', methods=['GET'])
+def api_photo_download_job_file(job_id: int):
+    member = sanitize_text(request.args.get('member') or '').strip() or _current_member_name()
+    job = PhotoDownloadJob.query.get(job_id)
+    if not job:
+        return jsonify({'ok': False, 'error': 'Job not found'}), 404
+    if not _can_access_download_job(job, member):
+        return jsonify({'ok': False, 'error': 'Not allowed'}), 403
+
+    mark_expired_if_needed(job)
+    if job.state == 'expired':
+        return jsonify({'ok': False, 'error': 'Download artifact has expired'}), 410
+    if job.state == 'failed':
+        return jsonify({'ok': False, 'error': job.error_message or 'Download job failed'}), 409
+    if job.state != 'ready':
+        return jsonify({'ok': False, 'error': 'Download job is not ready'}), 409
+
+    try:
+        abs_zip = get_zip_abs_path(job)
+    except Exception:
+        return jsonify({'ok': False, 'error': 'Invalid download artifact path'}), 500
+    if not os.path.exists(abs_zip):
+        return jsonify({'ok': False, 'error': 'Download artifact missing'}), 404
+
+    job.last_accessed_at = datetime.utcnow()
+    db.session.commit()
+    return send_file(
+        abs_zip,
+        as_attachment=True,
+        download_name=job.zip_filename or f'homehub_photos_job_{job.id}.zip',
+        mimetype='application/zip',
+        conditional=True,
+        etag=True,
+        last_modified=job.completed_at or job.updated_at,
+    )
 
 
 @main_bp.route('/api/photos/albums', methods=['GET'])
@@ -191,8 +481,9 @@ def api_photos_album_detail(album_id: int):
     album = PhotoAlbum.query.get_or_404(album_id)
     if not _can_view_album(album, member):
         return jsonify({'ok': False, 'error': 'Not allowed'}), 403
-    assets = PhotoAsset.query.filter_by(album_id=album.id).order_by(PhotoAsset.uploaded_at.desc(), PhotoAsset.id.desc()).all()
+    assets = PhotoAsset.query.filter_by(album_id=album.id).all()
     visible_assets = [a for a in assets if _can_view_asset(a, member)]
+    visible_assets.sort(key=lambda row: _asset_capture_sort_key(row, asc=False))
     payload = _album_to_dict(album, member)
     payload['asset_count'] = len(visible_assets)
     payload['assets'] = [_asset_to_dict(a) for a in visible_assets]
@@ -256,8 +547,12 @@ def api_photos_assets():
     member = sanitize_text(request.args.get('member') or '').strip() or _current_member_name()
     scope = sanitize_text(request.args.get('scope') or 'all').strip().lower()
     album_id = request.args.get('album_id', type=int)
+    sort_by = sanitize_text(request.args.get('sort_by') or 'captured_at').strip().lower()
+    sort_dir = sanitize_text(request.args.get('sort_dir') or 'desc').strip().lower()
+    start_date = _parse_date_filter(request.args.get('start_date'))
+    end_date = _parse_date_filter(request.args.get('end_date'))
 
-    rows = PhotoAsset.query.order_by(PhotoAsset.uploaded_at.desc(), PhotoAsset.id.desc()).all()
+    rows = PhotoAsset.query.order_by(PhotoAsset.id.desc()).all()
     visible = [r for r in rows if _can_view_asset(r, member)]
     if album_id:
         visible = [r for r in visible if r.album_id == album_id]
@@ -265,6 +560,30 @@ def api_photos_assets():
         visible = [r for r in visible if sanitize_text(r.visibility or 'private').strip().lower() == 'private']
     if scope == 'family':
         visible = [r for r in visible if sanitize_text(r.visibility or 'private').strip().lower() == 'family']
+
+    if start_date or end_date:
+        filtered = []
+        for row in visible:
+            media_dt = _asset_media_datetime(row)
+            if media_dt is None:
+                continue
+            media_day = datetime(media_dt.year, media_dt.month, media_dt.day)
+            if start_date and media_day < start_date:
+                continue
+            if end_date and media_day > end_date:
+                continue
+            filtered.append(row)
+        visible = filtered
+
+    if sort_by in {'captured_at', 'media_date'}:
+        visible.sort(
+            key=lambda row: _asset_capture_sort_key(row, asc=(sort_dir == 'asc')),
+        )
+    else:
+        visible.sort(
+            key=lambda row: ((row.uploaded_at or datetime.min), row.id),
+            reverse=(sort_dir != 'asc'),
+        )
 
     return jsonify({'ok': True, 'items': [_asset_to_dict(r) for r in visible[:2000]]})
 
@@ -356,21 +675,59 @@ def api_photos_upload():
         ext = os.path.splitext(original_name)[1].lower()
         if ext not in PHOTO_EXTS and ext not in VIDEO_EXTS:
             continue
-        storage_name = f"{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}_{secrets.token_hex(4)}_{original_name}"
-        file.save(os.path.join(PHOTO_UPLOAD_FOLDER, storage_name))
-        row = PhotoAsset(
-            album_id=album.id if album else None,
-            filename=storage_name,
-            original_filename=original_name,
-            uploader=uploader,
-            visibility=visibility,
-            shared_with_json='[]',
-            mime_type=sanitize_text(getattr(file, 'mimetype', '') or '').strip() or None,
-            file_size=int(getattr(file, 'content_length', 0) or 0),
-            is_video=ext in VIDEO_EXTS,
-        )
-        db.session.add(row)
-        uploaded.append(row)
+        temp_meta = save_upload_to_temp(file, get_sync_temp_folder(), prefix='manual_')
+        temp_path = temp_meta['temp_path']
+        sha = temp_meta['sha256']
+        mime_type = sanitize_text(temp_meta.get('mime_type') or '').strip() or None
+        captured_at = _extract_captured_at_from_media(temp_path, ext in VIDEO_EXTS)
+
+        outcome = None
+        try:
+            outcome = resolve_or_create_asset(
+                sha256=sha,
+                file_size=int(temp_meta['size_bytes'] or 0),
+                mime_type=mime_type,
+                is_video=(ext in VIDEO_EXTS),
+                album_id=album.id if album else None,
+                original_filename=original_name,
+                uploader=uploader,
+                visibility=visibility,
+                storage_filename=None,
+                source_device_id=None,
+                source_path=None,
+                source_mtime_utc=captured_at,
+                ingest_job_id=None,
+                origin_kind='manual_upload',
+            )
+        except ValueError:
+            storage_name, _ = move_temp_to_photo_storage(temp_path, original_name)
+            outcome = resolve_or_create_asset(
+                sha256=sha,
+                file_size=int(temp_meta['size_bytes'] or 0),
+                mime_type=mime_type,
+                is_video=(ext in VIDEO_EXTS),
+                album_id=album.id if album else None,
+                original_filename=original_name,
+                uploader=uploader,
+                visibility=visibility,
+                storage_filename=storage_name,
+                source_device_id=None,
+                source_path=None,
+                source_mtime_utc=captured_at,
+                ingest_job_id=None,
+                origin_kind='manual_upload',
+            )
+
+        row = outcome['asset']
+        if row.captured_at is None and captured_at is not None:
+            row.captured_at = captured_at
+        if outcome['action'] == 'linked_existing':
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
+            row.dedupe_reason = outcome.get('dedupe_reason') or 'content_sha256_match'
+        uploaded.append((row, outcome['action']))
 
     db.session.commit()
 
@@ -383,10 +740,11 @@ def api_photos_upload():
             target_members=targets,
             created_by=uploader,
             payload={'count': len(uploaded)},
-            channels=['in_app'],
+            channels=['in_app', 'mobile'],
         )
 
-    return jsonify({'ok': True, 'items': [_asset_to_dict(r) for r in uploaded]})
+    return jsonify({'ok': True, 'items': [{**_asset_to_dict(r), 'dedupe_action': action} for r, action in uploaded]})
+
 
 
 @main_bp.route('/api/photos/watch-folders', methods=['GET'])

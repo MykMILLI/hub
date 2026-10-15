@@ -150,6 +150,8 @@ def timeline_page():
             q = q.filter(ActivityLog.timestamp < end_dt)
         except Exception:
             pass
+    if not actor and not start and not end:
+        q = q.filter(ActivityLog.timestamp >= (datetime.utcnow() - timedelta(days=45)))
 
     posts = q.order_by(ActivityLog.timestamp.desc(), ActivityLog.id.desc()).limit(limit).all()
     actors = [row[0] for row in db.session.query(ActivityLog.actor).filter(ActivityLog.visibility == 'family').distinct().order_by(ActivityLog.actor.asc()).all() if row[0]]
@@ -186,6 +188,8 @@ def api_timeline():
             q = q.filter(ActivityLog.timestamp < end_dt)
         except Exception:
             pass
+    if not actor and not start and not end:
+        q = q.filter(ActivityLog.timestamp >= (datetime.utcnow() - timedelta(days=45)))
 
     rows = q.order_by(ActivityLog.timestamp.desc(), ActivityLog.id.desc()).limit(limit + 1).all()
     has_more = len(rows) > limit

@@ -1,0 +1,243 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .agenda-grid { display:grid; grid-template-columns:repeat(7,minmax(130px,1fr)); gap:0; overflow-x:auto; border:1px solid rgba(148,163,184,.25); border-radius:1rem; overflow:hidden; }
+  .agenda-day { min-height:220px; border-right:1px solid rgba(148,163,184,.22); background:rgba(255,255,255,.62); padding:.8rem; }
+  .agenda-day.today { border-color:rgb(14 165 233); box-shadow:0 0 0 1px rgba(14,165,233,.2); }
+  .agenda-entry { width:100%; text-align:left; border-left:4px solid #0ea5e9; border-radius:.6rem; padding:.55rem; background:rgba(14,165,233,.10); }
+  .agenda-entry:hover { background:rgba(14,165,233,.18); }
+  .dark .agenda-day { background:rgba(15,23,42,.55); border-color:rgba(71,85,105,.65); }
+  .dark .agenda-entry { background:rgba(14,165,233,.18); }
+  .agenda-location-card { border:1px solid rgba(148,163,184,.3); border-radius:.75rem; padding:.75rem; }
+  .agenda-dashboard-row { display:grid; grid-template-columns:minmax(220px,.7fr) minmax(330px,1.35fr) minmax(260px,.9fr); gap:1rem; }
+  .agenda-weather-card { min-height:290px; }
+  .agenda-album-card { min-height:290px; }
+  .agenda-work-card { min-height:290px; }
+  #memberWorkCards { grid-template-columns:1fr !important; gap:.65rem; }
+  #agendaWeather { display:flex; height:calc(100% - 2rem); align-items:center; justify-content:center; text-align:center; }
+  @media (max-width:767px) {
+    #dailyAgendaRoot { width:100%; min-width:0; }
+    #dailyAgendaRoot > section:first-child { padding:.9rem; }
+    #dailyAgendaRoot > section:first-child > div:first-child { align-items:stretch; }
+    #dailyAgendaRoot > section:first-child > div:first-child > div:last-child { width:100%; }
+    #dailyAgendaRoot > section:first-child > div:first-child > div:last-child .btn { flex:1 1 0; justify-content:center; min-height:44px; }
+    #dailyAgendaRoot > section:first-child > div:nth-child(2) { align-items:stretch; }
+    #dailyAgendaRoot > section:first-child > div:nth-child(2) > div { justify-content:center; width:100%; }
+    #dailyAgendaRoot > section:first-child > div:nth-child(2) > div:last-child .btn { min-width:44px; min-height:44px; }
+    #dailyAgendaRoot > section:first-child > div:last-child { align-items:flex-start; }
+    #dailyAgendaRoot > section:first-child > div:last-child > span { display:none; }
+    .agenda-grid {
+      display:flex;
+      gap:.65rem;
+      overflow-x:auto;
+      overflow-y:hidden;
+      border:0;
+      border-radius:0;
+      padding:.15rem .1rem .5rem;
+      scroll-snap-type:x mandatory;
+      -webkit-overflow-scrolling:touch;
+    }
+    .agenda-day,
+    .agenda-day:not(.agenda-active-day) {
+      display:block;
+      flex:0 0 calc(100vw - 2rem);
+      min-width:0;
+      min-height:240px;
+      border:1px solid rgba(148,163,184,.25);
+      border-radius:1rem;
+      padding:.85rem;
+      scroll-snap-align:start;
+    }
+    .agenda-day.today { border-width:2px; }
+    .agenda-entry { min-height:56px; padding:.7rem; }
+    .agenda-dashboard-row { display:flex; flex-direction:column; gap:.75rem; }
+    .agenda-weather-card,
+    .agenda-album-card,
+    .agenda-work-card { min-height:0; }
+    .agenda-album-card > div:first-child { flex-wrap:wrap; }
+    .agenda-album-card > div:first-child > div:last-child {
+      width:100%;
+      display:grid;
+      grid-template-columns:minmax(0,1fr) repeat(4,44px);
+      gap:.4rem;
+    }
+    #agendaSlideDuration,
+    #agendaSlidePrev,
+    #agendaSlidePlay,
+    #agendaSlideNext,
+    #agendaSlideFullscreen { min-height:44px; width:100%; }
+    #agendaSlideDuration { padding-left:.35rem; padding-right:.35rem; }
+    #memberWorkMember { width:100%; min-height:44px; }
+    #memberWorkCards article { min-height:0; }
+  }
+</style>
+<div class="mx-auto max-w-7xl space-y-4" id="dailyAgendaRoot">
+  <section class="card p-4 sm:p-6">
+    <div class="flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h2 class="text-3xl font-bold">Your week, at a glance</h2>
+        <p class="text-sm text-gray-600 dark:text-gray-400">Family travel, shared moments, and a little less to remember.</p>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <button type="button" id="agendaLocationsBtn" class="btn btn-secondary"><i class="fa-solid fa-location-dot mr-1"></i>Saved locations</button>
+        <button type="button" id="agendaAddBtn" class="btn btn-primary"><i class="fa-solid fa-plus mr-1"></i>Add agenda item</button>
+      </div>
+    </div>
+    <div class="mt-5 flex flex-wrap items-center justify-between gap-3">
+      <div class="inline-flex rounded-xl border border-gray-200 dark:border-gray-700 p-1">
+        <button type="button" data-view="day" class="agenda-view btn btn-secondary text-sm">Day</button>
+        <button type="button" data-view="week" class="agenda-view btn btn-secondary text-sm">Week</button>
+      </div>
+      <div class="flex items-center gap-2">
+        <button type="button" id="agendaPrev" class="btn btn-secondary" aria-label="Previous period"><i class="fa-solid fa-chevron-left"></i></button>
+        <button type="button" id="agendaToday" class="btn btn-secondary">Today</button>
+        <button type="button" id="agendaNext" class="btn btn-secondary" aria-label="Next period"><i class="fa-solid fa-chevron-right"></i></button>
+      </div>
+    </div>
+    <div class="mt-5 flex items-center justify-between"><div><h3 class="text-lg font-bold">Daily agenda</h3><p id="agendaLabel" class="text-sm text-gray-500"></p></div><span class="text-xs text-gray-500"><i class="fa-solid fa-circle text-emerald-400 text-[8px] mr-1"></i>Plans sync with your family calendar</span></div>
+  </section>
+  <section id="agendaSchedule" class="agenda-grid" aria-live="polite"></section>
+  <section class="agenda-dashboard-row">
+    <article class="agenda-weather-card card p-4"><h3 class="font-bold"><i class="fa-solid fa-cloud-sun text-violet-500 mr-2"></i>Weather</h3><div id="agendaWeather" class="mt-3 text-sm text-gray-500">Loading weather…</div></article>
+    <article class="agenda-album-card card p-4"><div class="flex justify-between gap-2"><div><h3 class="font-bold"><i class="fa-solid fa-images text-violet-500 mr-2"></i>Shared Family Album</h3><p id="agendaSlideStatus" class="text-xs text-gray-500">Loading slideshow…</p></div><div class="flex gap-1"><select id="agendaSlideDuration" class="text-xs border rounded-lg px-1 dark:bg-gray-800"><option value="5">5s</option><option value="8" selected>8s</option><option value="12">12s</option><option value="20">20s</option></select><button id="agendaSlidePrev" class="btn btn-secondary text-xs"><i class="fa-solid fa-chevron-left"></i></button><button id="agendaSlidePlay" class="btn btn-secondary text-xs"><i class="fa-solid fa-pause"></i></button><button id="agendaSlideNext" class="btn btn-secondary text-xs"><i class="fa-solid fa-chevron-right"></i></button><button id="agendaSlideFullscreen" class="btn btn-primary text-xs"><i class="fa-solid fa-expand"></i></button></div></div><div id="agendaSlideFrame" class="mt-3 aspect-video bg-black rounded-xl overflow-hidden"><img id="agendaSlideImage" class="w-full h-full object-contain" alt="Shared Family Album slideshow"></div></article>
+  <section class="agenda-work-card card p-4 sm:p-5">
+    <div class="flex flex-wrap items-center justify-between gap-2"><div><h3 class="text-lg font-bold">Member work dashboard</h3><p id="memberWorkLabel" class="text-sm text-gray-500">Open work for the selected family member.</p></div><select id="memberWorkMember" class="p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600"></select></div>
+    <div id="memberWorkCards" class="mt-4 grid md:grid-cols-3 gap-3"></div>
+  </section></section>
+</div>
+
+<div id="agendaEntryModal" class="hidden fixed inset-0 z-[60] bg-black/60 p-3 sm:p-6 items-center justify-center">
+  <div class="card w-full max-w-xl max-h-[calc(100vh-1.5rem)] sm:max-h-[calc(100vh-3rem)] overflow-y-auto p-5 sm:p-6 rounded-2xl">
+    <div class="flex items-start justify-between gap-4 mb-4"><div><h3 id="agendaEntryTitle" class="text-xl font-bold">Add agenda item</h3><p class="text-sm text-gray-500">A linked Family Calendar event is kept in sync.</p></div><button type="button" class="btn btn-secondary agenda-close">Close</button></div>
+    <form id="agendaEntryForm" class="space-y-4">
+      <input id="agendaEntryId" type="hidden">
+      <div class="grid sm:grid-cols-2 gap-3">
+        <label class="block text-sm font-medium">Family member<select id="agendaMember" required class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600"></select></label>
+        <label class="block text-sm font-medium">Date<input id="agendaDate" type="date" required class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600"></label>
+        <label class="block text-sm font-medium">Start time<input id="agendaStartTime" type="time" required class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600"></label>
+        <label class="block text-sm font-medium">End time <span class="font-normal text-gray-500">(optional)</span><input id="agendaEndTime" type="time" class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600"></label>
+      </div>
+      <label class="block text-sm font-medium">Saved location<select id="agendaLocation" class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600"></select></label>
+      <p class="text-xs text-gray-500">The selected location is copied into this agenda item, so future location edits do not alter the itinerary.</p>
+      <label class="block text-sm font-medium">Details<textarea id="agendaDetails" rows="4" class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600" maxlength="5000" placeholder="Travel notes, confirmation details, or reminders"></textarea></label>
+      <div class="flex justify-end gap-2 pt-2"><button type="button" class="btn btn-secondary agenda-close">Cancel</button><button class="btn btn-primary">Save agenda item</button></div>
+    </form>
+  </div>
+</div>
+
+<div id="agendaLocationsModal" class="hidden fixed inset-0 z-[60] bg-black/60 p-3 sm:p-6 items-center justify-center">
+  <div class="card w-full max-w-2xl max-h-[calc(100vh-1.5rem)] sm:max-h-[calc(100vh-3rem)] overflow-y-auto p-5 sm:p-6 rounded-2xl">
+    <div class="flex items-start justify-between gap-4 mb-4"><div><h3 class="text-xl font-bold">Saved locations</h3><p class="text-sm text-gray-500">Shared destinations for travel schedules.</p></div><button type="button" class="btn btn-secondary agenda-locations-close">Close</button></div>
+    <form id="agendaLocationForm" class="grid gap-3 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+      <input id="agendaLocationId" type="hidden">
+      <label class="text-sm font-medium">Name<input id="agendaLocationName" required maxlength="160" class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600" placeholder="School, Office, Airport"></label>
+      <label class="text-sm font-medium">Address<input id="agendaLocationAddress" required maxlength="512" class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600" placeholder="Street address or directions"></label>
+      <label class="text-sm font-medium">Notes <span class="font-normal text-gray-500">(optional)</span><textarea id="agendaLocationNotes" rows="2" maxlength="5000" class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600"></textarea></label>
+      <div class="flex justify-end gap-2"><button type="button" id="agendaLocationCancel" class="btn btn-secondary hidden">Cancel edit</button><button class="btn btn-primary">Save location</button></div>
+    </form>
+    <div id="agendaLocationsList" class="mt-4 space-y-3"></div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const esc = value => String(value || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const iso = d => d.toISOString().slice(0, 10);
+  const asDate = value => new Date(`${value}T12:00:00`);
+  const monday = date => { const d = new Date(date); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d; };
+  const toast = (message, type = 'success') => window.globalToast ? window.globalToast(message, type) : alert(message);
+  let slideAssets = [], slideIndex = 0, slideTimer, slidePlaying = true;
+  function renderSlide(){ if(!slideAssets.length) return; const a=slideAssets[slideIndex], frame=$('agendaSlideFrame'), url=`/api/immich/assets/${encodeURIComponent(a.id)}/${a.type==='VIDEO'?'original':'thumbnail'}`; const swap=()=>{frame.innerHTML=a.type==='VIDEO'?`<video class="w-full h-full object-contain" controls autoplay src="${url}"></video>`:`<img class="w-full h-full object-contain" alt="Shared Family Album slideshow" src="${url}">`;$('agendaSlideStatus').textContent=`${slideIndex+1} of ${slideAssets.length}`;}; if(a.type==='VIDEO'){swap();}else{const preload=new Image();preload.onload=swap;preload.onerror=()=>{$('agendaSlideStatus').textContent='Unable to load this photo.';};preload.src=url;} const next=slideAssets[(slideIndex+1)%slideAssets.length];if(next?.type!=='VIDEO'){const p=new Image();p.src=`/api/immich/assets/${encodeURIComponent(next.id)}/thumbnail`;}}
+  function playSlides(playing){slidePlaying=playing;clearInterval(slideTimer);$('agendaSlidePlay').innerHTML=`<i class="fa-solid fa-${playing?'pause':'play'}"></i>`;if(playing)slideTimer=setInterval(()=>$('agendaSlideNext').click(),Number($('agendaSlideDuration').value)*1000);}
+  fetch('/api/immich/shared-family-album').then(r=>r.json()).then(d=>{if(!d.ok) throw new Error(d.error); slideAssets=d.assets||[]; if(!slideAssets.length) throw new Error('No photos or videos in album'); renderSlide();playSlides(true);}).catch(e=>$('agendaSlideStatus').textContent=e.message);
+  $('agendaSlidePrev').onclick=()=>{if(slideAssets.length){slideIndex=(slideIndex-1+slideAssets.length)%slideAssets.length;renderSlide();}};
+  $('agendaSlideNext').onclick=()=>{if(slideAssets.length){slideIndex=(slideIndex+1)%slideAssets.length;renderSlide();}};
+  $('agendaSlidePlay').onclick=()=>playSlides(!slidePlaying); $('agendaSlideFullscreen').onclick=()=>$('agendaSlideFrame').requestFullscreen?.();
+  $('agendaSlideDuration').onchange=()=>playSlides(slidePlaying);
+  fetch('/api/weather/location').then(r=>r.json()).then(location => fetch(`/api/weather?latitude=${encodeURIComponent(location.latitude)}&longitude=${encodeURIComponent(location.longitude)}&location_name=${encodeURIComponent(location.location_name || '')}`)).then(r=>r.json()).then(d=>{const city=d.location_name||'Weather'; $('agendaWeather').innerHTML=`<div class=\"flex items-center gap-4\"><span class=\"text-4xl\">${d.weather_emoji||'☀️'}</span><div><b class=\"text-2xl text-gray-900 dark:text-white\">${Math.round(d.temperature)}°F</b><div>${city} · ${d.description||''}</div><div class=\"text-xs\">Wind ${d.wind_speed||'--'} mph · Humidity ${d.humidity||'--'}%</div></div></div>`;}).catch(()=>{$('agendaWeather').textContent='Weather is unavailable.';});
+  let view = 'week', anchor = new Date(), members = [], locations = [], entries = [];
+  async function loadMemberWork(member) {
+    const data = await api(`/api/daily-agenda/member-work?member=${encodeURIComponent(member)}`);
+    $('memberWorkLabel').textContent = `Open work for ${data.member}.`;
+    $('memberWorkCards').innerHTML = ['todo','chore'].map(kind => `<article class="rounded-xl border border-gray-200 dark:border-gray-700 p-3"><div class="flex justify-between"><h4 class="font-semibold">${kind === 'todo' ? 'To-Dos' : 'Chores'}</h4><a class="btn btn-secondary text-xs" href="/chores?tab=${kind === 'todo' ? 'todo' : 'chores'}&new=1&type=${kind}&assignee=${encodeURIComponent(data.member)}">Add</a></div><div class="mt-2 space-y-2">${data.work[kind].length ? data.work[kind].map(item => `<a class="block rounded-lg bg-gray-50 dark:bg-gray-800 p-2 text-sm hover:ring-1 hover:ring-sky-400" href="/chores?tab=${kind === 'todo' ? 'todo' : 'chores'}"><b>${esc(item.title)}</b>${item.due_date ? `<span class="block text-xs text-gray-500">Due ${esc(item.due_date)}</span>` : ''}</a>`).join('') : '<p class="text-sm text-gray-500">Nothing open.</p>'}</div></article>`).join('');
+  }
+
+  const period = () => {
+    const start = view === 'week' ? monday(anchor) : new Date(anchor);
+    const days = view === 'week' ? 7 : 1;
+    const end = new Date(start); end.setDate(start.getDate() + days - 1);
+    return { start, end, days };
+  };
+  const dateLabel = ({start, end}) => view === 'day' ? start.toLocaleDateString(undefined, { weekday:'long', month:'long', day:'numeric', year:'numeric' }) : `${start.toLocaleDateString(undefined, {month:'short',day:'numeric'})} – ${end.toLocaleDateString(undefined, {month:'short',day:'numeric',year:'numeric'})}`;
+  const open = id => { $(id).classList.remove('hidden'); $(id).classList.add('flex'); };
+  const close = id => { $(id).classList.add('hidden'); $(id).classList.remove('flex'); };
+  async function api(url, options) { const res = await fetch(url, options); const data = await res.json(); if (!res.ok || !data.ok) throw new Error(data.error || 'Request failed'); return data; }
+  async function load() {
+    const {start,end} = period();
+    const [memberData, locationData, entryData] = await Promise.all([
+      api('/api/daily-agenda/members'), api('/api/daily-agenda/locations'),
+      api(`/api/daily-agenda/entries?start=${iso(start)}&end=${iso(end)}`)
+    ]);
+    members = memberData.members; locations = locationData.locations; entries = entryData.entries;
+    $('memberWorkMember').innerHTML = members.map(member => `<option value="${esc(member)}">${esc(member)}</option>`).join('');
+    $('memberWorkMember').value = $('memberWorkMember').value || memberData.current_member;
+    await loadMemberWork($('memberWorkMember').value);
+    render();
+  }
+  function render() {
+    const range = period(), today = iso(new Date());
+    $('agendaLabel').textContent = dateLabel(range);
+    document.querySelectorAll('.agenda-view').forEach(btn => btn.classList.toggle('btn-primary', btn.dataset.view === view));
+    $('agendaSchedule').innerHTML = Array.from({length:range.days}, (_, index) => {
+      const day = new Date(range.start); day.setDate(day.getDate() + index); const dayIso = iso(day);
+      const list = entries.filter(entry => entry.date === dayIso);
+      return `<div class="agenda-day ${dayIso === today ? 'today agenda-active-day' : ''}"><div class="flex justify-between gap-2 mb-3"><strong>${esc(day.toLocaleDateString(undefined,{weekday:'short'}))}</strong><span class="text-sm text-gray-500">${esc(day.toLocaleDateString(undefined,{month:'short',day:'numeric'}))}</span></div>${list.length ? list.map(entry => `<button type="button" class="agenda-entry mb-2" data-entry="${entry.id}"><div class="text-sm font-bold">${esc(entry.start_time)}${entry.end_time ? `–${esc(entry.end_time)}` : ''}</div><div class="text-sm font-semibold">${esc(entry.member_name)}${entry.location_name ? ` · ${esc(entry.location_name)}` : ''}</div>${entry.location_address ? `<div class="mt-1 text-xs text-gray-600 dark:text-gray-300 truncate">${esc(entry.location_address)}</div>` : ''}</button>`).join('') : '<p class="text-sm text-gray-500">No travel planned.</p>'}</div>`;
+    }).join('');
+  }
+  function populateLocationSelect(selected = '') {
+    $('agendaLocation').innerHTML = '<option value="">No saved location</option>' + locations.map(location => `<option value="${location.id}" ${String(location.id) === String(selected) ? 'selected' : ''}>${esc(location.name)} — ${esc(location.address)}</option>`).join('');
+  }
+  function openEntry(entry) {
+    $('agendaEntryForm').reset(); $('agendaEntryId').value = entry?.id || ''; $('agendaEntryTitle').textContent = entry ? 'Edit agenda item' : 'Add agenda item';
+    $('agendaMember').innerHTML = members.map(member => `<option value="${esc(member)}">${esc(member)}</option>`).join('');
+    $('agendaMember').value = entry?.member_name || members[0] || '';
+    $('agendaDate').value = entry?.date || iso(anchor); $('agendaStartTime').value = entry?.start_time || '';
+    $('agendaEndTime').value = entry?.end_time || ''; $('agendaDetails').value = entry?.details || '';
+    populateLocationSelect(entry?.location_id || ''); open('agendaEntryModal');
+  }
+  function renderLocations() {
+    $('agendaLocationsList').innerHTML = locations.length ? locations.map(location => `<article class="agenda-location-card"><div class="flex justify-between gap-3"><div class="min-w-0"><h4 class="font-semibold">${esc(location.name)}</h4><p class="text-sm text-gray-600 dark:text-gray-300">${esc(location.address)}</p>${location.notes ? `<p class="mt-1 text-sm text-gray-500 whitespace-pre-wrap">${esc(location.notes)}</p>` : ''}</div><div class="flex h-fit gap-2"><button class="btn btn-secondary text-sm agenda-location-edit" data-location="${location.id}">Edit</button><button class="btn btn-danger text-sm agenda-location-delete" data-location="${location.id}">Delete</button></div></div></article>`).join('') : '<p class="text-sm text-gray-500">No saved locations yet.</p>';
+  }
+  document.querySelectorAll('.agenda-view').forEach(btn => btn.addEventListener('click', () => { view = btn.dataset.view; load().catch(err => toast(err.message, 'error')); }));
+  $('agendaPrev').onclick = () => { anchor.setDate(anchor.getDate() - (view === 'week' ? 7 : 1)); load().catch(err => toast(err.message, 'error')); };
+  $('agendaNext').onclick = () => { anchor.setDate(anchor.getDate() + (view === 'week' ? 7 : 1)); load().catch(err => toast(err.message, 'error')); };
+  $('agendaToday').onclick = () => { anchor = new Date(); load().catch(err => toast(err.message, 'error')); };
+  $('agendaAddBtn').onclick = () => openEntry();
+  $('memberWorkMember').onchange = () => loadMemberWork($('memberWorkMember').value).catch(err => toast(err.message, 'error'));
+  $('agendaSchedule').onclick = event => { const button = event.target.closest('[data-entry]'); if (button) openEntry(entries.find(item => item.id === Number(button.dataset.entry))); };
+  document.querySelectorAll('.agenda-close').forEach(button => button.onclick = () => close('agendaEntryModal'));
+  $('agendaEntryForm').onsubmit = async event => {
+    event.preventDefault(); const id = $('agendaEntryId').value;
+    const payload = {member_name:$('agendaMember').value, date:$('agendaDate').value, start_time:$('agendaStartTime').value, end_time:$('agendaEndTime').value, location_id:$('agendaLocation').value || null, details:$('agendaDetails').value};
+    try { await api(id ? `/api/daily-agenda/entries/${id}` : '/api/daily-agenda/entries', {method:id ? 'PUT':'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}); close('agendaEntryModal'); toast('Agenda item saved'); await load(); } catch (err) { toast(err.message, 'error'); }
+  };
+  $('agendaLocationsBtn').onclick = () => { renderLocations(); open('agendaLocationsModal'); };
+  document.querySelectorAll('.agenda-locations-close').forEach(button => button.onclick = () => close('agendaLocationsModal'));
+  $('agendaLocationCancel').onclick = () => { $('agendaLocationForm').reset(); $('agendaLocationId').value = ''; $('agendaLocationCancel').classList.add('hidden'); };
+  $('agendaLocationForm').onsubmit = async event => {
+    event.preventDefault(); const id = $('agendaLocationId').value;
+    const payload = {name:$('agendaLocationName').value, address:$('agendaLocationAddress').value, notes:$('agendaLocationNotes').value};
+    try { await api(id ? `/api/daily-agenda/locations/${id}` : '/api/daily-agenda/locations', {method:id ? 'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); $('agendaLocationForm').reset(); $('agendaLocationId').value=''; $('agendaLocationCancel').classList.add('hidden'); const data=await api('/api/daily-agenda/locations'); locations=data.locations; renderLocations(); toast('Location saved'); } catch(err) { toast(err.message,'error'); }
+  };
+  $('agendaLocationsList').onclick = async event => {
+    const id = Number(event.target.dataset.location); if (!id) return; const location = locations.find(item => item.id === id);
+    if (event.target.classList.contains('agenda-location-edit')) { $('agendaLocationId').value=id; $('agendaLocationName').value=location.name; $('agendaLocationAddress').value=location.address; $('agendaLocationNotes').value=location.notes; $('agendaLocationCancel').classList.remove('hidden'); return; }
+    if (event.target.classList.contains('agenda-location-delete') && confirm(`Delete ${location.name}? Existing agenda items retain their location snapshot.`)) { try { await api(`/api/daily-agenda/locations/${id}`,{method:'DELETE'}); locations=(await api('/api/daily-agenda/locations')).locations; renderLocations(); toast('Location deleted'); } catch(err) { toast(err.message,'error'); } }
+  };
+  $('agendaEntryModal').onclick = event => { if (event.target === $('agendaEntryModal')) close('agendaEntryModal'); };
+  $('agendaLocationsModal').onclick = event => { if (event.target === $('agendaLocationsModal')) close('agendaLocationsModal'); };
+  load().catch(err => toast(err.message, 'error'));
+})();
+</script>
+{% endblock %}

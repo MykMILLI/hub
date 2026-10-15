@@ -103,7 +103,7 @@
         // Update location name
         const locationName = document.getElementById('location-name');
         if (locationName) {
-            locationName.textContent = data.location_name || `${data.latitude.toFixed(2)}, ${data.longitude.toFixed(2)}`;
+            locationName.textContent = data.location_name || 'Location unavailable';
         }
 
         // Update current weather

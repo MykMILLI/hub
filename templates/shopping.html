@@ -1,9 +1,15 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="mx-auto space-y-4">
+<style>
+  .shopping-workspace { display:grid; grid-template-columns:minmax(210px,.72fr) minmax(0,1.4fr) minmax(210px,.72fr); gap:1rem; }
+  .shopping-list-active { box-shadow: inset 3px 0 0 var(--primary-color); background:rgba(139,92,246,.08); }
+  @media (max-width:1100px) { .shopping-workspace { grid-template-columns:260px minmax(0,1fr); } .shopping-rail { grid-column:1 / -1; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1rem; } }
+  @media (max-width:700px) { .shopping-workspace,.shopping-rail { display:block; } .shopping-workspace > *, .shopping-rail > * { margin-bottom:1rem; } }
+</style>
+<div class="mx-auto max-w-7xl space-y-4">
     <div class="flex flex-wrap items-center justify-between gap-3">
-        <h2 class="text-xl font-bold">Shopping Lists</h2>
-        <button id="addListBtn" class="btn btn-primary">+ New List</button>
+        <div><h2 class="text-3xl font-bold">Shopping, simplified</h2><p class="text-sm text-gray-500">Shared lists, familiar favorites, and fewer forgotten essentials.</p></div>
+        <button id="addListBtn" class="btn btn-primary"><i class="fa-solid fa-plus mr-1"></i>New list</button>
     </div>
 
     {% if groceries_budget > 0 %}
@@ -21,15 +27,15 @@
     </div>
     {% endif %}
 
-    <div class="grid grid-cols-1 xl:grid-cols-[minmax(280px,360px)_minmax(0,1fr)] gap-4 items-start">
+    <div class="shopping-workspace items-start">
         <aside class="card p-3 min-w-0">
-            <div class="text-sm font-semibold mb-2">Your Lists</div>
+            <div class="flex justify-between text-sm font-semibold mb-3"><span>Your lists</span><span class="text-xs text-gray-400" id="shoppingListCount"></span></div>
             <div id="shoppingLists" class="space-y-2"></div>
         </aside>
 
         <section class="space-y-4 min-w-0">
             <div class="card p-4 space-y-3">
-                <div class="text-sm font-semibold">Add Item</div>
+                <div class="flex justify-between gap-2"><div><div class="text-lg font-bold" id="activeListHeading">Shopping list</div><div class="text-xs text-gray-500">Add an item, then check it off as you shop.</div></div><span id="activeListCount" class="text-xs text-gray-500"></span></div>
                 <form id="addItemForm" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 xl:grid-cols-12 gap-3 items-end">
                     <div class="sm:col-span-2 lg:col-span-3 xl:col-span-4 relative min-w-0">
                         <label class="block text-xs text-gray-500 mb-1">Item</label>
@@ -104,11 +110,15 @@
                 <ul id="itemsHost" class="space-y-2"></ul>
             </div>
         </section>
+        <aside class="shopping-rail space-y-4">
+            <section class="card p-4"><h3 class="font-bold">At a glance</h3><div class="mt-4 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 p-4"><div id="glanceRemaining" class="text-3xl font-bold">0</div><div class="text-sm text-gray-600 dark:text-gray-300">items left to pick up</div></div><div class="mt-3 h-1.5 rounded bg-gray-200 dark:bg-gray-700"><div id="glanceProgress" class="h-full rounded bg-violet-500" style="width:0%"></div></div></section>
+            <section class="card p-4"><h3 class="font-bold">Quick add</h3><p class="text-xs text-gray-500 mb-3">From your saved items</p><div id="quickRepoItems" class="space-y-2"></div></section>
+        </aside>
     </div>
 
     <section class="card p-4 space-y-3">
         <div class="flex items-center justify-between gap-2">
-            <h3 class="font-semibold">Saved Item Repo</h3>
+            <h3 class="font-semibold">Saved items</h3>
             <button id="addRepoBtn" class="btn btn-secondary text-xs">+ Add Repo Item</button>
         </div>
         <div class="flex flex-wrap gap-2">
@@ -354,12 +364,13 @@
     }
 
     function renderLists() {
+        document.getElementById('shoppingListCount').textContent = `${state.lists.length} lists`;
         listHost.innerHTML = '';
         state.lists.forEach(lst => {
             const listType = lst.list_type || 'standard';
             const listTypeLabel = listType === 'big_purchase' ? 'Big Purchase' : 'Standard';
             const row = document.createElement('div');
-            row.className = `flex items-center gap-2 p-2 rounded border cursor-pointer ${state.activeListId === lst.id ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-200 dark:border-gray-700'}`;
+            row.className = `flex items-center gap-2 p-2 rounded border cursor-pointer ${state.activeListId === lst.id ? 'shopping-list-active border-violet-300' : 'border-gray-200 dark:border-gray-700'}`;
             row.innerHTML = `
                 <div class="w-3 h-3 rounded-full" style="background:${lst.color || '#3B82F6'}"></div>
                 <div class="flex-1 min-w-0">
@@ -449,6 +460,7 @@
         activeTitle.textContent = activeList
             ? `${activeList.name}${(activeList.list_type || 'standard') === 'big_purchase' ? ' · Big Purchases' : ''}`
             : 'Items';
+        document.getElementById('activeListHeading').textContent = activeList ? activeList.name : 'Shopping list';
         updateBigPurchaseUi();
         renderItems();
     }
@@ -491,6 +503,11 @@
             `;
             itemHost.appendChild(li);
         });
+        const remaining = state.activeItems.filter(item => !item.checked).length;
+        const picked = state.activeItems.length - remaining;
+        document.getElementById('activeListCount').textContent = `${remaining} items left · ${picked} picked up`;
+        document.getElementById('glanceRemaining').textContent = remaining;
+        document.getElementById('glanceProgress').style.width = state.activeItems.length ? `${(picked / state.activeItems.length) * 100}%` : '0%';
 
         activeTotal.textContent = `$${total.toFixed(2)}`;
 
@@ -663,6 +680,16 @@
     }
 
     function renderRepoTable() {
+        const quick = document.getElementById('quickRepoItems');
+        if (quick) {
+            quick.innerHTML = state.repoItems.slice(0, 4).map(item => `<button type="button" class="w-full flex justify-between gap-2 text-left rounded-lg border border-gray-200 dark:border-gray-700 p-2 quick-repo-add" data-name="${escapeHtml(item.name)}" data-store="${escapeHtml(item.store || '')}" data-price="${item.price ?? ''}"><span><b class="block text-sm">${escapeHtml(item.name)}</b><span class="text-xs text-gray-500">${escapeHtml(item.store || '')}${item.price != null ? ` · $${Number(item.price).toFixed(2)}` : ''}</span></span><i class="fa-solid fa-plus text-violet-500"></i></button>`).join('') || '<p class="text-sm text-gray-500">No saved items yet.</p>';
+            quick.querySelectorAll('.quick-repo-add').forEach(button => button.addEventListener('click', () => {
+                document.getElementById('itemName').value = button.dataset.name || '';
+                document.getElementById('itemStore').value = button.dataset.store || '';
+                document.getElementById('itemPrice').value = button.dataset.price || '';
+                document.getElementById('itemName').focus();
+            }));
+        }
         const tbody = document.getElementById('repoTable');
         tbody.innerHTML = '';
         state.repoItems.forEach(item => {

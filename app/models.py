@@ -62,6 +62,7 @@ class ProjectCard(db.Model):
     title = db.Column(db.String(256), nullable=False)
     description = db.Column(db.Text, default='')
     priority = db.Column(db.String(16), default='normal')  # low|normal|high|urgent
+    start_date = db.Column(db.Date)
     due_date = db.Column(db.Date)
     position = db.Column(db.Integer, default=0)
     creator = db.Column(db.String(64), nullable=False)
@@ -179,6 +180,11 @@ class PhotoAlbum(db.Model):
 
 
 class PhotoAsset(db.Model):
+    __table_args__ = (
+        db.Index('idx_photo_asset_content_sha256', 'content_sha256'),
+        db.Index('idx_photo_asset_source_device_path', 'source_device_id', 'source_path'),
+    )
+
     id = db.Column(db.Integer, primary_key=True)
     album_id = db.Column(db.Integer, db.ForeignKey('photo_album.id'), index=True)
     filename = db.Column(db.String(256), nullable=False, unique=True)
@@ -190,7 +196,192 @@ class PhotoAsset(db.Model):
     file_size = db.Column(db.Integer)
     is_video = db.Column(db.Boolean, default=False)
     captured_at = db.Column(db.DateTime)
+    content_sha256 = db.Column(db.String(64), index=True)
+    source_device_id = db.Column(db.Integer, db.ForeignKey('sync_device.id'))
+    source_path = db.Column(db.String(1024))
+    source_mtime_utc = db.Column(db.DateTime)
+    ingest_job_id = db.Column(db.Integer, db.ForeignKey('sync_job.id'))
+    origin_kind = db.Column(db.String(32), nullable=False, default='manual_upload')
+    dedupe_reason = db.Column(db.String(128))
     uploaded_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+
+class PhotoDownloadJob(db.Model):
+    __table_args__ = (
+        db.Index('idx_photo_dl_job_member_state', 'requested_by_member', 'state'),
+        db.Index('idx_photo_dl_job_expires', 'expires_at'),
+        db.Index('idx_photo_dl_job_created', 'created_at'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    requested_by_member = db.Column(db.String(64), nullable=False, index=True)
+    mode = db.Column(db.String(24), nullable=False, default='selected_assets')  # selected_assets|album
+    album_id = db.Column(db.Integer, db.ForeignKey('photo_album.id'), index=True)
+    state = db.Column(db.String(24), nullable=False, default='queued', index=True)
+    total_assets = db.Column(db.Integer, nullable=False, default=0)
+    included_assets = db.Column(db.Integer, nullable=False, default=0)
+    skipped_assets = db.Column(db.Integer, nullable=False, default=0)
+    total_bytes = db.Column(db.BigInteger, nullable=False, default=0)
+    zip_size_bytes = db.Column(db.BigInteger)
+    zip_filename = db.Column(db.String(256))
+    zip_storage_name = db.Column(db.String(256))
+    zip_rel_path = db.Column(db.String(1024))
+    error_code = db.Column(db.String(64))
+    error_message = db.Column(db.Text)
+    started_at = db.Column(db.DateTime)
+    completed_at = db.Column(db.DateTime)
+    expires_at = db.Column(db.DateTime, index=True)
+    cleanup_after_at = db.Column(db.DateTime)
+    cleaned_at = db.Column(db.DateTime)
+    last_accessed_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class PhotoDownloadJobAsset(db.Model):
+    __table_args__ = (
+        db.UniqueConstraint('job_id', 'photo_asset_id', name='uniq_photo_dl_job_asset'),
+        db.Index('idx_photo_dl_job_asset_job', 'job_id'),
+        db.Index('idx_photo_dl_job_asset_asset', 'photo_asset_id'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    job_id = db.Column(db.Integer, db.ForeignKey('photo_download_job.id'), nullable=False, index=True)
+    photo_asset_id = db.Column(db.Integer, db.ForeignKey('photo_asset.id'), nullable=False, index=True)
+    original_filename = db.Column(db.String(256), nullable=False)
+    storage_filename = db.Column(db.String(256), nullable=False)
+    mime_type = db.Column(db.String(128))
+    file_size = db.Column(db.BigInteger, nullable=False, default=0)
+    content_sha256 = db.Column(db.String(64), index=True)
+    added_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class SyncDevice(db.Model):
+    __table_args__ = (
+        db.Index('idx_sync_device_member_platform', 'member_name', 'platform'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    member_name = db.Column(db.String(128), nullable=False, index=True)
+    platform = db.Column(db.String(32), nullable=False, index=True)
+    device_label = db.Column(db.String(128), nullable=False)
+    trust_level = db.Column(db.String(16), nullable=False, default='trusted')
+    send_enabled = db.Column(db.Boolean, default=True, nullable=False)
+    receive_only = db.Column(db.Boolean, default=False, nullable=False)
+    app_instance_id = db.Column(db.String(128), unique=True, index=True)
+    last_seen_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class SyncSource(db.Model):
+    __table_args__ = (
+        db.Index('idx_sync_source_device_active', 'device_id', 'is_active'),
+        db.Index('idx_sync_source_type', 'source_type'),
+        db.UniqueConstraint('device_id', 'source_type', 'source_uri', name='uniq_sync_source_per_device'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    device_id = db.Column(db.Integer, db.ForeignKey('sync_device.id'), nullable=False, index=True)
+    source_type = db.Column(db.String(32), nullable=False, index=True)
+    source_uri = db.Column(db.String(1024), nullable=False)
+    scope = db.Column(db.String(16), nullable=False, default='private')
+    target_album_id = db.Column(db.Integer, db.ForeignKey('photo_album.id'))
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    requires_client_scan = db.Column(db.Boolean, default=True, nullable=False)
+    source_cursor = db.Column(db.Text)
+    last_scan_at = db.Column(db.DateTime)
+    last_success_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class SyncJob(db.Model):
+    __table_args__ = (
+        db.Index('idx_sync_job_source_state', 'source_id', 'state'),
+        db.Index('idx_sync_job_created', 'created_at'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    source_id = db.Column(db.Integer, db.ForeignKey('sync_source.id'), nullable=False, index=True)
+    trigger_type = db.Column(db.String(24), nullable=False, default='manual')
+    state = db.Column(db.String(24), nullable=False, default='queued', index=True)
+    total_items = db.Column(db.Integer, nullable=False, default=0)
+    processed_items = db.Column(db.Integer, nullable=False, default=0)
+    ingested_items = db.Column(db.Integer, nullable=False, default=0)
+    deduped_items = db.Column(db.Integer, nullable=False, default=0)
+    failed_items = db.Column(db.Integer, nullable=False, default=0)
+    started_at = db.Column(db.DateTime)
+    finished_at = db.Column(db.DateTime)
+    error_summary = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class SyncJobItem(db.Model):
+    __table_args__ = (
+        db.Index('idx_sync_item_job_state', 'job_id', 'state'),
+        db.Index('idx_sync_item_sha256', 'content_sha256'),
+        db.UniqueConstraint('job_id', 'source_rel_path', 'size_bytes', 'mtime_utc', name='uniq_sync_job_item_hint'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    job_id = db.Column(db.Integer, db.ForeignKey('sync_job.id'), nullable=False, index=True)
+    client_item_id = db.Column(db.String(128))
+    source_rel_path = db.Column(db.String(1024), nullable=False)
+    filename = db.Column(db.String(256), nullable=False)
+    size_bytes = db.Column(db.Integer, nullable=False)
+    mime_type = db.Column(db.String(128))
+    mtime_utc = db.Column(db.DateTime)
+    quick_fingerprint = db.Column(db.String(128), index=True)
+    content_sha256 = db.Column(db.String(64), index=True)
+    state = db.Column(db.String(24), nullable=False, default='queued', index=True)
+    attempts = db.Column(db.Integer, nullable=False, default=0)
+    last_error = db.Column(db.Text)
+    photo_asset_id = db.Column(db.Integer, db.ForeignKey('photo_asset.id'))
+    uploaded_blob_path = db.Column(db.String(1024))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class MediaContentIndex(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    content_sha256 = db.Column(db.String(64), nullable=False, unique=True, index=True)
+    canonical_photo_asset_id = db.Column(db.Integer, db.ForeignKey('photo_asset.id'), nullable=False)
+    file_size = db.Column(db.Integer, nullable=False, default=0)
+    mime_type = db.Column(db.String(128))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class MediaAlias(db.Model):
+    __table_args__ = (
+        db.Index('idx_media_alias_photo', 'photo_asset_id'),
+        db.Index('idx_media_alias_device', 'alias_device_id'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    photo_asset_id = db.Column(db.Integer, db.ForeignKey('photo_asset.id'), nullable=False, index=True)
+    alias_filename = db.Column(db.String(256), nullable=False)
+    alias_source_path = db.Column(db.String(1024))
+    alias_device_id = db.Column(db.Integer, db.ForeignKey('sync_device.id'))
+    alias_kind = db.Column(db.String(32), nullable=False, default='renamed_duplicate')
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class SyncEventLog(db.Model):
+    __table_args__ = (
+        db.Index('idx_sync_event_type', 'event_type'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    job_id = db.Column(db.Integer, db.ForeignKey('sync_job.id'), index=True)
+    item_id = db.Column(db.Integer, db.ForeignKey('sync_job_item.id'), index=True)
+    source_id = db.Column(db.Integer, db.ForeignKey('sync_source.id'), index=True)
+    level = db.Column(db.String(16), nullable=False, default='info')
+    event_type = db.Column(db.String(64), nullable=False, index=True)
+    message = db.Column(db.String(512), nullable=False)
+    payload_json = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
 class PhotoWatchFolder(db.Model):
@@ -287,6 +478,18 @@ class Chore(db.Model):
     done = db.Column(db.Boolean, default=False)
     # JSON-encoded list of tags (e.g., ["Alice", "Weekend"]) for assignment/filtering
     tags = db.Column(db.Text, default='[]')
+    task_type = db.Column(db.String(24), default='chore')  # chore|todo|task
+    assignee = db.Column(db.String(128), index=True)
+    due_date = db.Column(db.Date, index=True)
+    status = db.Column(db.String(32), default='todo', index=True)
+    status_options_json = db.Column(db.Text, default='["todo","in_progress","completed"]')
+    mentions_json = db.Column(db.Text, default='[]')
+    details_html = db.Column(db.Text)
+    checklist_json = db.Column(db.Text, default='[]')
+    chart_data_json = db.Column(db.Text, default='[]')
+    table_data_json = db.Column(db.Text, default='{"headers":[],"rows":[]}')
+    completed_at = db.Column(db.DateTime)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 class Recipe(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -627,6 +830,20 @@ class HouseholdRoutineState(db.Model):
     updated_by = db.Column(db.String(64))
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+
+class LibraryBookLoan(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    child_name = db.Column(db.String(128), nullable=False, index=True)
+    title = db.Column(db.String(256), nullable=False)
+    due_date = db.Column(db.Date)
+    reminder_date = db.Column(db.Date)
+    reminder_time = db.Column(db.String(5), default='08:00')
+    calendar_event_id = db.Column(db.Integer, db.ForeignKey('family_calendar_event.id', ondelete='SET NULL'), unique=True, index=True)
+    created_by = db.Column(db.String(128), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class FamilyMember(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(128), nullable=False, unique=True)
@@ -637,9 +854,21 @@ class FamilyMember(db.Model):
     favorite_color = db.Column(db.String(64), nullable=True)
     favorite_song = db.Column(db.String(256), nullable=True)
     amazon_wishlist_url = db.Column(db.String(512), nullable=True)
+    mini_slideshow_enabled = db.Column(db.Boolean, default=False)
     status = db.Column(db.String(50), default='home')  # home, away, at_work, traveling, or custom
     status_updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_hub_login_at = db.Column(db.DateTime)
+    last_hub_seen_at = db.Column(db.DateTime)
     avatar = db.Column(db.Text, nullable=True)  # base64 encoded avatar image
+    birthday_notifications_enabled = db.Column(db.Boolean, default=True)
+    notifications_enabled = db.Column(db.Boolean, default=True)
+    chat_notifications_enabled = db.Column(db.Boolean, default=True)
+    media_notifications_enabled = db.Column(db.Boolean, default=True)
+    browser_notifications_enabled = db.Column(db.Boolean, default=True)
+    weather_latitude = db.Column(db.Float, nullable=True)
+    weather_longitude = db.Column(db.Float, nullable=True)
+    weather_location_name = db.Column(db.String(256), nullable=True)
+    weather_use_gps_location = db.Column(db.Boolean, default=False)
     added_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
@@ -663,7 +892,44 @@ class FamilyCalendarEvent(db.Model):
     recurrence_count = db.Column(db.Integer)
     created_by = db.Column(db.String(64), nullable=False)
     invited_members_json = db.Column(db.Text, default='[]')  # JSON list of member names
+    external_uid = db.Column(db.String(256), index=True)
+    external_source_url = db.Column(db.Text)
     photo_filename = db.Column(db.String(256))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class DailyAgendaLocation(db.Model):
+    __table_args__ = (
+        db.Index('idx_daily_agenda_location_name', 'name'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(160), nullable=False)
+    address = db.Column(db.String(512), nullable=False)
+    notes = db.Column(db.Text)
+    created_by = db.Column(db.String(128), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class DailyAgendaEntry(db.Model):
+    __table_args__ = (
+        db.Index('idx_daily_agenda_entry_date_member', 'agenda_date', 'member_name'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    member_name = db.Column(db.String(128), nullable=False, index=True)
+    agenda_date = db.Column(db.Date, nullable=False, index=True)
+    start_time = db.Column(db.String(5), nullable=False)
+    end_time = db.Column(db.String(5))
+    location_id = db.Column(db.Integer, db.ForeignKey('daily_agenda_location.id', ondelete='SET NULL'), index=True)
+    location_name = db.Column(db.String(160))
+    location_address = db.Column(db.String(512))
+    location_notes = db.Column(db.Text)
+    details = db.Column(db.Text)
+    calendar_event_id = db.Column(db.Integer, db.ForeignKey('family_calendar_event.id', ondelete='SET NULL'), unique=True, index=True)
+    created_by = db.Column(db.String(128), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -673,6 +939,11 @@ class FamilyCalendarShareLink(db.Model):
     token = db.Column(db.String(64), nullable=False, unique=True, index=True)
     label = db.Column(db.String(128), default='Family Calendar Share')
     created_by = db.Column(db.String(64), nullable=False)
+    filter_title_keywords_json = db.Column(db.Text, default='[]')
+    filter_event_types_json = db.Column(db.Text, default='[]')
+    filter_created_by_json = db.Column(db.Text, default='[]')
+    include_private_events = db.Column(db.Boolean, default=False)
+    include_descriptions = db.Column(db.Boolean, default=True)
     active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     expires_at = db.Column(db.DateTime)
@@ -689,6 +960,7 @@ class FamilyBudget(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     notes = db.Column(db.Text)
+    categories = db.relationship('BudgetCategory', backref='budget', lazy=True, cascade='all, delete-orphan')
 
 class BudgetCategory(db.Model):
     """Allocated budget for a specific category within a family budget"""
@@ -782,13 +1054,39 @@ class GoalContribution(db.Model):
     notes = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+
+class TransactionCategoryRule(db.Model):
+    """Rule-based category override for recurring merchants/descriptions."""
+    id = db.Column(db.Integer, primary_key=True)
+    rule_name = db.Column(db.String(128), nullable=False)
+    match_field = db.Column(db.String(24), nullable=False, default='merchant')  # merchant|description|title
+    match_type = db.Column(db.String(24), nullable=False, default='contains')  # contains|equals|startswith|endswith
+    match_value = db.Column(db.String(256), nullable=False)
+    category = db.Column(db.String(64), nullable=False)
+    active = db.Column(db.Boolean, default=True)
+    priority = db.Column(db.Integer, default=100)
+    created_by = db.Column(db.String(64), default='Administrator')
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
 class PlaidAccount(db.Model):
     """Linked bank account via Plaid"""
+    __table_args__ = (
+        db.UniqueConstraint('item_account_key', name='uniq_plaid_item_account_key'),
+        db.UniqueConstraint('account_id', name='uniq_plaid_account_account_id'),
+        db.Index('idx_plaid_account_item', 'plaid_item_id'),
+    )
+
     id = db.Column(db.Integer, primary_key=True)
     user = db.Column(db.String(64), nullable=False)  # family member
     access_token = db.Column(db.String(512), nullable=False)  # encrypted Plaid access token
-    item_id = db.Column(db.String(256), nullable=False, unique=True)
-    account_id = db.Column(db.String(256), nullable=False)
+    # Legacy field kept for backward compatibility with existing rows.
+    item_id = db.Column(db.String(256), nullable=True)
+    # True Plaid item id (shared by multiple accounts from one institution link).
+    plaid_item_id = db.Column(db.String(256), index=True)
+    # Unique row key for one Plaid item + one account within that item.
+    item_account_key = db.Column(db.String(512), nullable=False)
+    account_id = db.Column(db.String(256), nullable=False, unique=True)
     account_name = db.Column(db.String(256))
     account_type = db.Column(db.String(64))  # checking, savings, credit_card, etc
     account_subtype = db.Column(db.String(64))

@@ -123,6 +123,16 @@
             {% set icon_color = 'from-orange-500 to-amber-500' %}
             {% set action_label = 'Meal Plan' %}
             {% set emoji = '' %}
+          {% elif a.startswith('chat.') %}
+            {% set icon = 'fa-message' %}
+            {% set icon_color = 'from-cyan-500 to-blue-500' %}
+            {% set action_label = 'Messages' %}
+            {% set emoji = '💬' %}
+          {% elif a.startswith('chore.') %}
+            {% set icon = 'fa-list-check' %}
+            {% set icon_color = 'from-emerald-500 to-teal-500' %}
+            {% set action_label = 'To-Do' %}
+            {% set emoji = '✅' %}
           {% else %}
             {% set icon = 'fa-bolt' %}
             {% set icon_color = 'from-gray-500 to-slate-500' %}
@@ -267,6 +277,8 @@ document.addEventListener('DOMContentLoaded', ()=>{
     if (a.startsWith('money.expense')) return { icon: 'fa-arrow-down', iconColor: 'from-red-500 to-rose-500', actionLabel: 'Expense', emoji: '🧾' };
     if (a.startsWith('money.bill')) return { icon: 'fa-receipt', iconColor: 'from-amber-500 to-orange-500', actionLabel: 'Bills', emoji: '🏠' };
     if (a.startsWith('meal.plan.')) return { icon: 'fa-utensils', iconColor: 'from-orange-500 to-amber-500', actionLabel: 'Meal Plan', emoji: '<i class="fa-solid fa-utensils text-[11px] text-orange-500" aria-hidden="true"></i>' };
+    if (a.startsWith('chat.')) return { icon: 'fa-message', iconColor: 'from-cyan-500 to-blue-500', actionLabel: 'Messages', emoji: '💬' };
+    if (a.startsWith('chore.')) return { icon: 'fa-list-check', iconColor: 'from-emerald-500 to-teal-500', actionLabel: 'To-Do', emoji: '✅' };
     if (a.startsWith('timeline.manual')) return { icon: 'fa-pen', iconColor: 'from-violet-500 to-fuchsia-500', actionLabel: 'Post', emoji: '📝' };
     return { icon: 'fa-bolt', iconColor: 'from-gray-500 to-slate-500', actionLabel: 'Activity', emoji: '📣' };
   }

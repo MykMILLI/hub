@@ -1,152 +1,322 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="mx-auto">
-  <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
-    <h2 class="text-3xl font-bold">Family Album Slideshow</h2>
-    <a href="/photos" class="btn btn-secondary"><i class="fa-solid fa-arrow-left"></i> Back to Photos</a>
-  </div>
-
-  <div class="card p-4 mb-4">
-    <div class="flex flex-wrap gap-2 items-center">
-      <button id="playPauseBtn" class="btn btn-primary"><i class="fa-solid fa-pause"></i> Pause</button>
-      <button id="prevBtn" class="btn btn-secondary"><i class="fa-solid fa-backward"></i> Prev</button>
-      <button id="nextBtn" class="btn btn-secondary"><i class="fa-solid fa-forward"></i> Next</button>
-      <label class="text-sm ml-2">Speed</label>
-      <select id="speedSelect" class="p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
-        <option value="2000">2s</option>
-        <option value="3500" selected>3.5s</option>
-        <option value="5000">5s</option>
-        <option value="8000">8s</option>
-      </select>
-      <label class="inline-flex items-center gap-2 text-sm ml-2">
-        <input id="shuffleToggle" type="checkbox"> Shuffle
-      </label>
-      <span id="statusText" class="text-sm text-gray-500 ml-auto">Loading...</span>
+  <div id="slideshowShell" class="relative min-h-[calc(100vh-7rem)] rounded-2xl overflow-hidden border border-gray-200/70 dark:border-gray-700 bg-black">
+    <div id="slideshowEmpty" class="absolute inset-0 z-10 flex items-center justify-center p-6 text-center">
+      <div class="max-w-lg rounded-2xl border border-white/20 bg-black/50 backdrop-blur px-6 py-5">
+        <h2 id="slideshowEmptyTitle" class="text-xl font-bold text-white">Select an album to start</h2>
+        <p id="slideshowEmptyBody" class="mt-2 text-sm text-gray-200">Interactive slideshow requires a specific album. Library mode is disabled here.</p>
+      </div>
     </div>
-  </div>
 
-  <div class="card p-2 md:p-4">
-    <div class="relative w-full h-[70vh] bg-black rounded-xl overflow-hidden flex items-center justify-center">
-      <img id="slideImage" class="max-w-full max-h-full object-contain hidden" alt="Slideshow image">
-      <video id="slideVideo" class="max-w-full max-h-full object-contain hidden" controls></video>
-      <div id="emptyState" class="text-gray-300 text-center p-6">No family-shared photos/videos found.</div>
+    <div class="absolute inset-0 flex items-center justify-center">
+      <img id="slideImage" class="hidden w-full h-full object-contain" alt="Slideshow image">
+      <video id="slideVideo" class="hidden w-full h-full object-contain bg-black" playsinline muted></video>
+    </div>
+
+    <div class="slideshow-controls absolute top-0 left-0 right-0 z-20 bg-gradient-to-b from-black/80 to-transparent p-4 transition-opacity duration-300">
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="text-sm font-semibold text-white">Interactive Slideshow</span>
+        <select id="albumSelect" class="p-2 rounded-lg border border-white/30 bg-black/60 text-white text-sm">
+          <option value="">Choose Album</option>
+        </select>
+        <button id="playPauseBtn" class="btn btn-primary text-xs" type="button"><i class="fa-solid fa-pause"></i> Pause</button>
+        <button id="prevBtn" class="btn btn-secondary text-xs" type="button"><i class="fa-solid fa-backward"></i></button>
+        <button id="nextBtn" class="btn btn-secondary text-xs" type="button"><i class="fa-solid fa-forward"></i></button>
+        <label class="text-xs text-white/90">Speed</label>
+        <select id="speedSelect" class="p-2 rounded-lg border border-white/30 bg-black/60 text-white text-xs">
+          <option value="2500">2.5s</option>
+          <option value="4000" selected>4s</option>
+          <option value="6000">6s</option>
+          <option value="9000">9s</option>
+        </select>
+        <button id="muteToggleBtn" class="btn btn-secondary text-xs" type="button"><i class="fa-solid fa-volume-xmark"></i> Muted</button>
+        <button id="fullscreenBtn" class="btn btn-secondary text-xs" type="button"><i class="fa-solid fa-expand"></i> Full Screen</button>
+        <a id="albumOpenLink" href="/upload#family-photos" class="btn btn-secondary text-xs">Open in Photos</a>
+      </div>
+    </div>
+
+    <div class="slideshow-controls absolute bottom-0 left-0 right-0 z-20 bg-gradient-to-t from-black/90 to-transparent p-4 transition-opacity duration-300">
+      <div class="flex items-center justify-between gap-3 text-white text-xs">
+        <div id="slideMeta" class="truncate">No album selected.</div>
+        <div id="slideCounter" class="shrink-0">0 / 0</div>
+      </div>
     </div>
   </div>
 </div>
 
 <script>
 (() => {
-  const currentMember = localStorage.getItem('username') || '{{ current_member_name }}';
-  const imgEl = document.getElementById('slideImage');
-  const vidEl = document.getElementById('slideVideo');
-  const emptyEl = document.getElementById('emptyState');
-  const statusText = document.getElementById('statusText');
+  const currentMember = (localStorage.getItem('username') || '{{ current_member_name }}').trim();
+  const albums = {{ (albums or [])|tojson|safe }};
+  const initialAlbumId = {{ selected_album_id if selected_album_id else 'null' }};
+
+  const shell = document.getElementById('slideshowShell');
+  const emptyWrap = document.getElementById('slideshowEmpty');
+  const emptyTitle = document.getElementById('slideshowEmptyTitle');
+  const emptyBody = document.getElementById('slideshowEmptyBody');
+  const slideImage = document.getElementById('slideImage');
+  const slideVideo = document.getElementById('slideVideo');
+  const slideMeta = document.getElementById('slideMeta');
+  const slideCounter = document.getElementById('slideCounter');
+  const albumSelect = document.getElementById('albumSelect');
+  const albumOpenLink = document.getElementById('albumOpenLink');
   const playPauseBtn = document.getElementById('playPauseBtn');
   const prevBtn = document.getElementById('prevBtn');
   const nextBtn = document.getElementById('nextBtn');
   const speedSelect = document.getElementById('speedSelect');
-  const shuffleToggle = document.getElementById('shuffleToggle');
+  const muteToggleBtn = document.getElementById('muteToggleBtn');
+  const fullscreenBtn = document.getElementById('fullscreenBtn');
 
   let items = [];
   let index = 0;
-  let timer = null;
   let playing = true;
-  let wakeLock = null;
+  let timer = null;
+  let selectedAlbumId = null;
+  let videosMuted = true;
+  let controlsHideTimer = null;
+  let controlsVisible = true;
 
-  async function requestWakeLock(){
-    try {
-      if ('wakeLock' in navigator) {
-        wakeLock = await navigator.wakeLock.request('screen');
-      }
-    } catch (_) {}
+  function esc(value) {
+    return String(value || '').replace(/[&<>\"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
   }
 
-  function hideAll(){
-    imgEl.classList.add('hidden');
-    vidEl.classList.add('hidden');
-  }
-
-  function currentItem(){
+  function currentItem() {
     if (!items.length) return null;
     return items[index % items.length];
   }
 
-  function render(){
-    const item = currentItem();
-    if (!item) {
-      hideAll();
-      emptyEl.classList.remove('hidden');
-      statusText.textContent = 'No items';
-      return;
-    }
-    emptyEl.classList.add('hidden');
-    statusText.textContent = `${index + 1} / ${items.length}`;
+  function setEmptyState(show, title, body) {
+    emptyWrap.classList.toggle('hidden', !show);
+    if (title) emptyTitle.textContent = title;
+    if (body) emptyBody.textContent = body;
+  }
 
-    if (item.is_video) {
-      hideAll();
-      vidEl.classList.remove('hidden');
-      vidEl.src = item.preview_url;
-      vidEl.play().catch(() => {});
-    } else {
-      hideAll();
-      imgEl.classList.remove('hidden');
-      imgEl.src = item.preview_url;
-      vidEl.pause();
-      vidEl.removeAttribute('src');
+  function clearTimer() {
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
     }
   }
 
-  function next(){
-    if (!items.length) return;
-    if (shuffleToggle.checked) {
-      index = Math.floor(Math.random() * items.length);
-    } else {
-      index = (index + 1) % items.length;
+  function setControlsVisible(show) {
+    controlsVisible = !!show;
+    shell.querySelectorAll('.slideshow-controls').forEach((el) => {
+      el.classList.toggle('opacity-0', !controlsVisible);
+      el.classList.toggle('pointer-events-none', !controlsVisible);
+      el.classList.toggle('opacity-100', controlsVisible);
+    });
+  }
+
+  function clearControlsHideTimer() {
+    if (controlsHideTimer) {
+      clearTimeout(controlsHideTimer);
+      controlsHideTimer = null;
     }
+  }
+
+  function scheduleControlsAutoHide() {
+    clearControlsHideTimer();
+    controlsHideTimer = setTimeout(() => {
+      setControlsVisible(false);
+    }, 10000);
+  }
+
+  function revealControlsAndDelayHide() {
+    setControlsVisible(true);
+    scheduleControlsAutoHide();
+  }
+
+  function scheduleAdvanceForImage() {
+    clearTimer();
+    if (!playing) return;
+    timer = setTimeout(() => {
+      goNext();
+    }, Number(speedSelect.value || 4000));
+  }
+
+  function hideMedia() {
+    slideImage.classList.add('hidden');
+    slideVideo.classList.add('hidden');
+  }
+
+  function render() {
+    const item = currentItem();
+    if (!item) {
+      hideMedia();
+      setEmptyState(true, 'No media in this album yet', 'Upload photos or videos into this album and start playback.');
+      slideMeta.textContent = 'No media found.';
+      slideCounter.textContent = '0 / 0';
+      return;
+    }
+
+    setEmptyState(false);
+    slideMeta.textContent = item.original_filename || item.filename || 'Slide';
+    slideCounter.textContent = `${index + 1} / ${items.length}`;
+
+    if (item.is_video) {
+      slideImage.classList.add('hidden');
+      slideVideo.classList.remove('hidden');
+      slideVideo.muted = videosMuted;
+      slideVideo.src = item.stream_url || item.preview_url;
+      slideVideo.currentTime = 0;
+      slideVideo.play().catch(() => {});
+      clearTimer();
+    } else {
+      slideVideo.pause();
+      slideVideo.removeAttribute('src');
+      slideVideo.load();
+      slideVideo.classList.add('hidden');
+      slideImage.classList.remove('hidden');
+      slideImage.src = item.preview_url;
+      scheduleAdvanceForImage();
+    }
+  }
+
+  function setPlayState(nextPlaying) {
+    playing = !!nextPlaying;
+    playPauseBtn.innerHTML = playing
+      ? '<i class="fa-solid fa-pause"></i> Pause'
+      : '<i class="fa-solid fa-play"></i> Play';
+
+    if (!playing) {
+      clearTimer();
+      slideVideo.pause();
+      return;
+    }
+
+    const item = currentItem();
+    if (!item) return;
+    if (item.is_video) {
+      slideVideo.play().catch(() => {});
+      return;
+    }
+    scheduleAdvanceForImage();
+  }
+
+  function goNext() {
+    if (!items.length) return;
+    index = (index + 1) % items.length;
     render();
   }
 
-  function prev(){
+  function goPrev() {
     if (!items.length) return;
     index = (index - 1 + items.length) % items.length;
     render();
   }
 
-  function restartTimer(){
-    if (timer) clearInterval(timer);
-    if (!playing) return;
-    timer = setInterval(next, Number(speedSelect.value || 3500));
-  }
-
-  playPauseBtn.addEventListener('click', () => {
-    playing = !playing;
-    playPauseBtn.innerHTML = playing
-      ? '<i class="fa-solid fa-pause"></i> Pause'
-      : '<i class="fa-solid fa-play"></i> Play';
-    restartTimer();
-  });
-  prevBtn.addEventListener('click', () => { prev(); restartTimer(); });
-  nextBtn.addEventListener('click', () => { next(); restartTimer(); });
-  speedSelect.addEventListener('change', restartTimer);
-
-  async function loadFamilyItems(){
-    const res = await fetch(`/api/photos/assets?member=${encodeURIComponent(currentMember)}&scope=family`);
-    const data = await res.json();
-    if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to load slideshow assets');
-    items = data.items || [];
+  async function loadAlbum(albumId) {
+    selectedAlbumId = Number(albumId || 0) || null;
+    items = [];
     index = 0;
-    render();
-    restartTimer();
+    clearTimer();
+
+    if (!selectedAlbumId) {
+      hideMedia();
+      setEmptyState(true, 'Select an album to start', 'Interactive slideshow requires a specific album. Library mode is disabled here.');
+      slideMeta.textContent = 'No album selected.';
+      slideCounter.textContent = '0 / 0';
+      albumOpenLink.href = '/upload#family-photos';
+      return;
+    }
+
+    albumOpenLink.href = `/upload?photo_album=${selectedAlbumId}&category=photos_videos&subview=albums#family-photos`;
+    setEmptyState(true, 'Loading album...', 'Fetching photos and videos...');
+
+    try {
+      const res = await fetch(`/api/photos/assets?member=${encodeURIComponent(currentMember)}&album_id=${selectedAlbumId}`);
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to load album media');
+      items = Array.isArray(data.items) ? data.items : [];
+      index = 0;
+      render();
+      if (playing && currentItem() && !currentItem().is_video) {
+        scheduleAdvanceForImage();
+      }
+    } catch (err) {
+      hideMedia();
+      setEmptyState(true, 'Unable to load album', err.message || 'Failed to load media');
+      slideMeta.textContent = 'Load error.';
+      slideCounter.textContent = '0 / 0';
+    }
   }
 
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && playing) restartTimer();
+  function renderAlbumOptions() {
+    const rows = ['<option value="">Choose Album</option>'].concat(
+      albums.map((a) => `<option value="${Number(a.id)}">${esc(a.name)} (${Number(a.asset_count || 0)})</option>`)
+    );
+    albumSelect.innerHTML = rows.join('');
+    if (initialAlbumId) albumSelect.value = String(initialAlbumId);
+  }
+
+  playPauseBtn.addEventListener('click', () => setPlayState(!playing));
+  prevBtn.addEventListener('click', () => { goPrev(); if (playing && !currentItem()?.is_video) scheduleAdvanceForImage(); });
+  nextBtn.addEventListener('click', () => { goNext(); if (playing && !currentItem()?.is_video) scheduleAdvanceForImage(); });
+
+  speedSelect.addEventListener('change', () => {
+    if (!playing) return;
+    if (!currentItem()?.is_video) scheduleAdvanceForImage();
   });
 
-  requestWakeLock();
-  loadFamilyItems().catch(err => {
-    statusText.textContent = err.message || 'Error';
+  muteToggleBtn.addEventListener('click', () => {
+    videosMuted = !videosMuted;
+    slideVideo.muted = videosMuted;
+    muteToggleBtn.innerHTML = videosMuted
+      ? '<i class="fa-solid fa-volume-xmark"></i> Muted'
+      : '<i class="fa-solid fa-volume-high"></i> Sound On';
   });
+
+  albumSelect.addEventListener('change', () => {
+    const albumId = Number(albumSelect.value || 0) || null;
+    const next = new URL(window.location.href);
+    if (albumId) next.searchParams.set('album_id', String(albumId));
+    else next.searchParams.delete('album_id');
+    window.history.replaceState({}, '', next.toString());
+    loadAlbum(albumId);
+  });
+
+  fullscreenBtn.addEventListener('click', async () => {
+    try {
+      if (!document.fullscreenElement) {
+        await shell.requestFullscreen();
+      } else {
+        await document.exitFullscreen();
+      }
+    } catch (_) {}
+  });
+
+  ['mousemove', 'mouseenter', 'touchstart'].forEach((eventName) => {
+    shell.addEventListener(eventName, revealControlsAndDelayHide, { passive: true });
+  });
+  shell.querySelectorAll('.slideshow-controls').forEach((el) => {
+    el.addEventListener('mouseenter', revealControlsAndDelayHide);
+    el.addEventListener('mousemove', revealControlsAndDelayHide);
+  });
+
+  slideVideo.addEventListener('ended', () => {
+    if (!playing) return;
+    goNext();
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowRight') {
+      goNext();
+      return;
+    }
+    if (event.key === 'ArrowLeft') {
+      goPrev();
+      return;
+    }
+    if (event.key === ' ') {
+      event.preventDefault();
+      setPlayState(!playing);
+    }
+  });
+
+  renderAlbumOptions();
+  loadAlbum(initialAlbumId || null);
+  revealControlsAndDelayHide();
 })();
 </script>
 {% endblock %}

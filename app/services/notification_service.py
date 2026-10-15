@@ -10,6 +10,10 @@ from ..models import AppNotification, FamilyMember, NotificationDeliveryLog, Smt
 from ..security import sanitize_text
 
 
+CHAT_NOTIFICATION_EVENTS = {'chat_message'}
+MEDIA_NOTIFICATION_EVENTS = {'shared_cloud_add'}
+
+
 def _cfg() -> dict:
     return current_app.config.get('HOMEHUB_CONFIG', {}) or {}
 
@@ -65,6 +69,52 @@ def resolve_member_email(member_name: str) -> str:
     mapping = _notifications_cfg().get('member_emails', {}) or {}
     email = sanitize_text(mapping.get(member, '') or '').strip()
     return email
+
+
+def _bool_or_default(value, default: bool = True) -> bool:
+    if value is None:
+        return bool(default)
+    return bool(value)
+
+
+def member_notification_preferences(member_name: str) -> dict[str, bool]:
+    member = sanitize_text(member_name or '').strip()
+    if not member:
+        return {
+            'notifications_enabled': True,
+            'chat_notifications_enabled': True,
+            'media_notifications_enabled': True,
+            'browser_notifications_enabled': True,
+        }
+
+    row = FamilyMember.query.filter_by(name=member).first()
+    if not row:
+        return {
+            'notifications_enabled': True,
+            'chat_notifications_enabled': True,
+            'media_notifications_enabled': True,
+            'browser_notifications_enabled': True,
+        }
+
+    return {
+        'notifications_enabled': _bool_or_default(getattr(row, 'notifications_enabled', None), True),
+        'chat_notifications_enabled': _bool_or_default(getattr(row, 'chat_notifications_enabled', None), True),
+        'media_notifications_enabled': _bool_or_default(getattr(row, 'media_notifications_enabled', None), True),
+        'browser_notifications_enabled': _bool_or_default(getattr(row, 'browser_notifications_enabled', None), True),
+    }
+
+
+def is_event_enabled_for_member(member_name: str, event_type: str) -> bool:
+    prefs = member_notification_preferences(member_name)
+    if not prefs.get('notifications_enabled', True):
+        return False
+
+    event_key = sanitize_text(event_type or '').strip().lower()
+    if event_key in CHAT_NOTIFICATION_EVENTS and not prefs.get('chat_notifications_enabled', True):
+        return False
+    if event_key in MEDIA_NOTIFICATION_EVENTS and not prefs.get('media_notifications_enabled', True):
+        return False
+    return True
 
 
 def _send_smtp_email(to_email: str, subject: str, body: str) -> bool:
@@ -149,6 +199,9 @@ def publish_notification(
     channels_json = json.dumps(sorted(set(normalized_channels)))
 
     for member in members:
+        if member and not is_event_enabled_for_member(member, event_type):
+            continue
+
         row = AppNotification(
             event_type=sanitize_text(event_type).strip() or 'general',
             title=sanitize_text(title).strip() or 'HomeHub Notification',

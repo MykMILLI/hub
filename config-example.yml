@@ -16,6 +16,16 @@ feature_toggles:
   url_shortener: true
   expense_tracker: true
   notifications: true
+  shared_calendar: true
+  daily_agenda: true
+  meal_planner: true
+  home_assistant: true
+
+home_assistant:
+  enabled: true
+  url: "https://home.millitop.net"
+  # Optional SSO/trusted-login URL. If set, HomeHub uses this first for iframe launch.
+  auto_login_url: ""
 
 family_members:
   - Mom
@@ -81,6 +91,28 @@ notifications:
     shared_cloud_add: true
     calendar_new_event: true
 
+supabase:
+  # Keep false until URL + anon key are provided.
+  enabled: false
+  # Enable Supabase email/password auth flow for web + mobile clients.
+  auth_enabled: true
+  # Use project root URL only, e.g. https://xyzcompany.supabase.co
+  # Do not include /auth/v1 or /rest/v1 in this field.
+  # You may provide multiple URLs (LAN + public) separated by commas.
+  # Example: "http://192.168.1.161:8100,https://base.millitop.net"
+  url: ""
+  # Safe for client-side use (Flutter/web auth/chat in later phases).
+  anon_key: ""
+  # Server-only key (never expose in frontend).
+  service_role_key: ""
+  # Schema reserved for future direct PostgREST calls.
+  schema: "public"
+  # Use Supabase PostgREST as the persistent chat message store.
+  chat_enabled: true
+  # Table should exist in Supabase with columns:
+  # id, sender, recipient, message, attachment_filename, attachment_mime, is_read, created_at
+  chat_table: "homehub_chat_messages"
+
 #Optional
 theme:
   primary_color: "#1d4ed8"
@@ -108,5 +140,9 @@ menu_visibility:
   pdf_compressor: true
   qr_generator: true
   expense_tracker: true
+  shared_calendar: true
+  daily_agenda: true
+  meal_planner: true
   notifications: true
+  home_assistant: true
   settings: true

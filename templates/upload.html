@@ -4,7 +4,7 @@
     <h2 class="text-3xl font-bold mb-6">Shared Cloud</h2>
     
     <!-- Upload Section -->
-    <form method="POST" enctype="multipart/form-data" class="mb-8 card p-6">
+    <form id="sharedCloudUploadCard" method="POST" enctype="multipart/form-data" class="mb-8 card p-6">
         <label class="block text-sm font-semibold text-m3-on-surface-variant mb-3">Upload Files</label>
         <div class="flex gap-3 items-end">
             <div class="flex-1">
@@ -12,7 +12,7 @@
             </div>
             <input type="hidden" name="creator" id="creator">
             <button type="submit" class="btn btn-primary">
-                <i class="fa-solid fa-cloud-arrow-up"></i> Upload
+                <i class="fa-solid fa-cloud-arrow-up"></i> Upload to Shared Cloud
             </button>
         </div>
     </form>
@@ -22,9 +22,12 @@
         <button class="category-tab glass-sm px-4 py-2 rounded-full font-semibold transition-m3 cursor-pointer" data-category="all">
             <i class="fa-solid fa-list"></i> All Files
         </button>
+        {# Disabled per request: Photos & Videos in Shared Cloud #}
+        {#
         <button class="category-tab glass-sm px-4 py-2 rounded-full font-semibold transition-m3 cursor-pointer" data-category="photos_videos">
             <i class="fa-solid fa-image"></i> Photos & Videos
         </button>
+        #}
         <button class="category-tab glass-sm px-4 py-2 rounded-full font-semibold transition-m3 cursor-pointer" data-category="documents">
             <i class="fa-solid fa-file-pdf"></i> Documents
         </button>
@@ -96,6 +99,7 @@
         <!-- All Other Files List View -->
         <div id="otherFilesList">
             {% for file in files %}
+            {% if file.category != 'photos_videos' %}
             <div class="file-item card p-4 mb-3 flex justify-between items-center transition-m3" data-category="{{ file.category }}">
                 <div class="flex-1">
                     <a href="/uploads/{{ file.filename }}" class="font-semibold text-m3-primary hover:underline">{{ file.filename }}</a>
@@ -121,6 +125,7 @@
                     </form>
                 </div>
             </div>
+            {% endif %}
             {% endfor %}
         </div>
 
@@ -187,34 +192,129 @@
     </div>
 </div>
 
-<section id="family-photos" class="mt-10 card p-6 space-y-5">
-    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+<section id="family-photos" class="mt-10 card p-6 space-y-5 hidden">
+    <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
         <div>
             <h3 class="text-2xl font-bold">Photos & Videos</h3>
-            <p class="text-sm text-m3-on-surface-variant">Shared Cloud now includes albums, photo/video uploads, and watched-folder sync opt-in.</p>
+            <p class="text-sm text-m3-on-surface-variant">Cleaner flow: action buttons open modals for uploads, albums, and watched-folder setup.</p>
         </div>
-        <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2">
+            <button id="cloudOpenUploadModalBtn" class="btn btn-primary" type="button"><i class="fa-solid fa-cloud-arrow-up"></i> Upload Photos/Videos</button>
+            <button id="cloudOpenAlbumModalBtn" class="btn btn-secondary" type="button"><i class="fa-solid fa-folder-plus"></i> Create Album</button>
             <button id="cloudPhotosRefreshBtn" class="btn btn-secondary" type="button"><i class="fa-solid fa-rotate"></i> Refresh</button>
         </div>
     </div>
 
-    <div class="grid lg:grid-cols-2 gap-4">
-        <form id="cloudAlbumCreateForm" class="card p-4 space-y-3">
-            <h4 class="font-semibold">Create Album</h4>
-            <input id="cloudAlbumName" class="w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600" placeholder="Album name" required>
-            <div class="grid grid-cols-2 gap-2">
-                <select id="cloudAlbumVisibility" class="p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
-                    <option value="private">Private</option>
-                    <option value="family">Family</option>
+    <div class="flex flex-wrap gap-2">
+        <button id="cloudSubNavLibrary" class="btn btn-primary" type="button"><i class="fa-solid fa-photo-film"></i> Library</button>
+        <button id="cloudSubNavAlbums" class="btn btn-secondary" type="button"><i class="fa-solid fa-folder-tree"></i> Albums</button>
+        <button id="cloudSubNavWatched" class="btn btn-secondary" type="button"><i class="fa-solid fa-folder-open"></i> Watched Folders</button>
+    </div>
+
+    <div id="cloudSubPanelLibrary" class="space-y-3">
+        <div class="card p-4 space-y-3">
+            <div class="flex items-center justify-between gap-3">
+                <h4 class="font-semibold">Recent Photos/Videos</h4>
+                <div class="flex items-center gap-2">
+                    <button id="cloudOpenUploadModalBtnSecondary" class="btn btn-secondary" type="button"><i class="fa-solid fa-plus"></i> Add More</button>
+                    <button id="cloudPhotoSelectAllBtn" class="btn btn-secondary" type="button"><i class="fa-solid fa-check-double"></i> Select All</button>
+                    <button id="cloudPhotoBulkDownloadBtn" class="btn btn-primary" type="button"><i class="fa-solid fa-file-zipper"></i> Download Selected</button>
+                    <button id="cloudPhotoAlbumDownloadBtn" class="btn btn-secondary" type="button"><i class="fa-solid fa-folder-arrow-down"></i> Download Album</button>
+                </div>
+            </div>
+            <div class="flex flex-wrap items-end gap-2">
+                <label class="text-xs text-m3-on-surface-variant" for="cloudPhotoSortDir">Sort</label>
+                <select id="cloudPhotoSortDir" class="glass-sm rounded-lg px-2 py-1 text-sm">
+                    <option value="desc">Newest first</option>
+                    <option value="asc">Oldest first</option>
                 </select>
-                <button class="btn btn-primary" type="submit"><i class="fa-solid fa-folder-plus"></i> Create</button>
+                <label class="text-xs text-m3-on-surface-variant" for="cloudPhotoStartDate">From</label>
+                <input id="cloudPhotoStartDate" type="date" class="glass-sm rounded-lg px-2 py-1 text-sm">
+                <label class="text-xs text-m3-on-surface-variant" for="cloudPhotoEndDate">To</label>
+                <input id="cloudPhotoEndDate" type="date" class="glass-sm rounded-lg px-2 py-1 text-sm">
+                <button id="cloudPhotoDateApplyBtn" class="btn btn-secondary" type="button">Apply</button>
+                <button id="cloudPhotoDateClearBtn" class="btn btn-secondary" type="button">Clear</button>
+            </div>
+            <div id="cloudPhotoSelectionSummary" class="text-xs text-m3-on-surface-variant">0 selected.</div>
+            <div id="cloudPhotoGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3"></div>
+        </div>
+    </div>
+
+    <div id="cloudSubPanelAlbums" class="space-y-3 hidden">
+        <div class="card p-4 space-y-3">
+            <div class="flex items-center justify-between gap-3">
+                <h4 class="font-semibold">Albums</h4>
+                <button id="cloudOpenAlbumModalBtnSecondary" class="btn btn-secondary" type="button"><i class="fa-solid fa-folder-plus"></i> New Album</button>
+            </div>
+            <div id="cloudAlbumList" class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3"></div>
+        </div>
+
+        <div id="cloudAlbumFocusCard" class="card p-4 space-y-3 hidden">
+            <div class="flex items-center justify-between gap-3">
+                <h4 id="cloudAlbumFocusTitle" class="font-semibold">Album</h4>
+                <div class="flex items-center gap-2">
+                    <button id="cloudAlbumFocusSlideshowBtn" class="btn btn-secondary text-xs" type="button"><i class="fa-solid fa-play"></i> Start Slideshow</button>
+                    <div id="cloudAlbumFocusMeta" class="text-xs text-m3-on-surface-variant"></div>
+                </div>
+            </div>
+            <div id="cloudAlbumFocusGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3"></div>
+        </div>
+    </div>
+
+    <div id="cloudSubPanelWatched" class="space-y-3 hidden">
+        <div class="card p-4 space-y-3">
+            <div class="flex items-center justify-between gap-3">
+                <h4 class="font-semibold">Sync Sources</h4>
+                <button id="cloudOpenWatchModalBtn" class="btn btn-secondary" type="button"><i class="fa-solid fa-folder-plus"></i> Add Source</button>
+            </div>
+            <div class="space-y-2">
+                <div class="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                    <div id="cloudWatchProgressBar" class="h-full bg-m3-primary transition-all duration-300" style="width: 0%;"></div>
+                </div>
+                <p id="cloudWatchProgressText" class="text-sm text-m3-on-surface-variant">No active sync jobs.</p>
+                <p id="cloudWatchProgressStats" class="text-xs text-m3-on-surface-variant">Register a source and run a scan.</p>
+            </div>
+            <div id="cloudWatchList" class="space-y-2"></div>
+            <div id="cloudSyncJobCard" class="text-xs text-m3-on-surface-variant"></div>
+            <div id="cloudSyncFailedList" class="space-y-2"></div>
+        </div>
+
+        <div class="card p-4 space-y-2">
+            <h4 class="font-semibold">Sync Notifications</h4>
+            <div id="cloudWatchNoticeList" class="text-sm text-m3-on-surface-variant">No notifications yet.</div>
+        </div>
+    </div>
+</section>
+
+<div id="cloudAlbumModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/60 p-4 md:p-8 backdrop-blur-sm">
+    <div class="card w-full max-w-xl p-5 md:p-6 max-h-[calc(100vh-2rem)] overflow-y-auto">
+        <div class="flex items-center justify-between mb-4">
+            <h4 class="text-xl font-bold">Create Album</h4>
+            <button id="cloudAlbumModalClose" class="btn btn-secondary" type="button">Close</button>
+        </div>
+        <form id="cloudAlbumCreateForm" class="space-y-3">
+            <input id="cloudAlbumName" class="w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600" placeholder="Album name" required>
+            <select id="cloudAlbumVisibility" class="w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
+                <option value="private">Private</option>
+                <option value="family">Family</option>
+            </select>
+            <div class="flex justify-end gap-2">
+                <button id="cloudAlbumModalCancel" class="btn btn-secondary" type="button">Cancel</button>
+                <button class="btn btn-primary" type="submit"><i class="fa-solid fa-folder-plus"></i> Create Album</button>
             </div>
         </form>
+    </div>
+</div>
 
-        <form id="cloudPhotoUploadForm" class="card p-4 space-y-3" enctype="multipart/form-data">
-            <h4 class="font-semibold">Upload Photos/Videos</h4>
+<div id="cloudUploadModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/60 p-4 md:p-8 backdrop-blur-sm">
+    <div class="card w-full max-w-2xl p-5 md:p-6 max-h-[calc(100vh-2rem)] overflow-y-auto">
+        <div class="flex items-center justify-between mb-4">
+            <h4 class="text-xl font-bold">Upload Photos/Videos</h4>
+            <button id="cloudUploadModalClose" class="btn btn-secondary" type="button">Close</button>
+        </div>
+        <form id="cloudPhotoUploadForm" class="space-y-3" enctype="multipart/form-data">
             <input id="cloudPhotoFiles" type="file" multiple accept="image/*,video/*" class="w-full" required>
-            <div class="grid grid-cols-3 gap-2">
+            <div class="grid md:grid-cols-2 gap-2">
                 <select id="cloudPhotoVisibility" class="p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
                     <option value="private">Private</option>
                     <option value="family">Family</option>
@@ -222,49 +322,47 @@
                 <select id="cloudPhotoAlbum" class="p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
                     <option value="">No album</option>
                 </select>
+            </div>
+            <div class="flex justify-end gap-2">
+                <button id="cloudUploadModalCancel" class="btn btn-secondary" type="button">Cancel</button>
                 <button class="btn btn-primary" type="submit"><i class="fa-solid fa-cloud-arrow-up"></i> Upload</button>
             </div>
         </form>
     </div>
+</div>
 
-    <div class="card p-4 space-y-3">
-        <div class="flex items-center justify-between gap-2">
-            <h4 class="font-semibold">Watched Folders</h4>
-            <span class="text-xs text-m3-on-surface-variant">Select a folder from this device, then choose sync scope and album.</span>
+<div id="cloudWatchModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/60 p-4 md:p-8 backdrop-blur-sm">
+    <div class="card w-full max-w-3xl p-5 md:p-6 max-h-[calc(100vh-2rem)] overflow-y-auto">
+        <div class="flex items-center justify-between mb-4">
+            <h4 class="text-xl font-bold">Add Sync Source</h4>
+            <button id="cloudWatchModalClose" class="btn btn-secondary" type="button">Close</button>
         </div>
-        <form id="cloudWatchFolderForm" class="grid md:grid-cols-4 gap-2 items-end">
-            <div class="md:col-span-2 space-y-2">
+        <form id="cloudWatchFolderForm" class="space-y-3">
+            <div class="space-y-2">
+                <label class="text-sm font-semibold text-m3-on-surface-variant">Browser Import Source</label>
                 <div class="flex gap-2">
                     <input id="cloudWatchFolderUri" class="flex-1 p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600" placeholder="Choose a folder" readonly required>
-                    <button id="cloudWatchBrowseBtn" class="btn btn-secondary" type="button"><i class="fa-solid fa-folder-open"></i> Browse</button>
+                    <button id="cloudWatchBrowseBtn" class="btn btn-secondary" type="button"><i class="fa-solid fa-folder-open"></i> Select Files</button>
                 </div>
                 <input id="cloudWatchFolderPicker" type="file" webkitdirectory directory multiple class="hidden" aria-hidden="true">
-                <div id="cloudWatchBrowseMeta" class="text-xs text-m3-on-surface-variant">No folder selected.</div>
+                <div id="cloudWatchBrowseMeta" class="text-xs text-m3-on-surface-variant">No files selected.</div>
             </div>
-            <select id="cloudWatchScope" class="p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
-                <option value="private">Private</option>
-                <option value="family">Family</option>
-            </select>
-            <div class="flex gap-2">
-                <select id="cloudWatchAlbum" class="flex-1 p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
+            <div class="grid md:grid-cols-2 gap-2">
+                <select id="cloudWatchScope" class="p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
+                    <option value="private">Private</option>
+                    <option value="family">Family</option>
+                </select>
+                <select id="cloudWatchAlbum" class="p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
                     <option value="">No album</option>
                 </select>
-                <button class="btn btn-secondary" type="submit"><i class="fa-solid fa-folder-plus"></i> Add</button>
+            </div>
+            <div class="flex justify-end gap-2">
+                <button id="cloudWatchModalCancel" class="btn btn-secondary" type="button">Cancel</button>
+                <button class="btn btn-primary" type="submit"><i class="fa-solid fa-folder-plus"></i> Register Source</button>
             </div>
         </form>
-        <div id="cloudWatchList" class="space-y-2"></div>
     </div>
-
-    <div class="card p-4 space-y-3">
-        <h4 class="font-semibold">Albums</h4>
-        <div id="cloudAlbumList" class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3"></div>
-    </div>
-
-    <div class="card p-4 space-y-3">
-        <h4 class="font-semibold">Recent Photos/Videos</h4>
-        <div id="cloudPhotoGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3"></div>
-    </div>
-</section>
+</div>
 
 <script>
 document.getElementById('creator').value = localStorage.getItem('username');
@@ -277,10 +375,15 @@ const fileItems = document.querySelectorAll('.file-item');
 const photosVideosGrid = document.getElementById('photosVideosGrid');
 const otherFilesList = document.getElementById('otherFilesList');
 const photosHubSection = document.getElementById('family-photos');
+const sharedCloudUploadCard = document.getElementById('sharedCloudUploadCard');
+const sharedCloudPhotosEnabled = false;
 
 function filterFiles(category) {
+    if (!sharedCloudPhotosEnabled && category === 'photos_videos') {
+        category = 'all';
+    }
     currentCategory = category;
-    const inPhotosMode = category === 'photos_videos';
+    const inPhotosMode = sharedCloudPhotosEnabled && category === 'photos_videos';
 
     if (inPhotosMode) {
         photosVideosGrid.style.display = 'block';
@@ -294,7 +397,15 @@ function filterFiles(category) {
         photosHubSection.style.display = inPhotosMode ? '' : 'none';
     }
 
+    if (sharedCloudUploadCard) {
+        sharedCloudUploadCard.style.display = inPhotosMode ? 'none' : '';
+    }
+
     fileItems.forEach(item => {
+        if (!sharedCloudPhotosEnabled && item.dataset.category === 'photos_videos') {
+            item.style.display = 'none';
+            return;
+        }
         if (category === 'all' || item.dataset.category === category) {
             item.style.display = '';
         } else {
@@ -321,8 +432,16 @@ categoryTabs.forEach(tab => {
     tab.addEventListener('click', () => filterFiles(tab.dataset.category));
 });
 
-// Initialize first tab as active
-filterFiles('all');
+// Respect URL state so album-open lands in Photos & Videos view.
+const pageUrlParams = new URLSearchParams(window.location.search);
+const requestedCategory = (pageUrlParams.get('category') || '').trim();
+const validCategories = sharedCloudPhotosEnabled
+    ? new Set(['all', 'photos_videos', 'documents', 'audio', 'archives', 'other'])
+    : new Set(['all', 'documents', 'audio', 'archives', 'other']);
+const initialCategory = validCategories.has(requestedCategory)
+    ? requestedCategory
+    : (sharedCloudPhotosEnabled && pageUrlParams.get('photo_album') ? 'photos_videos' : 'all');
+filterFiles(initialCategory);
 
 // Hide delete for non-owners
 (function(){
@@ -403,7 +522,9 @@ function initializeGallery() {
     document.querySelectorAll('.media-thumbnail').forEach(thumb => {
         mediaGallery.push({
             filename: thumb.dataset.filename,
-            isVideo: thumb.dataset.isVideo === 'true'
+            isVideo: thumb.dataset.isVideo === 'true',
+            title: thumb.dataset.filename,
+            url: `/uploads/${thumb.dataset.filename}`,
         });
     });
 }
@@ -417,6 +538,18 @@ function openMediaPreview(filename, isVideo) {
     currentMediaIndex = mediaGallery.findIndex(m => m.filename === filename);
     if (currentMediaIndex === -1) currentMediaIndex = 0;
     
+    displayMedia();
+    document.getElementById('lightboxSubtitle').textContent = '';
+    document.getElementById('mediaLightbox').classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+}
+
+function openMediaPreviewFromList(items, startIndex) {
+    mediaGallery = Array.isArray(items) ? items : [];
+    if (!mediaGallery.length) return;
+    currentMediaIndex = Number(startIndex) || 0;
+    if (currentMediaIndex < 0) currentMediaIndex = 0;
+    if (currentMediaIndex >= mediaGallery.length) currentMediaIndex = mediaGallery.length - 1;
     displayMedia();
     document.getElementById('mediaLightbox').classList.remove('hidden');
     document.body.style.overflow = 'hidden';
@@ -440,15 +573,18 @@ function displayMedia() {
     video.style.display = 'none';
     
     // Update title and counter
-    document.getElementById('lightboxTitle').textContent = media.filename;
+    document.getElementById('lightboxTitle').textContent = media.title || media.filename || 'Media';
     document.getElementById('lightboxCounter').textContent = `${currentMediaIndex + 1} / ${mediaGallery.length}`;
+    document.getElementById('lightboxSubtitle').textContent = media.subtitle || '';
+    const sourceUrl = media.url || `/uploads/${media.filename}`;
     
     if (media.isVideo) {
-        videoSource.src = `/uploads/${media.filename}`;
+        videoSource.src = sourceUrl;
+        video.muted = true;
         video.load();
         video.style.display = 'block';
     } else {
-        image.src = `/uploads/${media.filename}`;
+        image.src = sourceUrl;
         image.style.display = 'block';
     }
 }
@@ -485,7 +621,25 @@ document.getElementById('mediaLightbox').addEventListener('click', (e) => {
 
 <script>
 (() => {
+    const sharedCloudPhotosEnabled = false;
+    if (!sharedCloudPhotosEnabled) {
+        const photosHubSection = document.getElementById('family-photos');
+        if (photosHubSection) {
+            photosHubSection.style.display = 'none';
+        }
+        return;
+    }
+
     const currentMember = localStorage.getItem('username') || '{{ current_member_name }}';
+    function getOrCreateSyncInstanceId() {
+        const key = `homehub_sync_instance_id_${currentMember || 'anonymous'}`;
+        const existing = (localStorage.getItem(key) || '').trim();
+        if (existing) return existing;
+        const created = `web_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+        localStorage.setItem(key, created);
+        return created;
+    }
+    const syncInstanceId = getOrCreateSyncInstanceId();
     const urlParams = new URLSearchParams(window.location.search);
     const requestedAlbumRaw = Number(urlParams.get('photo_album') || 0);
     const requestedAlbumId = Number.isFinite(requestedAlbumRaw) && requestedAlbumRaw > 0 ? requestedAlbumRaw : null;
@@ -502,6 +656,8 @@ document.getElementById('mediaLightbox').addEventListener('click', (e) => {
     const watchProgressText = document.getElementById('cloudWatchProgressText');
     const watchProgressStats = document.getElementById('cloudWatchProgressStats');
     const watchNoticeList = document.getElementById('cloudWatchNoticeList');
+    const syncJobCard = document.getElementById('cloudSyncJobCard');
+    const syncFailedList = document.getElementById('cloudSyncFailedList');
 
     const subButtons = {
         library: document.getElementById('cloudSubNavLibrary'),
@@ -516,14 +672,17 @@ document.getElementById('mediaLightbox').addEventListener('click', (e) => {
 
     const albumModal = document.getElementById('cloudAlbumModal');
     const uploadModal = document.getElementById('cloudUploadModal');
-    const syncSuccessModal = document.getElementById('cloudSyncSuccessModal');
-    const syncSuccessText = document.getElementById('cloudSyncSuccessText');
+    const watchModal = document.getElementById('cloudWatchModal');
 
     const openAlbumButtons = [
         document.getElementById('cloudOpenAlbumModalBtn'),
         document.getElementById('cloudOpenAlbumModalBtnSecondary'),
     ].filter(Boolean);
-    const openUploadButtons = [document.getElementById('cloudOpenUploadModalBtn')].filter(Boolean);
+    const openUploadButtons = [
+        document.getElementById('cloudOpenUploadModalBtn'),
+        document.getElementById('cloudOpenUploadModalBtnSecondary'),
+    ].filter(Boolean);
+    const openWatchButtons = [document.getElementById('cloudOpenWatchModalBtn')].filter(Boolean);
     const closeAlbumButtons = [
         document.getElementById('cloudAlbumModalClose'),
         document.getElementById('cloudAlbumModalCancel'),
@@ -532,19 +691,49 @@ document.getElementById('mediaLightbox').addEventListener('click', (e) => {
         document.getElementById('cloudUploadModalClose'),
         document.getElementById('cloudUploadModalCancel'),
     ].filter(Boolean);
-    const closeSyncSuccessBtn = document.getElementById('cloudSyncSuccessClose');
+    const closeWatchButtons = [
+        document.getElementById('cloudWatchModalClose'),
+        document.getElementById('cloudWatchModalCancel'),
+    ].filter(Boolean);
 
     let albums = [];
     let photos = [];
-    let watchFolders = [];
+    let syncSources = [];
+    let syncJobs = [];
+    let syncFailedItems = [];
     let refreshTimer = null;
-    let currentSubView = 'library';
+    let currentSubView = requestedAlbumId ? 'albums' : 'library';
     let selectedFolder = null;
     let watchNotices = [];
+    let selectedAssetIds = new Set();
+    let photoRenderCount = 60;
+    const photoRenderBatch = 60;
+
+    const selectAllBtn = document.getElementById('cloudPhotoSelectAllBtn');
+    const bulkDownloadBtn = document.getElementById('cloudPhotoBulkDownloadBtn');
+    const albumDownloadBtn = document.getElementById('cloudPhotoAlbumDownloadBtn');
+    const selectionSummary = document.getElementById('cloudPhotoSelectionSummary');
+    const albumFocusCard = document.getElementById('cloudAlbumFocusCard');
+    const albumFocusTitle = document.getElementById('cloudAlbumFocusTitle');
+    const albumFocusMeta = document.getElementById('cloudAlbumFocusMeta');
+    const albumFocusGrid = document.getElementById('cloudAlbumFocusGrid');
+    const albumFocusSlideshowBtn = document.getElementById('cloudAlbumFocusSlideshowBtn');
+    const photoSortDirSelect = document.getElementById('cloudPhotoSortDir');
+    const photoStartDateInput = document.getElementById('cloudPhotoStartDate');
+    const photoEndDateInput = document.getElementById('cloudPhotoEndDate');
+    const photoDateApplyBtn = document.getElementById('cloudPhotoDateApplyBtn');
+    const photoDateClearBtn = document.getElementById('cloudPhotoDateClearBtn');
 
     function esc(v){ return String(v || '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
     function fmt(iso){ try { return new Date(iso).toLocaleString(); } catch(_) { return iso || ''; } }
     function toast(msg, type='info'){ if (window.globalToast) globalToast(msg, type); }
+
+    function mediaDateText(item) {
+        const captured = (item && item.captured_at) ? fmt(item.captured_at) : '';
+        if (captured) return `Taken ${captured}`;
+        const uploaded = (item && item.uploaded_at) ? fmt(item.uploaded_at) : '';
+        return uploaded ? `Uploaded ${uploaded}` : '';
+    }
 
     function setSubView(view){
         currentSubView = view;
@@ -557,6 +746,11 @@ document.getElementById('mediaLightbox').addEventListener('click', (e) => {
             btn.classList.toggle('btn-primary', active);
             btn.classList.toggle('btn-secondary', !active);
         });
+        if (view === 'watched') {
+            loadAll({ includeSyncDetails: true }).catch((err) => {
+                toast(err.message || 'Failed to load sync details', 'error');
+            });
+        }
     }
 
     function openModal(el){
@@ -570,7 +764,7 @@ document.getElementById('mediaLightbox').addEventListener('click', (e) => {
         if (!el) return;
         el.classList.add('hidden');
         el.classList.remove('flex');
-        if (![albumModal, uploadModal, syncSuccessModal].some((m) => m && !m.classList.contains('hidden'))) {
+        if (![albumModal, uploadModal, watchModal].some((m) => m && !m.classList.contains('hidden'))) {
             document.body.style.overflow = '';
         }
     }
@@ -601,9 +795,53 @@ document.getElementById('mediaLightbox').addEventListener('click', (e) => {
         renderWatchNotices();
     }
 
-    function showSyncSuccessModal(message){
-        if (syncSuccessText) syncSuccessText.textContent = message;
-        openModal(syncSuccessModal);
+    function renderSyncJobCard(){
+        if (!syncJobCard) return;
+        const job = syncJobs[0];
+        if (!job) {
+            syncJobCard.innerHTML = '<div>No recent jobs.</div>';
+            return;
+        }
+        syncJobCard.innerHTML = `
+            <div class="rounded-xl border border-gray-200 dark:border-gray-700 p-3">
+                <div class="font-medium text-sm">Latest job #${Number(job.id)} • ${esc(job.state)}</div>
+                <div class="mt-1">${Number(job.processed_items || 0)} / ${Number(job.total_items || 0)} processed</div>
+                <div>${Number(job.ingested_items || 0)} ingested • ${Number(job.deduped_items || 0)} deduped • ${Number(job.failed_items || 0)} failed</div>
+                <div class="text-[11px] mt-1">Updated: ${esc(job.updated_at ? fmt(job.updated_at) : 'n/a')}</div>
+            </div>
+        `;
+    }
+
+    function renderSyncFailedList(){
+        if (!syncFailedList) return;
+        if (!syncFailedItems.length) {
+            syncFailedList.innerHTML = '<div class="text-xs text-m3-on-surface-variant">No failed items.</div>';
+            return;
+        }
+        syncFailedList.innerHTML = syncFailedItems.slice(0, 8).map((item) => `
+            <article class="rounded-lg border border-amber-300 dark:border-amber-700 p-2 text-xs flex items-center justify-between gap-2">
+                <div class="min-w-0">
+                    <div class="font-medium truncate">${esc(item.filename || item.source_rel_path || `Item ${item.id}`)}</div>
+                    <div class="text-m3-on-surface-variant truncate">${esc(item.last_error || 'Unknown error')}</div>
+                </div>
+                <button class="btn btn-secondary text-xs cloud-sync-retry-item" data-item-id="${Number(item.id)}">Retry</button>
+            </article>
+        `).join('');
+    }
+
+    function updateWatchProgressFromJobs(){
+        const active = syncJobs.find((j) => ['queued', 'scanning', 'ingesting'].includes(String(j.state || '')));
+        const latest = active || syncJobs[0];
+        if (!latest) {
+            updateWatchProgress(0, 'No active sync jobs.', `Sources: ${syncSources.length} • Jobs: 0`);
+            return;
+        }
+        const pct = Number(latest.progress_percent || 0);
+        updateWatchProgress(
+            pct,
+            `Job #${latest.id} is ${latest.state}`,
+            `${Number(latest.processed_items || 0)} / ${Number(latest.total_items || 0)} processed • ${Number(latest.failed_items || 0)} failed`,
+        );
     }
 
     async function jget(url){
@@ -637,30 +875,49 @@ document.getElementById('mediaLightbox').addEventListener('click', (e) => {
             return;
         }
         albumList.innerHTML = albums.map(a => `
-            <article class="rounded-xl border border-gray-200 dark:border-gray-700 p-3">
-                <div class="font-semibold truncate">${esc(a.name)}</div>
-                <div class="text-xs text-m3-on-surface-variant mt-1">${esc(a.visibility)} • ${Number(a.asset_count || 0)} items</div>
+            <article class="rounded-xl border border-gray-200 dark:border-gray-700 p-3 space-y-2">
+                <div class="flex items-center justify-between gap-2">
+                    <div class="font-semibold truncate">${esc(a.name)}</div>
+                    <div class="flex items-center gap-1">
+                        <a href="/photos/slideshow?album_id=${Number(a.id)}" class="btn btn-secondary text-xs" title="Start Slideshow">
+                            <i class="fa-solid fa-play"></i>
+                        </a>
+                        <button type="button" class="btn btn-secondary text-xs cloud-album-open" data-album-id="${Number(a.id)}">
+                            <i class="fa-solid fa-folder-open"></i> Open
+                        </button>
+                    </div>
+                </div>
+                <div class="text-xs text-m3-on-surface-variant">${esc(a.visibility)} • ${Number(a.asset_count || 0)} items</div>
                 ${a.cover_url ? `<img src="${esc(a.cover_url)}" class="mt-2 w-full h-32 object-cover rounded-lg" alt="album cover">` : ''}
             </article>
         `).join('');
     }
 
     function renderPhotos(){
-        const rows = photos.slice(0, 50);
+        const rows = photos.slice(0, photoRenderCount);
+        const rowIds = new Set(rows.map((p) => Number(p.id)).filter((id) => id > 0));
+        selectedAssetIds = new Set(Array.from(selectedAssetIds).filter((id) => rowIds.has(id)));
+        updatePhotoSelectionSummary();
         if (!rows.length) {
             photoGrid.innerHTML = '<div class="text-sm text-m3-on-surface-variant">No photos yet.</div>';
             return;
         }
         photoGrid.innerHTML = rows.map(p => `
             <article class="rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
-                ${p.is_video
-                    ? `<video src="${esc(p.preview_url)}" class="w-full h-32 object-cover" controls preload="metadata"></video>`
-                    : `<img src="${esc(p.preview_url)}" class="w-full h-32 object-cover" alt="${esc(p.original_filename || '')}">`}
+                <button type="button" class="cloud-photo-open w-full h-36 bg-black relative" data-id="${Number(p.id)}">
+                    ${p.is_video
+                        ? `<video src="${esc(p.preview_url)}" class="w-full h-full object-contain" muted playsinline preload="none"></video><span class="absolute inset-0 flex items-center justify-center text-white/90"><i class="fa-solid fa-circle-play text-3xl"></i></span>`
+                        : `<img src="${esc(p.preview_url)}" class="w-full h-full object-contain" loading="lazy" alt="${esc(p.original_filename || '')}">`}
+                </button>
                 <div class="p-2 text-xs space-y-1">
+                    <label class="flex items-center gap-2 text-[11px]">
+                        <input type="checkbox" class="cloud-photo-select" data-id="${Number(p.id)}" ${selectedAssetIds.has(Number(p.id)) ? 'checked' : ''}>
+                        Select
+                    </label>
                     <div class="truncate font-medium">${esc(p.original_filename || p.filename || '')}</div>
-                    <div class="text-m3-on-surface-variant">${esc(p.uploader || '')} • ${esc(p.visibility || '')}</div>
+                    <div class="text-m3-on-surface-variant">${esc(p.uploader || '')} • ${esc(p.visibility || '')}${mediaDateText(p) ? ` • ${esc(mediaDateText(p))}` : ''}</div>
                     <div class="flex items-center gap-1">
-                        <a class="btn btn-secondary text-xs" href="${esc(p.download_url)}"><i class="fa-solid fa-download"></i></a>
+                        <a class="btn btn-secondary text-xs" href="${esc(p.original_download_url || p.download_url)}"><i class="fa-solid fa-download"></i></a>
                         <button class="btn btn-danger text-xs cloud-photo-delete" data-id="${Number(p.id)}"><i class="fa-solid fa-trash"></i></button>
                     </div>
                 </div>
@@ -668,46 +925,161 @@ document.getElementById('mediaLightbox').addEventListener('click', (e) => {
         `).join('');
     }
 
-    function renderWatchFolders(){
-        if (!watchFolders.length) {
-            watchList.innerHTML = '<div class="text-sm text-m3-on-surface-variant">No watched folders added on this device/member yet.</div>';
+    function renderAlbumFocus(){
+        if (!albumFocusCard || !albumFocusGrid || !albumFocusTitle || !albumFocusMeta) return;
+        if (!requestedAlbumId) {
+            albumFocusCard.classList.add('hidden');
             return;
         }
-        watchList.innerHTML = watchFolders.map(w => `
-            <article class="rounded-xl border border-gray-200 dark:border-gray-700 p-3 flex items-start justify-between gap-2">
-                <div class="min-w-0">
-                    <div class="font-medium text-sm">${esc(w.scope)} • ${w.is_active ? 'Active' : 'Paused'}</div>
-                    <div class="text-xs text-m3-on-surface-variant break-all">${esc(w.folder_uri)}</div>
-                    <div class="text-[11px] text-m3-on-surface-variant">Last sync: ${esc(w.last_synced_at ? fmt(w.last_synced_at) : 'Never')}</div>
-                </div>
-                <div class="flex items-center gap-1">
-                    <button class="btn btn-secondary text-xs cloud-watch-toggle" data-id="${Number(w.id)}" data-active="${w.is_active ? '1' : '0'}">${w.is_active ? 'Pause' : 'Resume'}</button>
-                    <button class="btn btn-danger text-xs cloud-watch-delete" data-id="${Number(w.id)}"><i class="fa-solid fa-trash"></i></button>
+
+        const album = albums.find((a) => Number(a.id) === Number(requestedAlbumId));
+        albumFocusCard.classList.remove('hidden');
+        albumFocusTitle.textContent = album?.name ? `Album: ${album.name}` : `Album #${requestedAlbumId}`;
+        albumFocusMeta.textContent = `${Number(photos.length)} items`;
+        if (albumFocusSlideshowBtn) {
+            albumFocusSlideshowBtn.onclick = () => {
+                window.location.href = `/photos/slideshow?album_id=${requestedAlbumId}`;
+            };
+        }
+
+        if (!photos.length) {
+            albumFocusGrid.innerHTML = '<div class="text-sm text-m3-on-surface-variant">No photos in this album yet.</div>';
+            return;
+        }
+
+        albumFocusGrid.innerHTML = photos.slice(0, photoRenderCount).map((p) => `
+            <article class="rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
+                <button type="button" class="cloud-photo-open w-full h-36 bg-black relative" data-id="${Number(p.id)}">
+                    ${p.is_video
+                        ? `<video src="${esc(p.preview_url)}" class="w-full h-full object-contain" muted playsinline preload="none"></video><span class="absolute inset-0 flex items-center justify-center text-white/90"><i class="fa-solid fa-circle-play text-3xl"></i></span>`
+                        : `<img src="${esc(p.preview_url)}" class="w-full h-full object-contain" loading="lazy" alt="${esc(p.original_filename || '')}">`}
+                </button>
+                <div class="p-2 text-xs space-y-1">
+                    <div class="truncate font-medium">${esc(p.original_filename || p.filename || '')}</div>
+                    <div class="text-m3-on-surface-variant">${esc(p.uploader || '')} • ${esc(p.visibility || '')}${mediaDateText(p) ? ` • ${esc(mediaDateText(p))}` : ''}</div>
+                    <div class="flex items-center gap-1">
+                        <a class="btn btn-secondary text-xs" href="${esc(p.original_download_url || p.download_url)}"><i class="fa-solid fa-download"></i></a>
+                    </div>
                 </div>
             </article>
         `).join('');
     }
 
-    async function loadAll(){
-        const assetsUrl = `/api/photos/assets?member=${encodeURIComponent(currentMember)}${requestedAlbumId ? `&album_id=${requestedAlbumId}` : ''}`;
-        const [albumData, photoData, watchData] = await Promise.all([
+    function ensurePhotoRenderCoverage() {
+        const doc = document.documentElement;
+        const nearBottom = (window.innerHeight + window.scrollY) >= (doc.scrollHeight - 320);
+        if (!nearBottom) return;
+        if (photoRenderCount >= photos.length) return;
+        photoRenderCount = Math.min(photoRenderCount + photoRenderBatch, photos.length);
+        renderPhotos();
+        renderAlbumFocus();
+    }
+
+    function updatePhotoSelectionSummary(){
+        if (!selectionSummary) return;
+        selectionSummary.textContent = `${selectedAssetIds.size} selected.`;
+    }
+
+    async function createBulkDownloadJob(payload){
+        const data = await jsend('/api/photos/download-jobs', 'POST', payload);
+        const job = data.job || {};
+        if (job.state !== 'ready' || !job.download_url) {
+            throw new Error(job.error_message || 'Download job is not ready yet');
+        }
+        window.location.href = job.download_url;
+        toast(`Download ready (${Number(job.included_assets || 0)} files)`, 'success');
+    }
+
+    function renderWatchFolders(){
+        if (!syncSources.length) {
+            watchList.innerHTML = '<div class="text-sm text-m3-on-surface-variant">No sync sources registered yet.</div>';
+            return;
+        }
+        watchList.innerHTML = syncSources.map(w => `
+            <article class="rounded-xl border border-gray-200 dark:border-gray-700 p-3 flex items-start justify-between gap-2">
+                <div class="min-w-0">
+                    <div class="font-medium text-sm">${esc(w.scope)} • ${w.is_active ? 'Active' : 'Paused'} • ${esc(w.source_type || '')}</div>
+                    <div class="text-xs text-m3-on-surface-variant break-all">${esc(w.source_uri || '')}</div>
+                    <div class="text-[11px] text-m3-on-surface-variant">Last scan: ${esc(w.last_scan_at ? fmt(w.last_scan_at) : 'Never')}</div>
+                </div>
+                <div class="flex items-center gap-1">
+                    <button class="btn btn-secondary text-xs cloud-sync-run" data-source-id="${Number(w.id)}">Run Scan</button>
+                    <button class="btn btn-secondary text-xs cloud-sync-toggle" data-source-id="${Number(w.id)}" data-active="${w.is_active ? '1' : '0'}">${w.is_active ? 'Pause' : 'Resume'}</button>
+                </div>
+            </article>
+        `).join('');
+    }
+
+    async function uploadSelectedFilesToJob(jobId, items){
+        if (!watchFolderPicker || !watchFolderPicker.files || !watchFolderPicker.files.length) return;
+        const byRelPath = new Map();
+        items.forEach((it) => {
+            const rel = String(it.source_rel_path || '').replace(/\\/g, '/');
+            byRelPath.set(rel, it);
+        });
+        for (const file of Array.from(watchFolderPicker.files)) {
+            const rel = String(file.webkitRelativePath || file.name || '').replace(/\\/g, '/');
+            const found = byRelPath.get(rel);
+            if (!found) continue;
+            const fd = new FormData();
+            fd.append('item_id', String(found.id));
+            fd.append('file', file, file.name);
+            const res = await fetch(`/api/photos/sync/jobs/${jobId}/ingest-item`, { method: 'POST', body: fd });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || !data.ok) throw new Error(data.error || `Failed to upload item ${found.id}`);
+        }
+    }
+
+    async function loadAll(options = {}){
+        const includeSyncDetails = options.includeSyncDetails ?? (currentSubView === 'watched');
+        const params = new URLSearchParams();
+        params.set('member', currentMember);
+        if (requestedAlbumId) params.set('album_id', String(requestedAlbumId));
+        params.set('sort_by', 'captured_at');
+        params.set('sort_dir', (photoSortDirSelect?.value || 'desc') === 'asc' ? 'asc' : 'desc');
+        const start = (photoStartDateInput?.value || '').trim();
+        const end = (photoEndDateInput?.value || '').trim();
+        if (start) params.set('start_date', start);
+        if (end) params.set('end_date', end);
+        const assetsUrl = `/api/photos/assets?${params.toString()}`;
+        const requests = [
             jget(`/api/photos/albums?member=${encodeURIComponent(currentMember)}`),
             jget(assetsUrl),
-            jget(`/api/photos/watch-folders?member=${encodeURIComponent(currentMember)}`),
-        ]);
+        ];
+        if (includeSyncDetails) {
+            requests.push(jget(`/api/photos/sync/status/summary?member=${encodeURIComponent(currentMember)}`));
+        }
+        const [albumData, photoData, summaryData] = await Promise.all(requests);
         albums = albumData.items || [];
         photos = photoData.items || [];
-        watchFolders = watchData.items || [];
+        photoRenderCount = Math.min(photoRenderBatch, photos.length);
+        if (summaryData) {
+            syncSources = summaryData.sources || [];
+            syncJobs = summaryData.jobs || [];
+        }
         renderAlbumSelects();
         renderAlbums();
         renderPhotos();
+        renderAlbumFocus();
         renderWatchFolders();
-        const activeCount = watchFolders.filter((w) => w && w.is_active).length;
-        updateWatchProgress(
-            activeCount ? 100 : 0,
-            activeCount ? 'Watched folder sync is active.' : 'Waiting for folder selection.',
-            activeCount ? `${activeCount} watched folder${activeCount === 1 ? '' : 's'} active.` : 'No sync activity yet.',
-        );
+        ensurePhotoRenderCoverage();
+
+        if (includeSyncDetails) {
+            const failed = [];
+            for (const job of syncJobs.slice(0, 5)) {
+                if (!job || !job.failed_items) continue;
+                try {
+                    const detail = await jget(`/api/photos/sync/jobs/${job.id}?member=${encodeURIComponent(currentMember)}`);
+                    (detail.items || []).filter((it) => it.state === 'failed').forEach((it) => failed.push(it));
+                } catch (_) {
+                    // Ignore detail failures during periodic refresh.
+                }
+            }
+            syncFailedItems = failed;
+            renderSyncJobCard();
+            renderSyncFailedList();
+            updateWatchProgressFromJobs();
+        }
     }
 
     function parseFolderSelection(files){
@@ -717,7 +1089,7 @@ document.getElementById('mediaLightbox').addEventListener('click', (e) => {
         const folderName = rel.includes('/') ? rel.split('/')[0] : '';
         const root = folderName || first.name;
         return {
-            folderUri: `folder://${root}`,
+            folderUri: `browser://${root}`,
             label: root,
             count: files.length,
         };
@@ -730,17 +1102,15 @@ document.getElementById('mediaLightbox').addEventListener('click', (e) => {
             if (!selected) {
                 selectedFolder = null;
                 watchFolderUriInput.value = '';
-                if (watchBrowseMeta) watchBrowseMeta.textContent = 'No folder selected.';
-                updateWatchProgress(0, 'Waiting for folder selection.', 'No sync activity yet.');
+                if (watchBrowseMeta) watchBrowseMeta.textContent = 'No files selected.';
                 return;
             }
             selectedFolder = selected;
             watchFolderUriInput.value = selected.folderUri;
             if (watchBrowseMeta) {
-                watchBrowseMeta.textContent = `${selected.label} selected (${selected.count} files visible in browser picker).`;
+                watchBrowseMeta.textContent = `${selected.label} selected (${selected.count} files queued).`;
             }
-            updateWatchProgress(15, `Ready to sync ${selected.label}.`, `${selected.count} item${selected.count === 1 ? '' : 's'} detected in this folder.`);
-            addWatchNotice(`Folder selected: ${selected.label}`);
+            addWatchNotice(`Source selected: ${selected.label}`);
         });
     }
 
@@ -751,11 +1121,12 @@ document.getElementById('mediaLightbox').addEventListener('click', (e) => {
 
     openAlbumButtons.forEach((btn) => btn.addEventListener('click', () => openModal(albumModal)));
     openUploadButtons.forEach((btn) => btn.addEventListener('click', () => openModal(uploadModal)));
+    openWatchButtons.forEach((btn) => btn.addEventListener('click', () => openModal(watchModal)));
     closeAlbumButtons.forEach((btn) => btn.addEventListener('click', () => closeModal(albumModal)));
     closeUploadButtons.forEach((btn) => btn.addEventListener('click', () => closeModal(uploadModal)));
-    if (closeSyncSuccessBtn) closeSyncSuccessBtn.addEventListener('click', () => closeModal(syncSuccessModal));
+    closeWatchButtons.forEach((btn) => btn.addEventListener('click', () => closeModal(watchModal)));
 
-    [albumModal, uploadModal, syncSuccessModal].forEach((modal) => {
+    [albumModal, uploadModal, watchModal].forEach((modal) => {
         if (!modal) return;
         modal.addEventListener('click', (event) => {
             if (event.target === modal) closeModal(modal);
@@ -766,7 +1137,7 @@ document.getElementById('mediaLightbox').addEventListener('click', (e) => {
         if (event.key !== 'Escape') return;
         closeModal(albumModal);
         closeModal(uploadModal);
-        closeModal(syncSuccessModal);
+        closeModal(watchModal);
     });
 
     document.getElementById('cloudAlbumCreateForm').addEventListener('submit', async (event) => {
@@ -815,42 +1186,93 @@ document.getElementById('mediaLightbox').addEventListener('click', (e) => {
         try {
             const folderUri = watchFolderUriInput.value.trim();
             if (!folderUri) throw new Error('Choose a folder first');
-            const selectedCount = selectedFolder?.count || 0;
+            const selectedFiles = Array.from(watchFolderPicker?.files || []);
+            const selectedCount = selectedFiles.length;
+            if (!selectedCount) throw new Error('No files selected');
             const selectedLabel = selectedFolder?.label || folderUri;
-            updateWatchProgress(30, `Starting sync for ${selectedLabel}...`, `${selectedCount} item${selectedCount === 1 ? '' : 's'} queued.`);
-            addWatchNotice(`Sync started for ${selectedLabel}`);
+            updateWatchProgress(10, `Registering source ${selectedLabel}...`, `${selectedCount} files selected.`);
             const scope = document.getElementById('cloudWatchScope').value;
             const albumRaw = document.getElementById('cloudWatchAlbum').value;
-            await jsend('/api/photos/watch-folders', 'POST', {
+            const reg = await jsend('/api/photos/sync/sources/register', 'POST', {
                 member: currentMember,
-                folder_uri: folderUri,
-                scope,
                 platform: 'web',
+                app_instance_id: syncInstanceId,
+                source_type: 'browser_import',
+                source_uri: folderUri,
+                scope,
                 target_album_id: albumRaw ? Number(albumRaw) : null,
             });
-            updateWatchProgress(75, 'Folder registered. Finalizing sync...', `Tracking ${selectedCount} selected item${selectedCount === 1 ? '' : 's'}.`);
+            const sourceId = Number(reg.source?.id || 0);
+            if (!sourceId) throw new Error('Source registration failed');
+
+            const enq = await jsend(`/api/photos/sync/sources/${sourceId}/enqueue-scan`, 'POST', { trigger_type: 'manual' });
+            const jobId = Number(enq.job_id || 0);
+            if (!jobId) throw new Error('Failed to create sync job');
+
+            updateWatchProgress(25, `Preparing manifest for job #${jobId}...`, `${selectedCount} files detected.`);
+            const manifestItems = selectedFiles.map((f) => ({
+                client_item_id: String(f.webkitRelativePath || f.name || ''),
+                source_rel_path: String(f.webkitRelativePath || f.name || ''),
+                filename: String(f.name || 'upload.bin'),
+                size_bytes: Number(f.size || 0),
+                mime_type: String(f.type || ''),
+                mtime_utc: new Date(Number(f.lastModified || Date.now())).toISOString(),
+            }));
+            await jsend(`/api/photos/sync/jobs/${jobId}/items`, 'POST', { items: manifestItems });
+
+            updateWatchProgress(40, `Uploading items to job #${jobId}...`, `${selectedCount} files uploading.`);
+            const detail = await jget(`/api/photos/sync/jobs/${jobId}?member=${encodeURIComponent(currentMember)}`);
+            await uploadSelectedFilesToJob(jobId, detail.items || []);
+
             watchFolderUriInput.value = '';
-            if (watchBrowseMeta) watchBrowseMeta.textContent = 'No folder selected.';
+            if (watchBrowseMeta) watchBrowseMeta.textContent = 'No files selected.';
             if (watchFolderPicker) watchFolderPicker.value = '';
             selectedFolder = null;
-            toast('Watched folder saved', 'success');
+            toast('Sync source registered and upload queued', 'success');
             await loadAll();
-            addWatchNotice('Watched folder is active and syncing.');
-            showSyncSuccessModal('Your watched folder is successfully synced and now active. Great job keeping family memories flowing.');
+            closeModal(watchModal);
+            addWatchNotice(`Sync queued for ${selectedLabel} (job #${jobId}).`);
             setSubView('watched');
         } catch (err) {
-            toast(err.message || 'Failed to save watched folder', 'error');
-            addWatchNotice('Sync setup failed. Please check folder selection and try again.');
+            toast(err.message || 'Failed to register sync source', 'error');
+            addWatchNotice('Sync setup failed. Please check selected files and try again.');
         }
     });
 
     photoGrid.addEventListener('click', async (event) => {
+        const checkbox = event.target.closest('.cloud-photo-select');
+        if (checkbox) {
+            const assetId = Number(checkbox.getAttribute('data-id') || 0);
+            if (assetId > 0) {
+                if (checkbox.checked) selectedAssetIds.add(assetId);
+                else selectedAssetIds.delete(assetId);
+                updatePhotoSelectionSummary();
+            }
+            return;
+        }
+
+        const openBtn = event.target.closest('.cloud-photo-open');
+        if (openBtn) {
+            const assetId = Number(openBtn.getAttribute('data-id') || 0);
+            const rows = photos.slice();
+            const list = rows.map((p) => ({
+                isVideo: !!p.is_video,
+                url: p.is_video ? (p.stream_url || p.preview_url) : p.preview_url,
+                title: p.original_filename || p.filename || 'Media',
+                subtitle: `${p.uploader || ''}${p.visibility ? ` • ${p.visibility}` : ''}`,
+            }));
+            const idx = rows.findIndex((p) => Number(p.id) === assetId);
+            if (idx >= 0) openMediaPreviewFromList(list, idx);
+            return;
+        }
+
         const btn = event.target.closest('.cloud-photo-delete');
         if (!btn) return;
         const assetId = Number(btn.getAttribute('data-id') || 0);
         if (!assetId) return;
         try {
             await jsend('/api/photos/assets/batch', 'POST', { action: 'delete', asset_ids: [assetId] });
+            selectedAssetIds.delete(assetId);
             toast('Photo deleted', 'success');
             await loadAll();
         } catch (err) {
@@ -858,30 +1280,106 @@ document.getElementById('mediaLightbox').addEventListener('click', (e) => {
         }
     });
 
-    watchList.addEventListener('click', async (event) => {
-        const toggleBtn = event.target.closest('.cloud-watch-toggle');
-        const delBtn = event.target.closest('.cloud-watch-delete');
+    selectAllBtn?.addEventListener('click', () => {
+        const rows = photos.slice(0, photoRenderCount);
+        const ids = rows.map((p) => Number(p.id)).filter((id) => id > 0);
+        const allSelected = ids.length > 0 && ids.every((id) => selectedAssetIds.has(id));
+        if (allSelected) {
+            ids.forEach((id) => selectedAssetIds.delete(id));
+        } else {
+            ids.forEach((id) => selectedAssetIds.add(id));
+        }
+        renderPhotos();
+    });
+
+    bulkDownloadBtn?.addEventListener('click', async () => {
+        if (!selectedAssetIds.size) {
+            toast('Select at least one photo/video first', 'error');
+            return;
+        }
         try {
-            if (toggleBtn) {
-                const id = Number(toggleBtn.getAttribute('data-id') || 0);
-                const active = toggleBtn.getAttribute('data-active') === '1';
+            await createBulkDownloadJob({ mode: 'selected_assets', asset_ids: Array.from(selectedAssetIds) });
+        } catch (err) {
+            toast(err.message || 'Failed to build bulk download', 'error');
+        }
+    });
+
+    albumDownloadBtn?.addEventListener('click', async () => {
+        if (!requestedAlbumId) {
+            toast('Open a specific album first (from Albums view)', 'error');
+            return;
+        }
+        try {
+            await createBulkDownloadJob({ mode: 'album', album_id: requestedAlbumId });
+        } catch (err) {
+            toast(err.message || 'Failed to build album download', 'error');
+        }
+    });
+
+    watchList.addEventListener('click', async (event) => {
+        const toggleBtn = event.target.closest('.cloud-sync-toggle');
+        const runBtn = event.target.closest('.cloud-sync-run');
+        try {
+            if (runBtn) {
+                const id = Number(runBtn.getAttribute('data-source-id') || 0);
                 if (!id) return;
-                await jsend(`/api/photos/watch-folders/${id}`, 'PATCH', { is_active: !active });
-                toast(!active ? 'Watch folder resumed' : 'Watch folder paused', 'success');
+                await jsend(`/api/photos/sync/sources/${id}/enqueue-scan`, 'POST', { trigger_type: 'manual' });
+                toast('Scan job started', 'success');
                 await loadAll();
                 return;
             }
-            if (delBtn) {
-                const id = Number(delBtn.getAttribute('data-id') || 0);
+            if (toggleBtn) {
+                const id = Number(toggleBtn.getAttribute('data-source-id') || 0);
+                const active = toggleBtn.getAttribute('data-active') === '1';
                 if (!id) return;
-                const res = await fetch(`/api/photos/watch-folders/${id}`, { method: 'DELETE' });
-                const data = await res.json().catch(() => ({}));
-                if (!res.ok || !data.ok) throw new Error(data.error || 'Delete failed');
-                toast('Watch folder removed', 'success');
+                await jsend(`/api/photos/sync/sources/${id}`, 'PATCH', { is_active: !active });
+                toast(!active ? 'Sync source resumed' : 'Sync source paused', 'success');
                 await loadAll();
+                return;
             }
         } catch (err) {
             toast(err.message || 'Operation failed', 'error');
+        }
+    });
+
+    albumList.addEventListener('click', (event) => {
+        const openBtn = event.target.closest('.cloud-album-open');
+        if (!openBtn) return;
+        const albumId = Number(openBtn.getAttribute('data-album-id') || 0);
+        if (!albumId) return;
+        const next = new URL(window.location.href);
+        next.searchParams.set('photo_album', String(albumId));
+        next.searchParams.set('category', 'photos_videos');
+        next.searchParams.set('subview', 'albums');
+        window.location.href = next.toString();
+    });
+
+    albumFocusGrid?.addEventListener('click', (event) => {
+        const openBtn = event.target.closest('.cloud-photo-open');
+        if (!openBtn) return;
+        const assetId = Number(openBtn.getAttribute('data-id') || 0);
+        const rows = photos.slice();
+        const list = rows.map((p) => ({
+            isVideo: !!p.is_video,
+            url: p.is_video ? (p.stream_url || p.preview_url) : p.preview_url,
+            title: p.original_filename || p.filename || 'Media',
+            subtitle: `${p.uploader || ''}${p.visibility ? ` • ${p.visibility}` : ''}`,
+        }));
+        const idx = rows.findIndex((p) => Number(p.id) === assetId);
+        if (idx >= 0) openMediaPreviewFromList(list, idx);
+    });
+
+    syncFailedList?.addEventListener('click', async (event) => {
+        const retryBtn = event.target.closest('.cloud-sync-retry-item');
+        if (!retryBtn) return;
+        const itemId = Number(retryBtn.getAttribute('data-item-id') || 0);
+        if (!itemId) return;
+        try {
+            await jsend(`/api/photos/sync/items/${itemId}/retry`, 'POST', {});
+            toast('Retry queued', 'success');
+            await loadAll();
+        } catch (err) {
+            toast(err.message || 'Retry failed', 'error');
         }
     });
 
@@ -889,10 +1387,31 @@ document.getElementById('mediaLightbox').addEventListener('click', (e) => {
         loadAll().catch((err) => toast(err.message || 'Refresh failed', 'error'));
     });
 
+    window.addEventListener('scroll', ensurePhotoRenderCoverage, { passive: true });
+
+    photoDateApplyBtn?.addEventListener('click', () => {
+        loadAll().catch((err) => toast(err.message || 'Filter failed', 'error'));
+    });
+
+    photoDateClearBtn?.addEventListener('click', () => {
+        if (photoStartDateInput) photoStartDateInput.value = '';
+        if (photoEndDateInput) photoEndDateInput.value = '';
+        if (photoSortDirSelect) photoSortDirSelect.value = 'desc';
+        loadAll().catch((err) => toast(err.message || 'Filter clear failed', 'error'));
+    });
+
+    photoSortDirSelect?.addEventListener('change', () => {
+        loadAll().catch((err) => toast(err.message || 'Sort failed', 'error'));
+    });
+
     document.addEventListener('visibilitychange', () => {
         if (!document.hidden) loadAll().catch(() => {});
     });
 
+    const requestedSubview = (urlParams.get('subview') || '').trim();
+    if (requestedSubview && ['library', 'albums', 'watched'].includes(requestedSubview)) {
+        currentSubView = requestedSubview;
+    }
     setSubView(currentSubView);
     renderWatchNotices();
     loadAll().catch((err) => toast(err.message || 'Failed to load integrated photos', 'error'));

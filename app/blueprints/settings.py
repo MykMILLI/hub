@@ -12,9 +12,10 @@ from ..models import (
     ResourcePermission,
 )
 from ..blueprints import main_bp
-from ..security import sanitize_text
+from ..security import is_http_url, sanitize_text
 from ..permissions import APP_MODULES, parse_allowed_members, sanitize_visibility
 from ..services.notification_service import send_test_email
+from ..services.supabase_service import supabase_service
 from datetime import datetime
 import yaml
 import os
@@ -46,6 +47,38 @@ def _current_member_is_admin() -> bool:
     if not current_member:
         current_member = current_app.config['HOMEHUB_CONFIG'].get('admin_name', 'Administrator')
     return _is_admin_name(current_member)
+
+
+def _sync_member_upsert_to_supabase(*, member_name: str, member_email: str | None, member_role: str, previous_email: str = '') -> dict | None:
+    clean_email = sanitize_text((member_email or '').strip().lower())
+    if not clean_email:
+        return None
+    actor = sanitize_text((session.get('current_member') or '').strip())
+    return supabase_service.provision_or_update_member_user(
+        email=clean_email,
+        member_name=sanitize_text((member_name or '').strip()),
+        role=_normalize_role(member_role),
+        actor=actor,
+        previous_email=sanitize_text((previous_email or '').strip().lower()),
+    )
+
+
+def _sync_member_revoke_in_supabase(*, member_email: str | None) -> dict | None:
+    clean_email = sanitize_text((member_email or '').strip().lower())
+    if not clean_email:
+        return None
+    actor = sanitize_text((session.get('current_member') or '').strip())
+    return supabase_service.revoke_member_user_access(email=clean_email, actor=actor)
+
+
+def _mark_member_login_welcome_state(member: FamilyMember | None) -> None:
+    previous_seen = getattr(member, 'last_hub_seen_at', None) if member else None
+    session['show_welcome_modal'] = True
+    session['welcome_last_seen_at'] = previous_seen.isoformat() if previous_seen else ''
+    if member:
+        member.last_hub_login_at = datetime.utcnow()
+        db.session.add(member)
+        db.session.commit()
 
 
 def _upsert_app_module_permission(module_key: str, visibility: str, allowed_members: list[str], updated_by: str):
@@ -85,9 +118,11 @@ APP_MODULE_LABELS = {
     'qr_generator': 'QR Generator',
     'expense_tracker': 'Expense & Money Tracker',
     'shared_calendar': 'Family Calendar',
+    'daily_agenda': 'Daily Agenda',
     'meal_planner': 'Meal Planner',
     'notifications': 'Messages, Polls & Notifications',
     'photos': 'Family Photos',
+    'home_assistant': 'Home Assistant',
     'settings': 'Settings',
 }
 
@@ -161,6 +196,61 @@ def api_update_settings():
         return jsonify({"ok": False, "error": str(e)}), 400
 
 
+@main_bp.route('/api/settings/home-assistant', methods=['GET'])
+def api_get_home_assistant_settings():
+    config = current_app.config.get('HOMEHUB_CONFIG', {})
+    home_assistant = config.get('home_assistant') or {}
+    return jsonify({
+        'ok': True,
+        'url': str(home_assistant.get('url') or ''),
+        'auto_login_url': str(home_assistant.get('auto_login_url') or ''),
+    })
+
+
+@main_bp.route('/api/settings/home-assistant', methods=['PUT'])
+def api_update_home_assistant_settings():
+    if not _current_member_is_admin():
+        return jsonify({'ok': False, 'error': 'Only admins can update settings'}), 403
+
+    try:
+        data = request.get_json(force=True) or {}
+        url = sanitize_text(str(data.get('url') or '')).strip()
+        auto_login_url = sanitize_text(str(data.get('auto_login_url') or '')).strip()
+
+        if url and not is_http_url(url):
+            return jsonify({'ok': False, 'error': 'Home Assistant URL must be a valid http/https URL'}), 400
+        if auto_login_url and not is_http_url(auto_login_url):
+            return jsonify({'ok': False, 'error': 'Auto-login URL must be a valid http/https URL'}), 400
+
+        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+        config_path = os.path.join(base_dir, 'config.yml')
+        if os.path.exists(config_path):
+            with open(config_path, 'r', encoding='utf-8') as f:
+                file_config = yaml.safe_load(f) or {}
+        else:
+            file_config = {}
+
+        home_assistant = file_config.setdefault('home_assistant', {})
+        home_assistant['url'] = url
+        home_assistant['auto_login_url'] = auto_login_url
+
+        with open(config_path, 'w', encoding='utf-8') as f:
+            yaml.safe_dump(file_config, f, default_flow_style=False, allow_unicode=True)
+
+        from ..config import load_config
+        updated_config = load_config()
+        current_app.config['HOMEHUB_CONFIG'] = updated_config
+        updated_home_assistant = updated_config.get('home_assistant') or {}
+        return jsonify({
+            'ok': True,
+            'url': str(updated_home_assistant.get('url') or ''),
+            'auto_login_url': str(updated_home_assistant.get('auto_login_url') or ''),
+            'message': 'Home Assistant settings updated',
+        })
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+
+
 # Family member management routes
 @main_bp.route('/api/family-members', methods=['GET'])
 def api_get_family_members():
@@ -211,6 +301,12 @@ def api_add_family_member():
         member = FamilyMember(name=name, role=role, email=(email or None))
         db.session.add(member)
         db.session.commit()
+
+        supabase_sync = _sync_member_upsert_to_supabase(
+            member_name=member.name,
+            member_email=member.email,
+            member_role=member.role,
+        )
         
         return jsonify({
             "ok": True,
@@ -220,7 +316,8 @@ def api_add_family_member():
                 "email": member.email,
                 "role": _normalize_role(member.role),
                 "is_admin": _normalize_role(member.role) == 'admin' or _is_config_admin_name(member.name),
-            }
+            },
+            "supabase_sync": supabase_sync,
         })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 400
@@ -236,6 +333,8 @@ def api_update_family_member(member_id):
         member = FamilyMember.query.get(member_id)
         if not member:
             return jsonify({"ok": False, "error": "Family member not found"}), 404
+
+        previous_email = sanitize_text((member.email or '').strip().lower())
         
         data = request.get_json(force=True) or {}
         name = sanitize_text(str(data.get('name', '')).strip()) if 'name' in data else member.name
@@ -264,6 +363,17 @@ def api_update_family_member(member_id):
         member.email = email or None
         member.role = role
         db.session.commit()
+
+        supabase_sync = None
+        if member.email:
+            supabase_sync = _sync_member_upsert_to_supabase(
+                member_name=member.name,
+                member_email=member.email,
+                member_role=member.role,
+                previous_email=previous_email,
+            )
+        elif previous_email:
+            supabase_sync = _sync_member_revoke_in_supabase(member_email=previous_email)
         
         return jsonify({
             "ok": True,
@@ -274,7 +384,8 @@ def api_update_family_member(member_id):
                 "email": member.email,
                 "role": _normalize_role(member.role),
                 "is_admin": _normalize_role(member.role) == 'admin' or _is_config_admin_name(member.name),
-            }
+            },
+            "supabase_sync": supabase_sync,
         })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 400
@@ -299,12 +410,16 @@ def api_delete_family_member(member_id):
             return jsonify({"ok": False, "error": "Cannot delete the last admin member"}), 400
         
         member_name = member.name
+        member_email = member.email
         db.session.delete(member)
         db.session.commit()
+
+        supabase_sync = _sync_member_revoke_in_supabase(member_email=member_email)
         
         return jsonify({
             "ok": True,
-            "message": f"Family member '{member_name}' deleted successfully"
+            "message": f"Family member '{member_name}' deleted successfully",
+            "supabase_sync": supabase_sync,
         })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 400
@@ -334,7 +449,7 @@ def api_toggle_menu_item(menu_item):
             'welcome', 'timeline', 'shared_notes', 'shared_cloud', 'shopping_list',
             'chores', 'recipes', 'expiry_tracker', 'url_shortener',
             'media_downloader', 'pdf_compressor', 'qr_generator',
-            'expense_tracker', 'shared_calendar', 'meal_planner', 'notifications', 'photos', 'settings'
+            'expense_tracker', 'shared_calendar', 'meal_planner', 'notifications', 'photos', 'home_assistant', 'settings'
         ]
         
         if menu_item not in valid_items:
@@ -651,8 +766,8 @@ def api_member_login():
             # Allow config admin identity even when not represented in family_member table.
             if _is_config_admin_name(name):
                 session['current_member'] = name
-                session.pop('shared_guest_mode', None)
-                session.pop('shared_calendar_token', None)
+                session.permanent = True
+                _mark_member_login_welcome_state(None)
                 return jsonify({
                     "ok": True,
                     "name": name,
@@ -664,8 +779,8 @@ def api_member_login():
         # If no PIN is set, allow login without PIN
         if not member.pin:
             session['current_member'] = name
-            session.pop('shared_guest_mode', None)
-            session.pop('shared_calendar_token', None)
+            session.permanent = True
+            _mark_member_login_welcome_state(member)
             return jsonify({
                 "ok": True,
                 "name": name,
@@ -678,8 +793,8 @@ def api_member_login():
             return jsonify({"ok": False, "error": "Invalid PIN"}), 403
         
         session['current_member'] = name
-        session.pop('shared_guest_mode', None)
-        session.pop('shared_calendar_token', None)
+        session.permanent = True
+        _mark_member_login_welcome_state(member)
         return jsonify({
             "ok": True,
             "name": name,
@@ -695,9 +810,17 @@ def api_member_logout():
     """Clear member from session"""
     try:
         from flask import session
+        session.pop('authed', None)
         session.pop('current_member', None)
-        session.pop('shared_guest_mode', None)
-        session.pop('shared_calendar_token', None)
+        session.pop('supabase_account', None)
+        session.pop('supabase_user', None)
+        session.pop('supabase_user_id', None)
+        session.pop('supabase_email', None)
+        session.pop('supabase_role', None)
+        session.pop('supabase_access_token', None)
+        session.pop('supabase_refresh_token', None)
+        session.pop('show_welcome_modal', None)
+        session.pop('welcome_last_seen_at', None)
         return jsonify({"ok": True, "message": "Logged out successfully"})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 400
@@ -707,10 +830,14 @@ def api_member_logout():
 def api_current_member():
     """Get currently logged-in member from session"""
     current = session.get('current_member', None)
+    account = session.get('supabase_account')
+    if not isinstance(account, dict):
+        account = None
     return jsonify({
         "ok": True,
         "member": current,
         "is_admin": _is_admin_name(current),
+        "account": account,
     })
 
 
@@ -899,6 +1026,7 @@ def api_get_member_profile(member_id):
         "favorite_color": member.favorite_color,
         "favorite_song": member.favorite_song,
         "amazon_wishlist_url": member.amazon_wishlist_url,
+        "mini_slideshow_enabled": bool(member.mini_slideshow_enabled),
         "status": member.status or 'home',
         "avatar": member.avatar,
         "status_updated_at": member.status_updated_at.isoformat() if member.status_updated_at else None
@@ -966,6 +1094,9 @@ def api_update_member_profile(member_id):
             if wishlist and not (wishlist.startswith('http://') or wishlist.startswith('https://')):
                 wishlist = 'https://' + wishlist
             member.amazon_wishlist_url = wishlist or None
+
+        if 'mini_slideshow_enabled' in data:
+            member.mini_slideshow_enabled = bool(data.get('mini_slideshow_enabled'))
         
         db.session.commit()
 
@@ -983,6 +1114,7 @@ def api_update_member_profile(member_id):
             "favorite_color": member.favorite_color,
             "favorite_song": member.favorite_song,
             "amazon_wishlist_url": member.amazon_wishlist_url,
+            "mini_slideshow_enabled": bool(member.mini_slideshow_enabled),
             "status": member.status or 'home',
             "avatar": member.avatar,
             "message": "Profile updated" + (" and test email sent" if email_changed and member.email else "")

@@ -64,7 +64,7 @@ def upload():
                 target_members=targets,
                 created_by=creator,
                 payload={'count': count},
-                channels=['in_app'],
+                channels=['in_app', 'mobile'],
             )
         return redirect(url_for('main.upload'))
     files = File.query.order_by(File.upload_time.desc()).all()
@@ -165,7 +165,7 @@ def api_files_upload():
             target_members=targets,
             created_by=creator,
             payload={'count': count},
-            channels=['in_app'],
+            channels=['in_app', 'mobile'],
         )
 
     return jsonify({

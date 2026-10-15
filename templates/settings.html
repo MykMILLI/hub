@@ -2,6 +2,77 @@
 {% block content %}
 <div class="mx-auto w-full max-w-full lg:max-w-[1700px]">
     <h2 class="text-2xl font-bold mb-6">Hub Settings</h2>
+    <div id="settingsData" class="hidden" data-current-is-admin="{{ '1' if current_is_admin else '0' }}"></div>
+
+    <div class="card p-6 mb-6">
+        <h3 class="text-lg font-semibold mb-2 flex items-center gap-2"><i class="fa-solid fa-bell text-blue-600"></i> Notification Controls</h3>
+        <p class="text-sm text-gray-600 dark:text-gray-300 mb-4">Turn notifications on, choose chat/media categories, and send a test alert.</p>
+
+        <div class="space-y-3 mb-4">
+            <div class="flex items-center justify-between gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60">
+                <div>
+                    <div class="font-medium text-gray-800 dark:text-gray-100">Enable all notifications</div>
+                    <div class="text-xs text-gray-500 dark:text-gray-400">Master switch for your account.</div>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer shrink-0">
+                    <input id="notifyEnabledToggle" type="checkbox" class="sr-only peer" checked>
+                    <span class="w-14 h-7 bg-gray-300 dark:bg-gray-600 rounded-full transition-colors peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 peer-checked:bg-blue-600"></span>
+                    <span class="absolute left-1 top-1 w-5 h-5 bg-white rounded-full shadow transition-transform peer-checked:translate-x-7"></span>
+                </label>
+            </div>
+
+            <div class="flex items-center justify-between gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60">
+                <div>
+                    <div class="font-medium text-gray-800 dark:text-gray-100">Chat notifications</div>
+                    <div class="text-xs text-gray-500 dark:text-gray-400">Alerts when family members send messages.</div>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer shrink-0">
+                    <input id="notifyChatToggle" type="checkbox" class="sr-only peer" checked>
+                    <span class="w-14 h-7 bg-gray-300 dark:bg-gray-600 rounded-full transition-colors peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 peer-checked:bg-blue-600"></span>
+                    <span class="absolute left-1 top-1 w-5 h-5 bg-white rounded-full shadow transition-transform peer-checked:translate-x-7"></span>
+                </label>
+            </div>
+
+            <div class="flex items-center justify-between gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60">
+                <div>
+                    <div class="font-medium text-gray-800 dark:text-gray-100">Photos and videos notifications</div>
+                    <div class="text-xs text-gray-500 dark:text-gray-400">Alerts for shared cloud uploads and media sync updates.</div>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer shrink-0">
+                    <input id="notifyMediaToggle" type="checkbox" class="sr-only peer" checked>
+                    <span class="w-14 h-7 bg-gray-300 dark:bg-gray-600 rounded-full transition-colors peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 peer-checked:bg-blue-600"></span>
+                    <span class="absolute left-1 top-1 w-5 h-5 bg-white rounded-full shadow transition-transform peer-checked:translate-x-7"></span>
+                </label>
+            </div>
+
+            <div class="flex items-center justify-between gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60">
+                <div>
+                    <div class="font-medium text-gray-800 dark:text-gray-100">Browser pop-up notifications</div>
+                    <div class="text-xs text-gray-500 dark:text-gray-400">Desktop/browser notifications while HomeHub is open.</div>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer shrink-0">
+                    <input id="notifyBrowserToggle" type="checkbox" class="sr-only peer" checked>
+                    <span class="w-14 h-7 bg-gray-300 dark:bg-gray-600 rounded-full transition-colors peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 peer-checked:bg-blue-600"></span>
+                    <span class="absolute left-1 top-1 w-5 h-5 bg-white rounded-full shadow transition-transform peer-checked:translate-x-7"></span>
+                </label>
+            </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2 mb-3">
+            <button type="button" id="saveNotificationPrefsBtn" class="btn btn-primary">Save Notification Preferences</button>
+            <button type="button" id="enableBrowserPermissionBtn" class="btn btn-secondary">Enable Browser Permission</button>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+            <select id="notificationTestCategory" class="p-2 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-800 dark:text-white">
+                <option value="chat">Test Chat Notification</option>
+                <option value="media">Test Photos/Videos Notification</option>
+                <option value="general">Test General Notification</option>
+            </select>
+            <button type="button" id="sendNotificationTestBtn" class="btn btn-secondary">Send Test Notification</button>
+            <span id="browserPermissionStatus" class="text-xs text-gray-500 dark:text-gray-400"></span>
+        </div>
+    </div>
     
     <div class="card p-6 mb-6">
         <h3 class="text-lg font-semibold mb-4">Hub Name</h3>
@@ -12,6 +83,41 @@
                 <p class="text-xs text-gray-500 mt-2">This name will appear at the top of the page and in browser titles.</p>
             </div>
             <button type="submit" class="btn btn-primary">Save Changes</button>
+        </form>
+    </div>
+
+    <div class="card p-6 mb-6">
+        <h3 class="text-lg font-semibold mb-4 flex items-center gap-2"><i class="fa-solid fa-house-signal text-blue-600"></i> Home Assistant Settings</h3>
+        <form id="homeAssistantSettingsForm" class="space-y-4">
+            <div>
+                <label for="haUrlInput" class="block text-sm text-gray-600 dark:text-gray-300 mb-2">Home Assistant URL</label>
+                <input
+                    id="haUrlInput"
+                    type="url"
+                    class="w-full p-3 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-white"
+                    placeholder="https://home.millitop.net"
+                    value="{{ (config.home_assistant.url if config.home_assistant and config.home_assistant.url else '') }}"
+                    {% if not current_is_admin %}disabled{% endif %}
+                >
+            </div>
+            <div>
+                <label for="haAutoLoginUrlInput" class="block text-sm text-gray-600 dark:text-gray-300 mb-2">Auto-login URL (optional)</label>
+                <input
+                    id="haAutoLoginUrlInput"
+                    type="url"
+                    class="w-full p-3 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-white"
+                    placeholder="https://home.millitop.net/auth/..."
+                    value="{{ (config.home_assistant.auto_login_url if config.home_assistant and config.home_assistant.auto_login_url else '') }}"
+                    {% if not current_is_admin %}disabled{% endif %}
+                >
+                <p class="text-xs text-gray-500 mt-2">If set, launcher opens this URL first so trusted-auth or SSO can sign in automatically.</p>
+            </div>
+            <div class="flex items-center gap-3">
+                <button type="submit" id="haSettingsSaveBtn" class="btn btn-primary" {% if not current_is_admin %}disabled{% endif %}>Save Home Assistant Settings</button>
+                {% if not current_is_admin %}
+                <span class="text-xs text-gray-500">Admin access required to edit.</span>
+                {% endif %}
+            </div>
         </form>
     </div>
     
@@ -155,8 +261,8 @@
 </div>
 
 <!-- Edit modal -->
-<div id="editModal" class="fixed inset-0 bg-black/40 hidden items-center justify-center z-50">
-    <div class="glass-lg w-full max-w-sm p-6 rounded-2xl border border-white/20 shadow-2xl">
+<div id="editModal" class="fixed inset-0 bg-black/40 hidden items-center justify-center z-50 p-2 md:p-6">
+    <div class="glass-lg w-full max-w-sm p-6 rounded-2xl border border-white/20 shadow-2xl max-h-[calc(100vh-2rem)] md:max-h-[calc(100vh-4rem)] overflow-y-auto">
         <h4 class="text-lg font-semibold mb-4 text-gray-900 dark:text-gray-100">Edit Family Member</h4>
         <form id="editMemberForm" class="space-y-4">
             <input type="hidden" id="editMemberId">
@@ -173,8 +279,8 @@
 </div>
 
 <!-- PIN Management Modal -->
-<div id="pinManagementModal" class="fixed inset-0 bg-black/40 hidden items-center justify-center z-50">
-    <div class="glass-lg w-full max-w-sm p-6 rounded-2xl border border-white/20 shadow-2xl">
+<div id="pinManagementModal" class="fixed inset-0 bg-black/40 hidden items-center justify-center z-50 p-2 md:p-6">
+    <div class="glass-lg w-full max-w-sm p-6 rounded-2xl border border-white/20 shadow-2xl max-h-[calc(100vh-2rem)] md:max-h-[calc(100vh-4rem)] overflow-y-auto">
         <h4 class="text-lg font-semibold mb-4 text-gray-900 dark:text-gray-100" id="pinModalTitle">Set PIN</h4>
         <form id="pinManagementForm" class="space-y-4">
             <input type="hidden" id="pinMemberId">
@@ -233,7 +339,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const newMemberRole = document.getElementById('newMemberRole');
     const membersList = document.getElementById('membersList');
     const noMembers = document.getElementById('noMembers');
-    const canAdminManage = {{ 'true' if current_is_admin else 'false' }};
+    const settingsData = document.getElementById('settingsData');
+    const canAdminManage = String(settingsData?.dataset.currentIsAdmin || '0') === '1';
     const editModal = document.getElementById('editModal');
     const editForm = document.getElementById('editMemberForm');
     const editMemberId = document.getElementById('editMemberId');
@@ -261,6 +368,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const settingsConfirmCancel = document.getElementById('settingsConfirmCancel');
     const settingsConfirmOk = document.getElementById('settingsConfirmOk');
     const settingsConfirmBackdrop = document.getElementById('settingsConfirmBackdrop');
+    const homeAssistantSettingsForm = document.getElementById('homeAssistantSettingsForm');
+    const haSettingsSaveBtn = document.getElementById('haSettingsSaveBtn');
+    const haUrlInput = document.getElementById('haUrlInput');
+    const haAutoLoginUrlInput = document.getElementById('haAutoLoginUrlInput');
+    const notifyEnabledToggle = document.getElementById('notifyEnabledToggle');
+    const notifyChatToggle = document.getElementById('notifyChatToggle');
+    const notifyMediaToggle = document.getElementById('notifyMediaToggle');
+    const notifyBrowserToggle = document.getElementById('notifyBrowserToggle');
+    const saveNotificationPrefsBtn = document.getElementById('saveNotificationPrefsBtn');
+    const enableBrowserPermissionBtn = document.getElementById('enableBrowserPermissionBtn');
+    const sendNotificationTestBtn = document.getElementById('sendNotificationTestBtn');
+    const notificationTestCategory = document.getElementById('notificationTestCategory');
+    const browserPermissionStatus = document.getElementById('browserPermissionStatus');
     
     // Toast function
     const toast = (msg, type = 'info') => {
@@ -297,6 +417,140 @@ document.addEventListener('DOMContentLoaded', () => {
             settingsConfirmBackdrop.addEventListener('click', onCancel);
         });
     };
+
+    const updateBrowserPermissionLabel = () => {
+        if (!browserPermissionStatus) return;
+        if (!('Notification' in window)) {
+            browserPermissionStatus.textContent = 'Browser notifications are not supported in this browser.';
+            return;
+        }
+        const permission = String(Notification.permission || 'default');
+        if (permission === 'granted') {
+            browserPermissionStatus.textContent = 'Browser permission: allowed';
+        } else if (permission === 'denied') {
+            browserPermissionStatus.textContent = 'Browser permission: blocked';
+        } else {
+            browserPermissionStatus.textContent = 'Browser permission: not requested yet';
+        }
+    };
+
+    const applyNotificationToggleState = () => {
+        const enabled = !!notifyEnabledToggle?.checked;
+        if (notifyChatToggle) notifyChatToggle.disabled = !enabled;
+        if (notifyMediaToggle) notifyMediaToggle.disabled = !enabled;
+        if (notifyBrowserToggle) notifyBrowserToggle.disabled = !enabled;
+    };
+
+    const broadcastNotificationPrefs = (prefs) => {
+        try {
+            window.homehubNotificationPrefs = prefs || {};
+            document.dispatchEvent(new CustomEvent('homehub-notification-prefs-updated', { detail: prefs || {} }));
+        } catch (_) {}
+    };
+
+    const loadNotificationPreferences = async () => {
+        try {
+            const response = await fetch('/api/notifications/preferences');
+            const data = await response.json();
+            if (!response.ok || !data.ok) {
+                throw new Error(data.error || 'Failed to load notification preferences');
+            }
+            if (notifyEnabledToggle) notifyEnabledToggle.checked = !!data.notifications_enabled;
+            if (notifyChatToggle) notifyChatToggle.checked = !!data.chat_notifications_enabled;
+            if (notifyMediaToggle) notifyMediaToggle.checked = !!data.media_notifications_enabled;
+            if (notifyBrowserToggle) notifyBrowserToggle.checked = !!data.browser_notifications_enabled;
+            applyNotificationToggleState();
+            broadcastNotificationPrefs(data);
+            updateBrowserPermissionLabel();
+        } catch (err) {
+            toast(err.message || 'Failed to load notification preferences', 'error');
+        }
+    };
+
+    notifyEnabledToggle?.addEventListener('change', applyNotificationToggleState);
+
+    saveNotificationPrefsBtn?.addEventListener('click', async () => {
+        saveNotificationPrefsBtn.disabled = true;
+        try {
+            const payload = {
+                notifications_enabled: !!notifyEnabledToggle?.checked,
+                chat_notifications_enabled: !!notifyChatToggle?.checked,
+                media_notifications_enabled: !!notifyMediaToggle?.checked,
+                browser_notifications_enabled: !!notifyBrowserToggle?.checked,
+            };
+            const response = await fetch('/api/notifications/preferences', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            const data = await response.json();
+            if (!response.ok || !data.ok) {
+                throw new Error(data.error || 'Failed to save notification preferences');
+            }
+            broadcastNotificationPrefs(data);
+            toast('Notification preferences saved', 'success');
+        } catch (err) {
+            toast(err.message || 'Failed to save notification preferences', 'error');
+        } finally {
+            saveNotificationPrefsBtn.disabled = false;
+        }
+    });
+
+    enableBrowserPermissionBtn?.addEventListener('click', async () => {
+        if (!('Notification' in window)) {
+            toast('Browser notifications are not supported in this browser', 'error');
+            updateBrowserPermissionLabel();
+            return;
+        }
+        try {
+            const permission = await Notification.requestPermission();
+            updateBrowserPermissionLabel();
+            if (permission === 'granted') {
+                if (notifyBrowserToggle) notifyBrowserToggle.checked = true;
+                toast('Browser notifications enabled', 'success');
+            } else if (permission === 'denied') {
+                toast('Browser notification permission was blocked', 'error');
+            } else {
+                toast('Browser notification permission request dismissed', 'info');
+            }
+        } catch (_) {
+            updateBrowserPermissionLabel();
+            toast('Unable to request browser notification permission', 'error');
+        }
+    });
+
+    sendNotificationTestBtn?.addEventListener('click', async () => {
+        sendNotificationTestBtn.disabled = true;
+        try {
+            const response = await fetch('/api/notifications/test', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    category: String(notificationTestCategory?.value || 'chat'),
+                }),
+            });
+            const data = await response.json();
+            if (!response.ok || !data.ok) {
+                throw new Error(data.error || 'Unable to send test notification');
+            }
+            toast(data.message || 'Test notification sent', 'success');
+            if (window.homehubShowNotification) {
+                await window.homehubRequestNotificationPermission?.();
+                window.homehubShowNotification(
+                    data.title || 'Test HomeHub notification',
+                    data.body || 'Your HomeHub notifications are active.',
+                    `homehub-${data.id || Date.now()}`,
+                    ''
+                );
+            }
+        } catch (err) {
+            toast(err.message || 'Unable to send test notification', 'error');
+        } finally {
+            sendNotificationTestBtn.disabled = false;
+        }
+    });
+
+    loadNotificationPreferences();
     
     // Add member
     addForm.addEventListener('submit', async (e) => {
@@ -514,8 +768,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     { key: 'qr_generator', label: 'QR Generator', icon: 'fa-qrcode' },
                     { key: 'expense_tracker', label: 'Expense & Money Tracker', icon: 'fa-wallet' },
                     { key: 'shared_calendar', label: 'Family Calendar', icon: 'fa-calendar-days' },
+                    { key: 'daily_agenda', label: 'Daily Agenda', icon: 'fa-route' },
                     { key: 'meal_planner', label: 'Meal Planner', icon: 'fa-bowl-food' },
                     { key: 'notifications', label: 'Messages, Polls & Notifications', icon: 'fa-bell' },
+                    { key: 'home_assistant', label: 'Home Assistant', icon: 'fa-house-signal' },
                     { key: 'settings', label: 'Settings', icon: 'fa-gear' }
                 ];
                 
@@ -577,8 +833,8 @@ document.addEventListener('DOMContentLoaded', () => {
         welcome: 'Welcome', timeline: 'Timeline', shared_notes: 'Projects & Spaces', shared_cloud: 'Shared Cloud',
         shopping_list: 'Shopping List', chores: 'To-Do/Chores', recipes: 'Recipe Book', expiry_tracker: 'Expiry Tracker',
         url_shortener: 'URL Shortener', media_downloader: 'Media Downloader', pdf_compressor: 'PDF Compressor',
-        qr_generator: 'QR Generator', expense_tracker: 'Expense & Money Tracker', shared_calendar: 'Family Calendar',
-        meal_planner: 'Meal Planner', notifications: 'Notifications', settings: 'Settings'
+        qr_generator: 'QR Generator', expense_tracker: 'Expense & Money Tracker', shared_calendar: 'Family Calendar', daily_agenda: 'Daily Agenda',
+        meal_planner: 'Meal Planner', notifications: 'Notifications', home_assistant: 'Home Assistant', settings: 'Settings'
     };
 
     let permissionState = { members: [], member_details: [], groups: [], resources: { app_modules: [], projects: [], spaces: [] }, grants: [] };
@@ -1208,6 +1464,36 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     loadPermissionSchemes();
+
+    if (homeAssistantSettingsForm) {
+        homeAssistantSettingsForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const url = String(haUrlInput?.value || '').trim();
+            const autoLoginUrl = String(haAutoLoginUrlInput?.value || '').trim();
+            if (haSettingsSaveBtn) haSettingsSaveBtn.disabled = true;
+            try {
+                const response = await fetch('/api/settings/home-assistant', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        url,
+                        auto_login_url: autoLoginUrl,
+                    })
+                });
+                const data = await response.json();
+                if (!data.ok) {
+                    throw new Error(data.error || 'Failed to update Home Assistant settings');
+                }
+                if (haUrlInput) haUrlInput.value = data.url || '';
+                if (haAutoLoginUrlInput) haAutoLoginUrlInput.value = data.auto_login_url || '';
+                toast(data.message || 'Home Assistant settings updated', 'success');
+            } catch (err) {
+                toast(err.message || 'Failed to update Home Assistant settings', 'error');
+            } finally {
+                if (haSettingsSaveBtn && canAdminManage) haSettingsSaveBtn.disabled = false;
+            }
+        });
+    }
     
     // PIN Management Handlers
     const showPinModal = (memberId, action = 'set', memberName = '') => {

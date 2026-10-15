@@ -1,13 +1,16 @@
 from datetime import datetime
 import json
 import time
+from typing import Optional
 
 from flask import Response, current_app, jsonify, render_template, request, session, stream_with_context
 from sqlalchemy import or_
 
 from ..blueprints import main_bp
-from ..models import ActivityLog, AppNotification, MobilePushToken, NotificationDeliveryLog, db
+from ..models import ActivityLog, AppNotification, FamilyMember, MobilePushToken, NotificationDeliveryLog, db
 from ..security import sanitize_text
+from ..services.notification_service import member_notification_preferences, publish_notification
+from ..services.sync_events import latest_sync_markers
 
 
 def _current_member_name() -> str:
@@ -15,6 +18,31 @@ def _current_member_name() -> str:
     if member:
         return member
     return sanitize_text(current_app.config.get('HOMEHUB_CONFIG', {}).get('admin_name', 'Administrator')).strip() or 'Administrator'
+
+
+def _to_bool(value, default: bool = False) -> bool:
+    if value is None:
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value).strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
+def _ensure_member_row(member_name: str) -> Optional[FamilyMember]:
+    member = sanitize_text(member_name or '').strip()
+    if not member:
+        return None
+    row = FamilyMember.query.filter_by(name=member).first()
+    if row:
+        return row
+
+    admin_name = sanitize_text(current_app.config.get('HOMEHUB_CONFIG', {}).get('admin_name', 'Administrator')).strip() or 'Administrator'
+    row = FamilyMember(name=member, role='admin' if member == admin_name else 'standard')
+    db.session.add(row)
+    db.session.flush()
+    return row
 
 
 @main_bp.route('/notifications', methods=['GET'])
@@ -74,6 +102,14 @@ def api_get_notifications():
     member = sanitize_text(request.args.get('member') or '').strip() or _current_member_name()
     event_type = sanitize_text(request.args.get('event_type') or '').strip()
     unread_only = str(request.args.get('unread_only') or '').strip().lower() in {'1', 'true', 'yes'}
+
+    try:
+        from .family_calendar import emit_due_calendar_reminders_for_member
+        emit_due_calendar_reminders_for_member(member)
+        from .dashboard import emit_due_bedtime_reader_notification_for_member
+        emit_due_bedtime_reader_notification_for_member(member)
+    except Exception:
+        pass
 
     q = AppNotification.query.order_by(AppNotification.created_at.desc(), AppNotification.id.desc())
     if member:
@@ -173,6 +209,87 @@ def api_notifications_delivery_history():
     })
 
 
+@main_bp.route('/api/notifications/preferences', methods=['GET', 'PUT'])
+def api_notification_preferences():
+    member = sanitize_text(request.args.get('member') or '').strip() or _current_member_name()
+
+    if request.method == 'GET':
+        prefs = member_notification_preferences(member)
+        return jsonify({'ok': True, 'member': member, **prefs})
+
+    data = request.get_json(silent=True) or {}
+    row = _ensure_member_row(member)
+    if not row:
+        return jsonify({'ok': False, 'error': 'Member not found'}), 404
+
+    if 'notifications_enabled' in data:
+        row.notifications_enabled = _to_bool(data.get('notifications_enabled'), True)
+    if 'chat_notifications_enabled' in data:
+        row.chat_notifications_enabled = _to_bool(data.get('chat_notifications_enabled'), True)
+    if 'media_notifications_enabled' in data:
+        row.media_notifications_enabled = _to_bool(data.get('media_notifications_enabled'), True)
+    if 'browser_notifications_enabled' in data:
+        row.browser_notifications_enabled = _to_bool(data.get('browser_notifications_enabled'), True)
+
+    db.session.commit()
+    prefs = member_notification_preferences(member)
+    return jsonify({'ok': True, 'member': member, **prefs})
+
+
+@main_bp.route('/api/notifications/test', methods=['POST'])
+def api_notification_test():
+    data = request.get_json(silent=True) or {}
+    member = sanitize_text(data.get('member') or '').strip() or _current_member_name()
+    category = sanitize_text(data.get('category') or 'chat').strip().lower()
+
+    event_map = {
+        'chat': 'chat_message',
+        'media': 'shared_cloud_add',
+        'general': 'family_notice',
+    }
+    event_type = event_map.get(category, 'chat_message')
+
+    title_map = {
+        'chat_message': 'Test chat notification',
+        'shared_cloud_add': 'Test media notification',
+        'family_notice': 'Test HomeHub notification',
+    }
+    message_map = {
+        'chat_message': 'You will receive chat alerts when family members message you.',
+        'shared_cloud_add': 'You will receive media alerts for new photos or videos.',
+        'family_notice': 'Your HomeHub notifications are active.',
+    }
+
+    created = publish_notification(
+        event_type=event_type,
+        title=title_map.get(event_type, 'Test HomeHub notification'),
+        message=message_map.get(event_type, 'Your HomeHub notifications are active.'),
+        target_members=[member],
+        created_by=member,
+        payload={'is_test': True, 'category': category},
+        channels=['in_app', 'mobile', 'email'],
+    )
+
+    if not created:
+        return jsonify({
+            'ok': False,
+            'error': 'No test notification was created. Check your notification preferences and category settings.',
+        }), 400
+
+    return jsonify({
+        'ok': True,
+        'message': 'Test notification sent',
+        'count': len(created),
+        'id': created[0].id,
+        'title': created[0].title,
+        'body': created[0].message,
+    })
+
+
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
 @main_bp.route('/api/stream/events', methods=['GET'])
 def api_stream_events():
     member = sanitize_text(request.args.get('member') or '').strip() or _current_member_name()
@@ -195,29 +312,46 @@ def api_stream_events():
         row = ActivityLog.query.filter(ActivityLog.visibility == 'family').order_by(ActivityLog.id.desc()).first()
         return int(row.id) if row else 0
 
+    def _latest_chat_marker() -> int:
+        try:
+            from .communication import chat_latest_marker_for_member
+            return int(chat_latest_marker_for_member(member))
+        except Exception:
+            return 0
+
     @stream_with_context
     def event_stream():
         last_timeline_id = _latest_timeline_id()
         last_notification_id = _latest_notification_id()
         last_unread = _unread_count()
+        last_chat_marker = _latest_chat_marker()
+        sync_markers = latest_sync_markers()
+        last_sync_job_id = int(sync_markers.get('job_latest_id') or 0)
+        last_sync_item_id = int(sync_markers.get('item_latest_id') or 0)
+        last_sync_source_id = int(sync_markers.get('source_latest_id') or 0)
 
         boot_payload = {
             'timeline_latest_id': last_timeline_id,
             'notification_latest_id': last_notification_id,
             'notification_unread': last_unread,
+            'chat_latest_id': last_chat_marker,
+            'sync_job_latest_id': last_sync_job_id,
+            'sync_item_latest_id': last_sync_item_id,
+            'sync_source_latest_id': last_sync_source_id,
             'member': member,
         }
-        yield f"event: sync\\ndata: {json.dumps(boot_payload)}\\n\\n"
+        yield _sse('sync', boot_payload)
 
         while True:
             try:
                 timeline_id = _latest_timeline_id()
                 notification_id = _latest_notification_id()
                 unread_count = _unread_count()
+                chat_marker = _latest_chat_marker()
 
                 if timeline_id != last_timeline_id:
                     last_timeline_id = timeline_id
-                    yield f"event: timeline\\ndata: {json.dumps({'latest_id': timeline_id})}\\n\\n"
+                    yield _sse('timeline', {'latest_id': timeline_id})
 
                 if notification_id != last_notification_id or unread_count != last_unread:
                     last_notification_id = notification_id
@@ -226,9 +360,28 @@ def api_stream_events():
                         'latest_id': notification_id,
                         'unread_count': unread_count,
                     }
-                    yield f"event: notifications\\ndata: {json.dumps(payload)}\\n\\n"
+                    yield _sse('notifications', payload)
 
-                yield "event: heartbeat\\ndata: {}\\n\\n"
+                if chat_marker != last_chat_marker:
+                    last_chat_marker = chat_marker
+                    yield _sse('chat_messages', {'latest_id': chat_marker})
+
+                sync_markers = latest_sync_markers()
+                sync_job_id = int(sync_markers.get('job_latest_id') or 0)
+                sync_item_id = int(sync_markers.get('item_latest_id') or 0)
+                sync_source_id = int(sync_markers.get('source_latest_id') or 0)
+
+                if sync_job_id != last_sync_job_id:
+                    last_sync_job_id = sync_job_id
+                    yield _sse('media_sync_job', {'latest_id': sync_job_id})
+                if sync_item_id != last_sync_item_id:
+                    last_sync_item_id = sync_item_id
+                    yield _sse('media_sync_item', {'latest_id': sync_item_id})
+                if sync_source_id != last_sync_source_id:
+                    last_sync_source_id = sync_source_id
+                    yield _sse('media_sync_source', {'latest_id': sync_source_id})
+
+                yield _sse('heartbeat', {})
                 time.sleep(2)
             except GeneratorExit:
                 break

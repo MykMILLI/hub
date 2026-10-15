@@ -1,58 +1,162 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="max-w-7xl w-full mx-auto space-y-4 md:space-y-5 min-w-0">
-  <section class="card p-5 rounded-2xl border border-gray-200/70 dark:border-gray-700/70">
-    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-      <div>
-        <h1 class="text-3xl font-extrabold tracking-tight">Family Messages</h1>
-        <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">Private in-app family chat with encrypted message storage.</p>
-      </div>
-      <div class="flex items-center gap-2 text-xs text-gray-500">
-        <span id="messagesUnreadCount" class="px-2 py-1 rounded bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-200">Unread: 0</span>
-        <label class="inline-flex items-center gap-1">
-          <span>Mine</span>
-          <input id="mineBubbleColor" type="color" value="#3B82F6" class="w-7 h-7 p-0 border-0 bg-transparent cursor-pointer">
-        </label>
-        <label class="inline-flex items-center gap-1">
-          <span>Theirs</span>
-          <input id="theirBubbleColor" type="color" value="#E5E7EB" class="w-7 h-7 p-0 border-0 bg-transparent cursor-pointer">
-        </label>
-        <a href="/polls" class="btn btn-secondary text-xs">Open Polls</a>
-      </div>
+<div class="messages-shell w-full min-w-0 overflow-hidden border border-slate-200 dark:border-slate-700">
+  <header class="messages-topbar">
+    <div class="font-bold text-sm whitespace-nowrap"><i class="fa-solid fa-comments mr-2"></i>Family Messages</div>
+    <div class="relative w-full max-w-2xl">
+      <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+      <input id="globalMessageSearch" type="search" class="messages-search" placeholder="Search messages across your family conversations" autocomplete="off">
+      <div id="messageSearchResults" class="hidden message-search-results"></div>
     </div>
-  </section>
-
-  <section class="card p-0 rounded-2xl border border-gray-200/70 dark:border-gray-700/70 overflow-hidden min-w-0">
-    <div class="grid grid-cols-1 md:grid-cols-3 w-full min-w-0">
-      <aside class="md:col-span-1 border-b md:border-b-0 md:border-r border-gray-200/70 dark:border-gray-700/70 p-3 sm:p-4 bg-gray-50/50 dark:bg-gray-900/30 min-w-0">
-        <div class="flex items-center justify-between mb-3">
-          <h2 class="text-lg font-bold">Conversations</h2>
-          <button id="refreshThreads" class="btn btn-secondary text-xs">Refresh</button>
-        </div>
-        <div id="threadList" class="space-y-2 overflow-y-auto" style="max-height: 24rem;"></div>
-      </aside>
-
-      <div class="md:col-span-2 min-w-0 flex flex-col w-full">
-        <div class="px-3 sm:px-4 py-3 border-b border-gray-200/70 dark:border-gray-700/70 flex items-center justify-between gap-3">
-          <div id="chatHeader" class="text-sm font-semibold text-gray-700 dark:text-gray-200">Select a family member to start chatting.</div>
-          <button id="startVideoChatBtn" type="button" class="btn btn-secondary text-xs hidden">Video Chat</button>
-        </div>
-
-        <div id="chatMessages" class="overflow-y-auto px-3 sm:px-4 py-4 space-y-3 bg-gradient-to-b from-gray-50/40 to-transparent dark:from-gray-900/20 min-w-0" style="min-height: 16rem; max-height: 26rem;"></div>
-
-        <form id="chatForm" class="px-3 sm:px-4 py-3 border-t border-gray-200 dark:border-gray-700 space-y-2 min-w-0">
-          <textarea id="chatMessageInput" rows="2" class="w-full p-3 border rounded-2xl dark:bg-gray-800 dark:border-gray-600"></textarea>
-          <div class="flex flex-col sm:flex-row sm:items-center gap-2">
-            <input id="chatAttachmentInput" type="file" class="text-sm w-full sm:w-auto min-w-0">
-            <button type="submit" class="btn btn-primary sm:ml-auto">Send</button>
-          </div>
-        </form>
-      </div>
+    <div class="flex items-center gap-2">
+      <span id="messagesUnreadCount" class="text-xs px-2 py-1 rounded-full bg-white/15">Unread: 0</span>
+      <a href="/polls" class="text-xs px-2 py-1 rounded hover:bg-white/10" title="Open polls">Polls</a>
     </div>
-  </section>
+  </header>
+  <div class="messages-workspace">
+    <nav class="messages-rail hidden md:flex" aria-label="Messages navigation">
+      <span class="messages-rail-avatar">{{ (current_member_name or 'U')[:1].upper() }}</span>
+      <a href="/messages" class="active" title="Messages"><i class="fa-solid fa-message"></i></a>
+      <button id="openSharedCloudPicker" type="button" title="Share from Shared Cloud"><i class="fa-solid fa-folder"></i></button>
+    </nav>
+    <aside class="messages-sidebar">
+      <div class="flex items-center justify-between gap-2 px-4 pt-4 pb-3">
+        <div>
+          <h1 class="font-bold text-base">Direct messages</h1>
+          <p class="text-xs opacity-70">Your family</p>
+        </div>
+        <div class="flex gap-1">
+          <button id="refreshThreads" type="button" class="messages-icon-btn" title="Refresh messages" aria-label="Refresh messages"><i class="fa-solid fa-rotate"></i></button>
+          <button id="newMessageBtn" type="button" class="messages-icon-btn" title="New message" aria-label="New message"><i class="fa-solid fa-square-pen"></i></button>
+        </div>
+      </div>
+      <div class="px-3 pb-3">
+        <button id="openNewMessageFromSidebar" type="button" class="messages-compose-btn"><i class="fa-solid fa-plus"></i> New message</button>
+      </div>
+      <div class="px-4 pb-2 text-[11px] font-bold uppercase tracking-wider opacity-60">Direct messages</div>
+      <div id="threadList" class="messages-thread-list"></div>
+    </aside>
+    <section class="messages-conversation">
+      <div class="messages-conversation-header">
+        <div>
+          <div id="chatHeader" class="font-bold">Select a family member to start chatting.</div>
+          <div id="chatSubheader" class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Private, encrypted family conversation</div>
+        </div>
+        <button id="startVideoChatBtn" type="button" class="btn btn-secondary text-xs hidden"><i class="fa-solid fa-video mr-1"></i>Video chat</button>
+      </div>
+      <div id="typingIndicator" class="hidden px-5 py-1 text-xs text-indigo-600 dark:text-indigo-300 border-b border-slate-100 dark:border-slate-800">
+        <span id="typingIndicatorText"></span>
+      </div>
+      <div id="chatMessages" class="messages-canvas"></div>
+      <form id="chatForm" class="messages-composer">
+        <div class="flex flex-wrap items-center gap-1 pb-2 text-gray-600 dark:text-gray-300">
+          <button type="button" class="chat-compose-action" data-wrap="bold" title="Bold" aria-label="Bold"><i class="fa-solid fa-bold"></i></button>
+          <button type="button" class="chat-compose-action" data-wrap="italic" title="Italic" aria-label="Italic"><i class="fa-solid fa-italic"></i></button>
+          <button type="button" class="chat-compose-action" data-wrap="code" title="Code" aria-label="Code"><i class="fa-solid fa-code"></i></button>
+          <button type="button" id="chatLinkBtn" class="chat-compose-action" title="Insert link" aria-label="Insert link"><i class="fa-solid fa-link"></i></button>
+          <button type="button" id="chatGifBtn" class="chat-compose-action" title="Add GIF link" aria-label="Add GIF link"><i class="fa-solid fa-film"></i><span class="ml-1 text-xs">GIF</span></button>
+          <button type="button" id="chatAppLinkBtn" class="chat-compose-action" title="Link a HomeHub item" aria-label="Link a HomeHub item"><i class="fa-solid fa-share-nodes"></i></button>
+          <button type="button" id="chatAttachBtn" class="chat-compose-action" title="Attach file" aria-label="Attach file"><i class="fa-solid fa-paperclip"></i></button>
+        </div>
+        <textarea id="chatMessageInput" rows="2" class="messages-composer-input" placeholder="Message" disabled></textarea>
+        <div class="flex items-center justify-between gap-2 pt-2">
+          <input id="chatAttachmentInput" type="file" class="hidden" disabled>
+          <span id="chatAttachmentLabel" class="text-xs text-gray-500 truncate"></span>
+          <button id="sendMessageBtn" type="submit" class="btn btn-primary" disabled><i class="fa-solid fa-paper-plane mr-1"></i>Send</button>
+        </div>
+      </form>
+    </section>
+  </div>
+  <input id="mineBubbleColor" type="color" value="#4F46E5" class="hidden">
+  <input id="theirBubbleColor" type="color" value="#E2E8F0" class="hidden">
 </div>
+<div id="gifPickerModal" class="hidden fixed inset-0 z-[80] bg-black/60 p-4 items-center justify-center"><div class="card w-full max-w-3xl max-h-[calc(100vh-2rem)] overflow-y-auto p-5 rounded-2xl"><div class="flex justify-between"><h3 class="text-xl font-bold">Find a GIF</h3><button class="btn btn-secondary gif-close">Close</button></div><p class="mt-2 text-sm text-gray-500">Search without leaving this conversation, then paste the selected GIF URL below.</p><form id="gifSearchForm" class="mt-4 flex gap-2"><input id="gifSearchInput" class="flex-1 p-2 border rounded-lg" placeholder="Search for a GIF"><button class="btn btn-primary">Search</button></form><iframe id="gifSearchFrame" class="hidden mt-3 w-full h-[420px] rounded-xl border border-gray-200 dark:border-gray-700" title="GIF search"></iframe><input id="gifUrlInput" class="mt-3 w-full p-2 border rounded-lg" placeholder="Paste selected GIF URL"><button id="insertGifUrl" class="mt-3 btn btn-primary">Insert GIF</button></div></div>
+<div id="sharedCloudModal" class="hidden fixed inset-0 z-[80] bg-black/60 p-4 items-center justify-center"><div class="card w-full max-w-2xl max-h-[calc(100vh-2rem)] overflow-y-auto p-5 rounded-2xl"><div class="flex justify-between"><h3 class="text-xl font-bold">Share from Shared Cloud</h3><button class="btn btn-secondary cloud-close">Close</button></div><div id="sharedCloudItems" class="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-3"></div></div></div>
 
-<div id="videoChatModal" class="hidden fixed inset-0 bg-black/70 z-50 items-center justify-center p-4 sm:p-6">
+<style>
+  .messages-shell { height: calc(100vh - 4.5rem); min-height: 700px; background: #fff; color: #172033; border-radius: 0; box-shadow: none; }
+  .dark .messages-shell { background: #111827; color: #f8fafc; }
+  .messages-topbar { height: 54px; display: flex; align-items: center; gap: 1rem; padding: .55rem 1rem; background: linear-gradient(135deg, #4c1d5f, var(--primary-color, #8b5cf6)); color: #fff; }
+  .messages-search { width: 100%; height: 34px; padding: 0 .75rem 0 2rem; border: 1px solid rgba(255,255,255,.28); border-radius: .4rem; background: rgba(255,255,255,.14); color: #fff; font-size: .875rem; outline: none; }
+  .messages-search::placeholder { color: rgba(255,255,255,.72); }
+  .messages-search:focus { border-color: #fff; background: rgba(255,255,255,.22); }
+  .messages-workspace { display: flex; width: 100%; min-width: 0; height: calc(100% - 54px); }
+  .messages-rail { flex: 0 0 56px; align-items: center; flex-direction: column; gap: .6rem; padding: .65rem 0; background: #f3e8ff; border-right: 1px solid #e9d5ff; }
+  .dark .messages-rail { background: #3b0764; border-color: #581c87; }
+  .messages-rail a { display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: .45rem; color: #6b21a8; }
+  .messages-rail button { display:flex; align-items:center; justify-content:center; width:34px; height:34px; border-radius:.45rem; color:#6b21a8; }
+  .dark .messages-rail a { color: #e9d5ff; }
+  .messages-rail a:hover, .messages-rail a.active { color: #fff; background: var(--primary-color, #8b5cf6); }
+  .messages-rail-avatar { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: .4rem; color: #fff; font-weight: 800; background: var(--primary-color, #8b5cf6); margin-bottom: .25rem; }
+  .messages-sidebar { flex: 0 0 300px; min-width: 0; overflow-y: auto; background: #faf5ff; border-right: 1px solid #e9d5ff; }
+  .dark .messages-sidebar { background: #3b0764; border-color: #581c87; }
+  .messages-icon-btn { width: 30px; height: 30px; border-radius: .35rem; color: inherit; opacity: .8; }
+  .messages-icon-btn:hover { opacity: 1; background: rgba(139,92,246,.14); }
+  .messages-compose-btn { display: flex; align-items: center; justify-content: center; gap: .5rem; width: 100%; padding: .55rem .75rem; border-radius: .4rem; background: var(--primary-color, #8b5cf6); color: #fff; font-size: .875rem; font-weight: 700; }
+  .messages-compose-btn:hover { filter: brightness(.9); }
+  .messages-thread-list { padding: 0 .5rem .75rem; }
+  .thread-item { border: 0; border-radius: .35rem; padding: .5rem .65rem; margin-bottom: .1rem; }
+  .thread-item:hover { background: rgba(139,92,246,.12); }
+  .thread-item.thread-active { background: var(--primary-color, #8b5cf6); color: #fff; }
+  .thread-item.thread-active .text-gray-500, .thread-item.thread-active .text-gray-400 { color: rgba(255,255,255,.78); }
+  .messages-conversation { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; flex: 1 1 auto; width: 0; min-width: 0; background: #fff; }
+  .dark .messages-conversation { background: #111827; }
+  .messages-conversation-header { min-height: 72px; display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .9rem 1.25rem; border-bottom: 1px solid #ede9fe; }
+  .dark .messages-conversation-header { border-color: #581c87; }
+  .messages-canvas { overflow-y: auto; padding: 1.25rem; }
+  .messages-composer { padding: .75rem 1rem 1rem; border-top: 1px solid #ede9fe; }
+  .dark .messages-composer { border-color: #581c87; }
+  .messages-composer-input { width: 100%; resize: none; border: 1px solid #c4b5fd; border-radius: .45rem; padding: .7rem .8rem; background: transparent; outline: none; }
+  .messages-composer-input:focus { border-color: var(--primary-color, #8b5cf6); box-shadow: 0 0 0 2px rgba(139,92,246,.15); }
+  .chat-compose-action { min-width: 2rem; height: 2rem; padding: 0 .45rem; border-radius: .35rem; }
+  .chat-compose-action:hover { background: #f3e8ff; color: #6b21a8; }
+  .dark .chat-compose-action:hover { background: #581c87; color: #fff; }
+  .message-search-results { position: absolute; z-index: 75; top: calc(100% + .35rem); left: 0; right: 0; max-height: 360px; overflow-y: auto; border: 1px solid #ddd6fe; border-radius: .5rem; background: #fff; color: #172033; box-shadow: 0 14px 32px rgba(76,29,95,.28); }
+  .dark .message-search-results { background: #3b0764; color: #f8fafc; border-color: #7e22ce; }
+  .message-search-result { width: 100%; padding: .7rem .8rem; text-align: left; border-bottom: 1px solid #ede9fe; }
+  .message-search-result:last-child { border-bottom: 0; }
+  .message-search-result:hover { background: #faf5ff; }
+  .dark .message-search-result:hover { background: #581c87; }
+  @media (max-width: 767px) {
+    .messages-shell { height: calc(100vh - 6rem); min-height: 540px; border-radius: 0; margin: -0.75rem; width: calc(100% + 1.5rem); }
+    .messages-topbar { gap: .5rem; padding: .5rem .75rem; }
+    .messages-topbar > .font-bold, .messages-topbar > .flex > a { display: none; }
+    .messages-sidebar { flex-basis: 220px; }
+  }
+  @media (max-width: 767px) {
+    .messages-shell { height: calc(100dvh - 1.5rem); min-height: 580px; margin:0; }
+    .messages-topbar { height:auto; min-height:54px; flex-wrap:wrap; gap:.5rem; }
+    .messages-topbar > .relative { order:3; max-width:none; flex-basis:100%; }
+    .messages-rail { display:none !important; }
+    .messages-sidebar { flex:0 0 92px; }
+    .messages-sidebar h1,.messages-sidebar p,.messages-sidebar .messages-compose-btn { display:none; }
+    .messages-sidebar .px-4,.messages-sidebar .px-3 { padding-left:.4rem; padding-right:.4rem; }
+    .thread-item { padding:.45rem; }
+    .messages-conversation-header { padding:.8rem; }
+    .messages-canvas { padding:.75rem; }
+    .messages-composer { padding:.65rem; }
+  }
+</style>
+
+  <div id="newMessageModal" class="hidden fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4 sm:p-6" role="dialog" aria-modal="true" aria-labelledby="newMessageTitle">
+    <div class="card w-full max-w-lg max-h-[calc(100vh-2rem)] overflow-y-auto p-4 sm:p-5 rounded-2xl border border-gray-200/70 dark:border-gray-700/70">
+      <div class="flex items-center justify-between gap-3 mb-4">
+        <div>
+          <h2 id="newMessageTitle" class="text-xl font-bold">New message</h2>
+          <p class="text-sm text-gray-500 dark:text-gray-400">Choose a family member to start a direct message.</p>
+        </div>
+        <button id="closeNewMessageBtn" type="button" class="btn btn-secondary" aria-label="Close new message">Close</button>
+      </div>
+      <label class="relative block mb-3">
+        <span class="sr-only">Search family members</span>
+        <i class="fa-solid fa-magnifying-glass absolute left-3 top-3 text-gray-400"></i>
+        <input id="newMessageSearch" type="search" class="w-full p-2 pl-9 border rounded-xl dark:bg-gray-800 dark:border-gray-600" placeholder="Search family members..." autocomplete="off">
+      </label>
+      <div id="newMessageMembers" class="space-y-1"></div>
+    </div>
+  </div>
+
+  <div id="videoChatModal" class="hidden fixed inset-0 bg-black/70 z-50 items-center justify-center p-4 sm:p-6">
   <div class="card w-full max-w-5xl p-4 rounded-2xl border border-gray-200/70 dark:border-gray-700/70 max-h-[calc(100vh-4rem)] overflow-y-auto">
     <div class="flex items-center justify-between gap-2 mb-3">
       <h3 id="videoChatTitle" class="text-lg font-bold">Family Video Chat</h3>
@@ -84,7 +188,10 @@
   const chatForm = document.getElementById('chatForm');
   const chatMessageInput = document.getElementById('chatMessageInput');
   const chatAttachmentInput = document.getElementById('chatAttachmentInput');
+  const chatAttachmentLabel = document.getElementById('chatAttachmentLabel');
   const startVideoChatBtn = document.getElementById('startVideoChatBtn');
+  const typingIndicator = document.getElementById('typingIndicator');
+  const typingIndicatorText = document.getElementById('typingIndicatorText');
   const videoChatModal = document.getElementById('videoChatModal');
   const videoChatTitle = document.getElementById('videoChatTitle');
   const videoChatStatus = document.getElementById('videoChatStatus');
@@ -97,9 +204,16 @@
   const unreadBadge = document.getElementById('messagesUnreadCount');
   const mineBubbleColorInput = document.getElementById('mineBubbleColor');
   const theirBubbleColorInput = document.getElementById('theirBubbleColor');
+  const newMessageModal = document.getElementById('newMessageModal');
+  const newMessageMembers = document.getElementById('newMessageMembers');
+  const newMessageSearch = document.getElementById('newMessageSearch');
+  const globalMessageSearch = document.getElementById('globalMessageSearch');
+  const messageSearchResults = document.getElementById('messageSearchResults');
+  const sendMessageBtn = document.getElementById('sendMessageBtn');
   const rtcIceServers = JSON.parse('{{ (webrtc_ice_servers or [])|tojson|safe }}');
 
   let selectedMember = '';
+  let availableMembers = [];
   let lastSignalId = 0;
   let signalPollTimer = null;
   let messagePollTimer = null;
@@ -107,6 +221,9 @@
   let eventsSource = null;
   let eventsReconnectTimer = null;
   let lastThreadSignature = '';
+  let typingStopTimer = null;
+  let typingSent = false;
+  let globalSearchTimer = null;
   const callState = {
     sessionId: '',
     peer: '',
@@ -118,7 +235,48 @@
   function toast(msg, type='info'){ if(window.globalToast) globalToast(msg, type); }
   function esc(v){ return String(v || '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
   function fmt(iso){ try { return new Date(iso).toLocaleString(); } catch(_) { return iso || ''; } }
+  function setNewMessageModal(open){
+    newMessageModal.classList.toggle('hidden', !open);
+    if (open) {
+      newMessageSearch.value = '';
+      renderMemberPicker();
+      setTimeout(() => newMessageSearch.focus(), 10);
+    }
+  }
+  function renderMemberPicker(){
+    const query = String(newMessageSearch.value || '').trim().toLowerCase();
+    const rows = availableMembers.filter(row => String(row.member || '').toLowerCase().includes(query));
+    newMessageMembers.innerHTML = rows.length ? rows.map(row => {
+      const name = String(row.member || '');
+      const initial = esc(name.slice(0, 1).toUpperCase() || '?');
+      const preview = row.last_message ? esc(row.last_message) : 'Start a new conversation';
+      return `<button type="button" class="w-full flex items-center gap-3 p-3 rounded-xl text-left hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition new-message-member" data-member="${esc(name)}">
+        <span class="w-10 h-10 rounded-full bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-200 flex items-center justify-center font-bold">${initial}</span>
+        <span class="min-w-0 flex-1"><span class="block font-semibold truncate">${esc(name)}</span><span class="block text-xs text-gray-500 truncate">${preview}</span></span>
+        <i class="fa-solid fa-chevron-right text-xs text-gray-400"></i>
+      </button>`;
+    }).join('') : '<p class="p-3 text-sm text-gray-500">No family members match that search.</p>';
+  }
+  async function selectMember(member){
+    selectedMember = member;
+    setNewMessageModal(false);
+    typingSent = false;
+    setTypingIndicator(false, '');
+    await loadThreads();
+    await loadThreadMessages();
+    await loadTypingStatus();
+  }
   function colorKey(side){ return `homehub_chat_bubble_${currentMember}_${side}`; }
+  function insertComposerText(before, after = '', placeholder = '') {
+    const start = chatMessageInput.selectionStart;
+    const end = chatMessageInput.selectionEnd;
+    const selected = chatMessageInput.value.slice(start, end) || placeholder;
+    chatMessageInput.value = chatMessageInput.value.slice(0, start) + before + selected + after + chatMessageInput.value.slice(end);
+    const caret = start + before.length + selected.length + after.length;
+    chatMessageInput.setSelectionRange(caret, caret);
+    chatMessageInput.focus();
+    chatMessageInput.dispatchEvent(new Event('input'));
+  }
   function readColor(side, fallback){
     const raw = String(localStorage.getItem(colorKey(side)) || '').trim();
     return /^#[0-9a-fA-F]{6}$/.test(raw) ? raw : fallback;
@@ -158,6 +316,17 @@
   function setVideoModal(show){
     videoChatModal.classList.toggle('hidden', !show);
     videoChatModal.classList.toggle('flex', show);
+  }
+
+  function setTypingIndicator(show, member){
+    if (!typingIndicator || !typingIndicatorText) return;
+    if (!show) {
+      typingIndicator.classList.add('hidden');
+      typingIndicatorText.textContent = '';
+      return;
+    }
+    typingIndicatorText.textContent = `${member || 'Family member'} is typing...`;
+    typingIndicator.classList.remove('hidden');
   }
 
   function setCallStatus(text){
@@ -364,35 +533,34 @@
 
   function renderThreadItem(item){
     const active = item.member === selectedMember;
-    return `<button type="button" class="w-full text-left p-3 rounded-2xl border ${active ? 'border-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 shadow-sm' : 'border-gray-200 dark:border-gray-700'} thread-item" data-member="${esc(item.member)}">
+    const initial = esc(String(item.member || '?').slice(0, 1).toUpperCase());
+    return `<button type="button" class="w-full text-left thread-item ${active ? 'thread-active' : ''}" data-member="${esc(item.member)}">
       <div class="flex items-center justify-between gap-2">
-        <div class="font-semibold truncate">${esc(item.member)}</div>
+        <div class="flex items-center gap-2 min-w-0"><span class="w-6 h-6 rounded bg-purple-200 dark:bg-purple-800 text-purple-800 dark:text-purple-100 flex items-center justify-center text-xs font-bold flex-shrink-0">${initial}</span><div class="font-semibold truncate">${esc(item.member)}</div></div>
         ${item.unread ? `<span class="text-xs px-2 py-0.5 rounded-full bg-red-500 text-white">${item.unread}</span>` : ''}
       </div>
       <div class="text-xs text-gray-500 truncate">${esc(item.last_message || '')}</div>
-      <div class="text-[10px] text-gray-400">${esc(item.last_at ? fmt(item.last_at) : '')}</div>
     </button>`;
   }
 
   function renderMessageBubble(row){
     const mine = row.sender === currentMember;
-    const align = mine ? 'justify-end' : 'justify-start';
-    const bubbleBg = mine ? readColor('mine', '#3B82F6') : readColor('theirs', '#E5E7EB');
-    const bubbleText = preferredTextColor(bubbleBg);
-    const bubbleRadius = mine ? 'rounded-2xl rounded-br-md' : 'rounded-2xl rounded-bl-md';
+    const sender = mine ? currentMember : row.sender;
+    const initial = esc(String(sender || '?').slice(0, 1).toUpperCase());
     const attachment = row.attachment_url
       ? (String(row.attachment_mime || '').startsWith('image/')
-          ? `<img src="${esc(row.attachment_url)}" class="max-w-xs rounded-lg border border-gray-200 dark:border-gray-700 mt-1" alt="chat attachment">`
+          ? `<img src="${esc(row.attachment_url)}" class="max-w-xs rounded-lg border border-gray-200 dark:border-gray-700 mt-2" alt="chat attachment">`
           : `<a href="${esc(row.attachment_url)}" target="_blank" rel="noopener" class="text-xs underline mt-1 inline-block">Attachment: ${esc(row.attachment_filename || 'file')}</a>`)
       : '';
 
-    return `<div class="flex ${align}">
-      <div class="max-w-[80%] break-words px-3 py-2 ${bubbleRadius}" style="background:${esc(bubbleBg)};color:${esc(bubbleText)};">
-        ${row.message ? `<div class="whitespace-pre-wrap text-sm">${esc(row.message)}</div>` : ''}
+    return `<article class="flex gap-3 py-2 px-2 -mx-2 rounded hover:bg-purple-50 dark:hover:bg-purple-950/20 ${mine ? 'bg-purple-50/50 dark:bg-purple-950/20' : ''}">
+      <span class="w-9 h-9 rounded bg-purple-200 dark:bg-purple-800 text-purple-900 dark:text-purple-100 flex items-center justify-center font-bold flex-shrink-0">${initial}</span>
+      <div class="min-w-0 flex-1">
+        <div class="flex items-baseline gap-2"><span class="font-bold text-sm">${esc(sender)}</span><span class="text-[11px] text-slate-500">${esc(fmt(row.created_at))}</span></div>
+        ${row.message ? `<div class="whitespace-pre-wrap text-sm leading-6 break-words">${esc(row.message)}</div>` : ''}
         ${attachment}
-        <div class="text-[10px] opacity-70 mt-1 text-right">${esc(fmt(row.created_at))}</div>
       </div>
-    </div>`;
+    </article>`;
   }
 
   function connectLiveEvents(){
@@ -401,6 +569,9 @@
     }
     eventsSource = new EventSource(`/api/stream/events?member=${encodeURIComponent(currentMember)}`);
     eventsSource.addEventListener('notifications', () => {
+      pollMessagesRealtime();
+    });
+    eventsSource.addEventListener('chat_messages', () => {
       pollMessagesRealtime();
     });
     eventsSource.addEventListener('sync', () => {
@@ -418,7 +589,9 @@
     const data = await res.json();
     if (!res.ok || !data.ok) throw new Error(data.error || 'Failed loading threads');
     const rows = data.threads || [];
-    threadList.innerHTML = rows.length ? rows.map(renderThreadItem).join('') : '<div class="text-sm text-gray-500">No conversations yet.</div>';
+    availableMembers = rows;
+    renderMemberPicker();
+    threadList.innerHTML = rows.length ? rows.map(renderThreadItem).join('') : '<div class="text-sm text-gray-500 p-2">No conversations yet. Click + to start one.</div>';
 
     const unread = rows.reduce((sum, row) => sum + Number(row.unread || 0), 0);
     unreadBadge.textContent = `Unread: ${unread}`;
@@ -429,16 +602,57 @@
     }
   }
 
+  function hideGlobalSearchResults(){
+    messageSearchResults.classList.add('hidden');
+    messageSearchResults.innerHTML = '';
+  }
+
+  function renderGlobalSearchResults(results, query){
+    if (!results.length) {
+      messageSearchResults.innerHTML = `<div class="p-3 text-sm text-slate-500">No messages found for “${esc(query)}”.</div>`;
+      messageSearchResults.classList.remove('hidden');
+      return;
+    }
+    messageSearchResults.innerHTML = results.map(row => `
+      <button type="button" class="message-search-result" data-member="${esc(row.member)}">
+        <span class="block text-xs font-bold text-purple-700 dark:text-purple-300">${esc(row.member)}</span>
+        <span class="block text-sm truncate">${esc(row.message)}</span>
+        <span class="block text-[11px] text-slate-500 mt-1">${esc(fmt(row.created_at))}</span>
+      </button>`).join('');
+    messageSearchResults.classList.remove('hidden');
+  }
+
+  async function searchMessages(){
+    const query = String(globalMessageSearch.value || '').trim();
+    if (query.length < 2) {
+      hideGlobalSearchResults();
+      return;
+    }
+    const res = await fetch(`/api/messages/search?q=${encodeURIComponent(query)}`);
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Unable to search messages');
+    renderGlobalSearchResults(Array.isArray(data.results) ? data.results : [], query);
+  }
+
   async function loadThreadMessages(markRead = true, autoScroll = true){
     if (!selectedMember) {
       chatHeader.textContent = 'Select a family member to start chatting.';
+      document.getElementById('chatSubheader').textContent = 'Private, encrypted family conversation';
       chatMessages.innerHTML = '';
       startVideoChatBtn.classList.add('hidden');
+      chatMessageInput.disabled = true;
+      chatAttachmentInput.disabled = true;
+      sendMessageBtn.disabled = true;
+      setTypingIndicator(false, '');
       lastThreadSignature = '';
       return;
     }
     chatHeader.textContent = `Chat with ${selectedMember}`;
+    document.getElementById('chatSubheader').textContent = 'Private, encrypted direct message';
     startVideoChatBtn.classList.remove('hidden');
+    chatMessageInput.disabled = false;
+    chatAttachmentInput.disabled = false;
+    sendMessageBtn.disabled = false;
 
     const res = await fetch(`/api/messages/thread/${encodeURIComponent(selectedMember)}?member=${encodeURIComponent(currentMember)}`);
     const data = await res.json();
@@ -452,7 +666,7 @@
     lastThreadSignature = signature;
 
     const wasNearBottom = (chatMessages.scrollHeight - chatMessages.scrollTop - chatMessages.clientHeight) < 60;
-    chatMessages.innerHTML = rows.length ? rows.map(renderMessageBubble).join('') : '<div class="text-sm text-gray-500">No messages yet.</div>';
+    chatMessages.innerHTML = rows.length ? rows.map(renderMessageBubble).join('') : `<div class="h-full min-h-[280px] flex flex-col items-center justify-center text-center text-slate-500"><i class="fa-regular fa-message text-4xl mb-3 text-purple-300"></i><p class="font-semibold">Start a conversation with ${esc(selectedMember)}.</p><p class="text-sm mt-1">Send a message below to say hello.</p></div>`;
     if (autoScroll || wasNearBottom) {
       chatMessages.scrollTop = chatMessages.scrollHeight;
     }
@@ -473,11 +687,42 @@
       await loadThreads();
       if (selectedMember) {
         await loadThreadMessages(false, false);
+        await loadTypingStatus();
       }
     } catch (_) {
     } finally {
       messagePollBusy = false;
     }
+  }
+
+  async function sendTypingStatus(typing){
+    if (!selectedMember) return;
+    if (typingSent === typing) return;
+    typingSent = typing;
+    try {
+      await fetch('/api/messages/typing', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          sender: currentMember,
+          recipient: selectedMember,
+          typing,
+        }),
+      });
+    } catch (_) {}
+  }
+
+  async function loadTypingStatus(){
+    if (!selectedMember) {
+      setTypingIndicator(false, '');
+      return;
+    }
+    try {
+      const res = await fetch(`/api/messages/typing/${encodeURIComponent(selectedMember)}?member=${encodeURIComponent(currentMember)}`);
+      const data = await res.json();
+      if (!res.ok || !data.ok) return;
+      setTypingIndicator(data.typing === true, selectedMember);
+    } catch (_) {}
   }
 
   async function sendMessage(){
@@ -505,21 +750,128 @@
 
     chatMessageInput.value = '';
     chatAttachmentInput.value = '';
+    chatAttachmentLabel.textContent = '';
     await loadThreadMessages();
     await loadThreads();
   }
 
+  document.getElementById('newMessageBtn').addEventListener('click', () => setNewMessageModal(true));
+  document.getElementById('openNewMessageFromSidebar').addEventListener('click', () => setNewMessageModal(true));
+  document.getElementById('closeNewMessageBtn').addEventListener('click', () => setNewMessageModal(false));
+  newMessageModal.addEventListener('click', (event) => {
+    if (event.target === newMessageModal) setNewMessageModal(false);
+  });
+  newMessageSearch.addEventListener('input', renderMemberPicker);
+  newMessageMembers.addEventListener('click', async (event) => {
+    const button = event.target.closest('.new-message-member');
+    if (!button) return;
+    try {
+      await selectMember(button.getAttribute('data-member') || '');
+    } catch (err) {
+      toast(err.message || 'Failed to open conversation', 'error');
+    }
+  });
+
+  globalMessageSearch.addEventListener('input', () => {
+    if (globalSearchTimer) clearTimeout(globalSearchTimer);
+    globalSearchTimer = setTimeout(() => {
+      searchMessages().catch(err => toast(err.message || 'Unable to search messages', 'error'));
+    }, 250);
+  });
+  globalMessageSearch.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      hideGlobalSearchResults();
+      globalMessageSearch.blur();
+    }
+  });
+  messageSearchResults.addEventListener('click', async event => {
+    const result = event.target.closest('.message-search-result');
+    if (!result) return;
+    try {
+      await selectMember(result.getAttribute('data-member') || '');
+      hideGlobalSearchResults();
+      globalMessageSearch.value = '';
+    } catch (err) {
+      toast(err.message || 'Failed to open conversation', 'error');
+    }
+  });
+  document.addEventListener('click', event => {
+    if (!event.target.closest('#globalMessageSearch') && !event.target.closest('#messageSearchResults')) {
+      hideGlobalSearchResults();
+    }
+  });
+
   threadList.addEventListener('click', async (event) => {
     const btn = event.target.closest('.thread-item');
     if (!btn) return;
-    selectedMember = btn.getAttribute('data-member') || '';
-    await loadThreads();
-    await loadThreadMessages();
+    try {
+      await selectMember(btn.getAttribute('data-member') || '');
+    } catch (err) {
+      toast(err.message || 'Failed to open conversation', 'error');
+    }
+  });
+
+  chatMessageInput.addEventListener('input', () => {
+    if (!selectedMember) return;
+    const hasText = String(chatMessageInput.value || '').trim().length > 0;
+    if (typingStopTimer) clearTimeout(typingStopTimer);
+    if (hasText) {
+      sendTypingStatus(true).catch(() => {});
+      typingStopTimer = setTimeout(() => {
+        sendTypingStatus(false).catch(() => {});
+      }, 2200);
+    } else {
+      sendTypingStatus(false).catch(() => {});
+    }
+  });
+
+  chatMessageInput.addEventListener('blur', () => {
+    sendTypingStatus(false).catch(() => {});
+  });
+
+  document.querySelectorAll('.chat-compose-action[data-wrap]').forEach(button => {
+    button.addEventListener('click', () => {
+      const action = button.dataset.wrap;
+      const wraps = { bold: ['**', '**', 'bold text'], italic: ['_', '_', 'italic text'], code: ['`', '`', 'code'] };
+      const wrap = wraps[action];
+      if (wrap) insertComposerText(wrap[0], wrap[1], wrap[2]);
+    });
+  });
+  document.getElementById('chatLinkBtn').addEventListener('click', () => {
+    const url = window.prompt('Paste a link to share');
+    if (!url) return;
+    const label = window.prompt('Link label (optional)') || url;
+    insertComposerText(`[${label}](`, ')', url);
+  });
+  const setPicker = (id, show) => { const modal=document.getElementById(id); modal.classList.toggle('hidden',!show); modal.classList.toggle('flex',show); };
+  document.getElementById('chatGifBtn').addEventListener('click', () => setPicker('gifPickerModal', true));
+  document.querySelectorAll('.gif-close').forEach(button => button.onclick=()=>setPicker('gifPickerModal',false));
+  document.getElementById('gifSearchForm').onsubmit = event => { event.preventDefault(); const q=document.getElementById('gifSearchInput').value.trim(); if(q){ const frame=document.getElementById('gifSearchFrame'); frame.src=`https://giphy.com/search/${encodeURIComponent(q)}`; frame.classList.remove('hidden'); } };
+  document.getElementById('insertGifUrl').onclick = () => { const url=document.getElementById('gifUrlInput').value.trim(); if(url){ insertComposerText('', '', url); setPicker('gifPickerModal',false); } };
+  document.getElementById('openSharedCloudPicker').onclick = async () => { setPicker('sharedCloudModal',true); const host=document.getElementById('sharedCloudItems'); host.innerHTML='<p class="text-sm text-gray-500">Loading shared items…</p>'; try { const data=await fetch('/api/photos/assets?limit=24').then(r=>r.json()); const items=data.assets||data.items||[]; host.innerHTML=items.map(item=>`<button type="button" class="text-left rounded-lg border overflow-hidden cloud-item" data-url="${item.stream_url||item.download_url||''}" data-name="${escapeHtml(item.original_filename||item.filename||'Shared item')}"><img class="w-full aspect-square object-cover bg-gray-100" src="${item.thumbnail_url||item.preview_url||item.stream_url||''}"><span class="block p-2 text-xs truncate">${escapeHtml(item.original_filename||item.filename||'Shared item')}</span></button>`).join('') || '<p class="text-sm text-gray-500">No shared cloud items found.</p>'; host.querySelectorAll('.cloud-item').forEach(button=>button.onclick=()=>{insertComposerText(`[${button.dataset.name}](`,')',button.dataset.url);setPicker('sharedCloudModal',false);}); } catch(err){host.textContent='Unable to load Shared Cloud items.';} };
+  document.querySelectorAll('.cloud-close').forEach(button => button.onclick=()=>setPicker('sharedCloudModal',false));
+  document.getElementById('chatAppLinkBtn').addEventListener('click', () => {
+    const choices = [
+      ['Family Calendar', '/calendar'],
+      ['To-Do & Chores', '/chores'],
+      ['Daily Agenda', '/daily-agenda'],
+      ['Projects & Spaces', '/notes'],
+      ['Family Notice history', '/notice-history'],
+    ];
+    const promptText = choices.map((choice, index) => `${index + 1}. ${choice[0]}`).join('\n');
+    const choice = Number(window.prompt(`Link a HomeHub item:\n${promptText}`));
+    const selected = choices[choice - 1];
+    if (selected) insertComposerText(`[${selected[0]}](${window.location.origin}${selected[1]})`);
+  });
+  document.getElementById('chatAttachBtn').addEventListener('click', () => chatAttachmentInput.click());
+  chatAttachmentInput.addEventListener('change', () => {
+    chatAttachmentLabel.textContent = chatAttachmentInput.files[0]?.name || '';
   });
 
   chatForm.addEventListener('submit', async (event) => {
     event.preventDefault();
     try {
+      await sendTypingStatus(false);
       await sendMessage();
     } catch (err) {
       toast(err.message || 'Failed to send message', 'error');
@@ -601,6 +953,12 @@
     }
   });
 
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !newMessageModal.classList.contains('hidden')) {
+      setNewMessageModal(false);
+    }
+  });
+
   window.addEventListener('beforeunload', () => {
     if (signalPollTimer) clearInterval(signalPollTimer);
     if (messagePollTimer) clearInterval(messagePollTimer);
@@ -608,6 +966,7 @@
     if (eventsSource) {
       try { eventsSource.close(); } catch (_) {}
     }
+    if (typingStopTimer) clearTimeout(typingStopTimer);
     if (callState.sessionId) {
       sendCallSignal('end', {}).catch(() => {});
     }

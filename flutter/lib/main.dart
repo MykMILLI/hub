@@ -6,41 +6,111 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:video_player/video_player.dart';
+import 'package:timezone/data/latest.dart' as tzdata;
+import 'package:timezone/timezone.dart' as tz;
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:workmanager/workmanager.dart';
+
+import 'supabase_runtime.dart';
 
 const String _notificationTaskName = 'homehub_notification_poll';
 const String _notificationChannelId = 'homehub_alerts';
 const String _notificationChannelName = 'HomeHub Alerts';
-const String _notificationChannelDesc = 'HomeHub notifications for chat and family activity';
+const String _notificationChannelDesc =
+    'HomeHub notifications for chat and family activity';
 const String _ackActionId = 'acknowledge_notification';
-const List<String> _mealTypes = ['breakfast', 'morning_snack', 'lunch', 'afternoon_snack', 'dinner'];
-const Map<String, String> _mealReminderTime = {
-  'breakfast': '07:55',
-  'morning_snack': '09:55',
-  'lunch': '11:55',
-  'afternoon_snack': '16:25',
-  'dinner': '17:55',
-};
-const String _storyReminderTime = '19:55';
-const Duration _scheduledReminderEarlyTolerance = Duration(minutes: 1);
-const Duration _scheduledReminderCatchUpWindow = Duration(minutes: 90);
+const List<String> _mealTypes = [
+  'breakfast',
+  'morning_snack',
+  'lunch',
+  'afternoon_snack',
+  'dinner',
+];
 const String _cloudBaseUrl = 'https://hub.millitop.net';
 const String _localBaseUrl = 'http://192.168.1.225:5001';
 const bool _calendarSupportsOccurrenceScopedUpdates = false;
 final http.Client _httpClient = IOClient(HttpClient());
 
-String _normalizeBaseUrl(String raw) => raw.startsWith('http://') || raw.startsWith('https://') ? raw : 'http://$raw';
+class _DailyWallClockReminder {
+  const _DailyWallClockReminder({
+    required this.slot,
+    required this.title,
+    required this.body,
+    required this.hour,
+    required this.minute,
+  });
+
+  final String slot;
+  final String title;
+  final String body;
+  final int hour;
+  final int minute;
+}
+
+// Correct approach: store reminders as local time-of-day definitions.
+// Wrong approach: treating reminders as fixed UTC instants or fixed EST offsets.
+const List<_DailyWallClockReminder> _dailyWallClockReminders = [
+  _DailyWallClockReminder(
+    slot: 'breakfast',
+    title: 'Breakfast',
+    body: 'Breakfast reminder',
+    hour: 7,
+    minute: 55,
+  ),
+  _DailyWallClockReminder(
+    slot: 'morning_snack',
+    title: 'Morning Snack',
+    body: 'Morning snack reminder',
+    hour: 9,
+    minute: 55,
+  ),
+  _DailyWallClockReminder(
+    slot: 'lunch',
+    title: 'Lunch',
+    body: 'Lunch reminder',
+    hour: 11,
+    minute: 55,
+  ),
+  _DailyWallClockReminder(
+    slot: 'afternoon_snack',
+    title: 'Afternoon Snack',
+    body: 'Afternoon snack reminder',
+    hour: 16,
+    minute: 25,
+  ),
+  _DailyWallClockReminder(
+    slot: 'dinner',
+    title: 'Dinner',
+    body: 'Dinner reminder',
+    hour: 17,
+    minute: 55,
+  ),
+  _DailyWallClockReminder(
+    slot: 'bedtime_reader',
+    title: 'Bedtime Reader',
+    body: 'Bedtime Reader reminder',
+    hour: 20,
+    minute: 45,
+  ),
+];
+
+String _normalizeBaseUrl(String raw) =>
+    raw.startsWith('http://') || raw.startsWith('https://')
+    ? raw
+    : 'http://$raw';
 
 List<String> _endpointCandidates(String configuredBaseUrl) {
-  final values = <String>[configuredBaseUrl.trim(), _cloudBaseUrl, _localBaseUrl]
-      .where((value) => value.isNotEmpty)
-      .map(_normalizeBaseUrl)
-      .toList();
+  final values = <String>[
+    configuredBaseUrl.trim(),
+    _cloudBaseUrl,
+    _localBaseUrl,
+  ].where((value) => value.isNotEmpty).map(_normalizeBaseUrl).toList();
   final seen = <String>{};
   final out = <String>[];
   for (final value in values) {
@@ -51,7 +121,9 @@ List<String> _endpointCandidates(String configuredBaseUrl) {
 
 Future<bool> _isEndpointReachable(String baseUrl) async {
   try {
-    final response = await http.get(_apiUri(baseUrl, '/healthz')).timeout(const Duration(seconds: 3));
+    final response = await http
+        .get(_apiUri(baseUrl, '/healthz'))
+        .timeout(const Duration(seconds: 3));
     return response.statusCode >= 200 && response.statusCode < 500;
   } on SocketException {
     return false;
@@ -74,41 +146,10 @@ Future<String?> _firstReachableEndpoint(String configuredBaseUrl) async {
 
 Uri _apiUri(String baseUrl, String path, [Map<String, String>? query]) {
   final root = Uri.parse(_normalizeBaseUrl(baseUrl));
-  final rootPath = root.path.endsWith('/') ? root.path.substring(0, root.path.length - 1) : root.path;
+  final rootPath = root.path.endsWith('/')
+      ? root.path.substring(0, root.path.length - 1)
+      : root.path;
   return root.replace(path: '$rootPath$path', queryParameters: query);
-}
-
-String _todayKey(DateTime dt) => '${dt.year.toString().padLeft(4, '0')}${dt.month.toString().padLeft(2, '0')}${dt.day.toString().padLeft(2, '0')}';
-
-DateTime _easternNow() => _toEasternTime(DateTime.now().toUtc());
-
-DateTime _toEasternTime(DateTime utcNow) {
-  final dstStartUtc = _usEasternDstStartUtc(utcNow.year);
-  final dstEndUtc = _usEasternDstEndUtc(utcNow.year);
-  final isDst = !utcNow.isBefore(dstStartUtc) && utcNow.isBefore(dstEndUtc);
-  return utcNow.add(Duration(hours: isDst ? -4 : -5));
-}
-
-DateTime _usEasternDstStartUtc(int year) {
-  final marchSecondSunday = _nthWeekdayOfMonthUtc(year, 3, DateTime.sunday, 2);
-  return DateTime.utc(year, 3, marchSecondSunday.day, 7, 0);
-}
-
-DateTime _usEasternDstEndUtc(int year) {
-  final novemberFirstSunday = _nthWeekdayOfMonthUtc(year, 11, DateTime.sunday, 1);
-  return DateTime.utc(year, 11, novemberFirstSunday.day, 6, 0);
-}
-
-DateTime _nthWeekdayOfMonthUtc(int year, int month, int weekday, int nth) {
-  final first = DateTime.utc(year, month, 1);
-  final delta = (weekday - first.weekday + 7) % 7;
-  return first.add(Duration(days: delta + (nth - 1) * 7));
-}
-
-String _scheduledShownKey(String baseUrl, String member, String slot, DateTime now) {
-  final safeBase = baseUrl.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
-  final safeMember = member.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
-  return 'homehub_sched_shown_${safeBase}_${safeMember}_${_todayKey(now)}_$slot';
 }
 
 String _scheduledDiagKey(String baseUrl, String member, String suffix) {
@@ -117,48 +158,101 @@ String _scheduledDiagKey(String baseUrl, String member, String suffix) {
   return 'homehub_sched_diag_${safeBase}_${safeMember}_$suffix';
 }
 
-int _scheduledNotificationId(String slot, DateTime now) {
-  final seed = '${_todayKey(now)}_$slot';
-  return 700000 + seed.codeUnits.fold<int>(0, (sum, ch) => (sum + ch) % 1000000);
+int _dailyReminderNotificationId(String slot) {
+  return 740000 +
+      slot.codeUnits.fold<int>(0, (sum, ch) => ((sum * 31) + ch) % 100000);
 }
 
-DateTime? _timeForToday(DateTime now, String hhmm) {
-  final parts = hhmm.split(':');
-  if (parts.length != 2) return null;
-  final h = int.tryParse(parts[0]);
-  final m = int.tryParse(parts[1]);
-  if (h == null || m == null) return null;
-  return DateTime(now.year, now.month, now.day, h, m);
-}
-
-bool _isWithinScheduledWindow(DateTime now, DateTime trigger) {
-  return !now.isBefore(trigger.subtract(_scheduledReminderEarlyTolerance)) &&
-      now.isBefore(trigger.add(_scheduledReminderCatchUpWindow));
-}
-
-String _reminderSlot(Map<String, dynamic> row) {
-  final id = _toInt(row['id']);
-  if (id > 0) return 'reminder_$id';
-  final title = '${row['title'] ?? 'reminder'}'.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '_');
-  final timeRaw = '${row['time'] ?? ''}'.trim().replaceAll(':', '');
-  return 'reminder_${timeRaw}_$title';
-}
-
-String _mealLabel(String mealType) {
-  switch (mealType) {
-    case 'breakfast':
-      return 'Breakfast';
-    case 'morning_snack':
-      return 'Morning Snack';
-    case 'lunch':
-      return 'Lunch';
-    case 'afternoon_snack':
-      return 'Afternoon Snack';
-    case 'dinner':
-      return 'Dinner';
-    default:
-      return mealType;
+Future<void> _configureLocalTimezone() async {
+  tzdata.initializeTimeZones();
+  try {
+    final String timezoneName = await FlutterTimezone.getLocalTimezone();
+    tz.setLocalLocation(tz.getLocation(timezoneName));
+  } catch (_) {
+    // If timezone lookup fails, keep the currently configured tz.local.
   }
+}
+
+String _timezoneFingerprint() {
+  final now = DateTime.now();
+  return '${now.timeZoneName}|${now.timeZoneOffset.inMinutes}';
+}
+
+tz.TZDateTime _nextLocalWallClockOccurrence(int hour, int minute) {
+  final now = tz.TZDateTime.now(tz.local);
+  var scheduled = tz.TZDateTime(
+    tz.local,
+    now.year,
+    now.month,
+    now.day,
+    hour,
+    minute,
+  );
+  if (!scheduled.isAfter(now)) {
+    scheduled = scheduled.add(const Duration(days: 1));
+  }
+  return scheduled;
+}
+
+Future<void> _rescheduleDailyWallClockReminders({
+  required FlutterLocalNotificationsPlugin notifications,
+  required String baseUrl,
+  required String member,
+  bool force = false,
+}) async {
+  await _configureLocalTimezone();
+  final prefs = await SharedPreferences.getInstance();
+  final fingerprint = _timezoneFingerprint();
+  final fingerprintKey = _scheduledDiagKey(
+    baseUrl,
+    member,
+    'daily_local_timezone_fingerprint',
+  );
+  if (!force && prefs.getString(fingerprintKey) == fingerprint) {
+    return;
+  }
+
+  for (final reminder in _dailyWallClockReminders) {
+    final next = _nextLocalWallClockOccurrence(reminder.hour, reminder.minute);
+    try {
+      // Scheduling with the same notification ID replaces prior entries.
+      await notifications.zonedSchedule(
+        _dailyReminderNotificationId(reminder.slot),
+        reminder.title,
+        reminder.body,
+        next,
+        NotificationDetails(
+          android: AndroidNotificationDetails(
+            _notificationChannelId,
+            _notificationChannelName,
+            channelDescription: _notificationChannelDesc,
+            importance: Importance.max,
+            priority: Priority.high,
+            actions: const [
+              AndroidNotificationAction(
+                _ackActionId,
+                'Acknowledge',
+                cancelNotification: true,
+              ),
+            ],
+          ),
+        ),
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.wallClockTime,
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        matchDateTimeComponents: DateTimeComponents.time,
+        payload: 'daily_local_${reminder.slot}',
+      );
+    } catch (_) {
+      // Keep app startup resilient if scheduled-cache migration fails on device.
+    }
+  }
+
+  await prefs.setString(fingerprintKey, fingerprint);
+  await prefs.setString(
+    _scheduledDiagKey(baseUrl, member, 'daily_local_last_rescheduled_at'),
+    DateTime.now().toIso8601String(),
+  );
 }
 
 class _SseEvent {
@@ -174,11 +268,16 @@ Stream<_SseEvent> _sseConnect(Uri uri) async* {
     final req = http.Request('GET', uri)
       ..headers['Accept'] = 'text/event-stream'
       ..headers['Cache-Control'] = 'no-cache';
-    final response = await client.send(req).timeout(const Duration(seconds: 20));
+    final response = await client
+        .send(req)
+        .timeout(const Duration(seconds: 20));
 
     String eventName = 'message';
     final dataBuffer = StringBuffer();
-    await for (final line in response.stream.transform(utf8.decoder).transform(const LineSplitter())) {
+    await for (final line
+        in response.stream
+            .transform(utf8.decoder)
+            .transform(const LineSplitter())) {
       if (line.isEmpty) {
         final data = dataBuffer.toString();
         if (data.isNotEmpty) {
@@ -215,170 +314,44 @@ void notificationBackgroundDispatcher() {
     final member = (prefs.getString('homehub_member') ?? '').trim();
     if (baseUrl.isEmpty || member.isEmpty) return true;
 
-    final normalized = baseUrl.startsWith('http://') || baseUrl.startsWith('https://') ? baseUrl : 'http://$baseUrl';
-    final uri = _apiUri(normalized, '/api/notifications', {'member': member, 'unread_only': 'true'});
+    final normalized =
+        baseUrl.startsWith('http://') || baseUrl.startsWith('https://')
+        ? baseUrl
+        : 'http://$baseUrl';
+    final uri = _apiUri(normalized, '/api/notifications', {
+      'member': member,
+      'unread_only': 'true',
+    });
 
     final response = await http.get(uri).timeout(const Duration(seconds: 20));
     if (response.statusCode < 200 || response.statusCode >= 300) return true;
     final data = jsonDecode(response.body);
     if (data is! Map<String, dynamic>) return true;
-    final items = (data['items'] as List<dynamic>? ?? []).whereType<Map<String, dynamic>>().toList();
+    final items = (data['items'] as List<dynamic>? ?? [])
+        .whereType<Map<String, dynamic>>()
+        .toList();
 
     items.sort((a, b) => _toInt(a['id']).compareTo(_toInt(b['id'])));
-    final key = 'homehub_last_notification_${baseUrl.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')}_${member.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')}';
+    final key =
+        'homehub_last_notification_${baseUrl.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')}_${member.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')}';
     int last = prefs.getInt(key) ?? 0;
 
     final local = FlutterLocalNotificationsPlugin();
-    const init = InitializationSettings(android: AndroidInitializationSettings('@mipmap/ic_launcher'));
+    const init = InitializationSettings(
+      android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+    );
     await local.initialize(init);
-
-    final now = _easternNow();
-    final monthUri = _apiUri(normalized, '/api/meal-planner/entries', {
-      'member': member,
-      'year': '${now.year}',
-      'month': '${now.month}',
-    });
-    try {
-      final mealResponse = await http.get(monthUri).timeout(const Duration(seconds: 20));
-      if (mealResponse.statusCode >= 200 && mealResponse.statusCode < 300) {
-        final mealObj = jsonDecode(mealResponse.body);
-        final rows = (mealObj is Map<String, dynamic> ? mealObj['entries'] as List<dynamic>? : null) ?? const [];
-        final todayIso = _fmtDate(now);
-        final todayMeals = rows.whereType<Map<String, dynamic>>().where((row) {
-          return '${row['date'] ?? ''}' == todayIso && row['is_locked'] != true;
-        }).toList();
-
-        for (final mealType in _mealTypes) {
-          final trigger = _timeForToday(now, _mealReminderTime[mealType] ?? '');
-          if (trigger == null) continue;
-          final inWindow = _isWithinScheduledWindow(now, trigger);
-          if (!inWindow) continue;
-          final slot = todayMeals.where((row) => '${row['meal_type'] ?? ''}' == mealType).toList();
-
-          final shownKey = _scheduledShownKey(baseUrl, member, 'meal_$mealType', now);
-          if (prefs.getBool(shownKey) == true) continue;
-
-          final mealLabel = _mealLabel(mealType);
-          final planned = slot.map((row) => '${row['title'] ?? ''}').where((value) => value.trim().isNotEmpty).take(3).join(' • ');
-          final body = planned.isEmpty ? '$mealLabel - no meal planned.' : '$mealLabel - $planned';
-
-          await local.show(
-            _scheduledNotificationId('meal_$mealType', now),
-            '$mealLabel reminder',
-            body,
-            NotificationDetails(
-              android: AndroidNotificationDetails(
-                _notificationChannelId,
-                _notificationChannelName,
-                channelDescription: _notificationChannelDesc,
-                importance: Importance.max,
-                priority: Priority.high,
-                actions: const [AndroidNotificationAction(_ackActionId, 'Acknowledge', cancelNotification: true)],
-              ),
-            ),
-            payload: shownKey,
-          );
-          await prefs.setBool(shownKey, true);
-          await prefs.setString(_scheduledDiagKey(baseUrl, member, 'last_fired_meal_$mealType'), now.toIso8601String());
-        }
-
-        final storyTrigger = _timeForToday(now, _storyReminderTime);
-        if (storyTrigger != null) {
-          final inStoryWindow = _isWithinScheduledWindow(now, storyTrigger);
-          if (inStoryWindow) {
-            final shownKey = _scheduledShownKey(baseUrl, member, 'story_reader', now);
-            if (prefs.getBool(shownKey) != true) {
-              String reader = 'Story reader not set';
-              try {
-                final routinesUri = _apiUri(normalized, '/api/routines');
-                final routinesResponse = await http.get(routinesUri).timeout(const Duration(seconds: 20));
-                if (routinesResponse.statusCode >= 200 && routinesResponse.statusCode < 300) {
-                  final routinesObj = jsonDecode(routinesResponse.body);
-                  final bedtime = (routinesObj is Map<String, dynamic> ? (routinesObj['routines'] as Map<String, dynamic>? ?? {})['bedtime'] : null) as Map<String, dynamic>?;
-                  final rawReader = '${bedtime?['reader'] ?? ''}'.trim();
-                  if (rawReader.isNotEmpty) reader = rawReader;
-                }
-              } catch (_) {}
-
-              await local.show(
-                _scheduledNotificationId('story_reader', now),
-                'Bedtime Reader Tonight',
-                '$reader is the reader tonight.',
-                NotificationDetails(
-                  android: AndroidNotificationDetails(
-                    _notificationChannelId,
-                    _notificationChannelName,
-                    channelDescription: _notificationChannelDesc,
-                    importance: Importance.max,
-                    priority: Priority.high,
-                    actions: const [AndroidNotificationAction(_ackActionId, 'Acknowledge', cancelNotification: true)],
-                  ),
-                ),
-                payload: shownKey,
-              );
-              await prefs.setBool(shownKey, true);
-              await prefs.setString(_scheduledDiagKey(baseUrl, member, 'last_fired_story_reader'), now.toIso8601String());
-            }
-          }
-        }
-
-        try {
-          final remindersUri = _apiUri(normalized, '/api/reminders', {
-            'scope': 'month',
-            'date': _fmtDate(now),
-          });
-          final remindersResponse = await http.get(remindersUri).timeout(const Duration(seconds: 20));
-          if (remindersResponse.statusCode >= 200 && remindersResponse.statusCode < 300) {
-            final remindersObj = jsonDecode(remindersResponse.body);
-            final reminders = (remindersObj is Map<String, dynamic> ? remindersObj['reminders'] as List<dynamic>? : null) ?? const [];
-            final today = _fmtDate(now);
-
-            for (final raw in reminders) {
-              if (raw is! Map) continue;
-              final row = Map<String, dynamic>.from(raw);
-              if ('${row['date'] ?? ''}' != today) continue;
-              final rawTime = '${row['time'] ?? ''}'.trim();
-              if (rawTime.length < 5) continue;
-              final trigger = _timeForToday(now, rawTime.substring(0, 5));
-              if (trigger == null || !_isWithinScheduledWindow(now, trigger)) continue;
-
-              final slot = _reminderSlot(row);
-              final shownKey = _scheduledShownKey(baseUrl, member, slot, now);
-              if (prefs.getBool(shownKey) == true) continue;
-
-              final title = '${row['title'] ?? 'Reminder'}'.trim();
-              final description = '${row['description'] ?? ''}'.trim();
-              final body = description.isNotEmpty ? description : 'Reminder for $rawTime';
-              await local.show(
-                _scheduledNotificationId(slot, now),
-                title.isEmpty ? 'Reminder' : title,
-                body,
-                NotificationDetails(
-                  android: AndroidNotificationDetails(
-                    _notificationChannelId,
-                    _notificationChannelName,
-                    channelDescription: _notificationChannelDesc,
-                    importance: Importance.max,
-                    priority: Priority.high,
-                    actions: const [AndroidNotificationAction(_ackActionId, 'Acknowledge', cancelNotification: true)],
-                  ),
-                ),
-                payload: shownKey,
-              );
-              await prefs.setBool(shownKey, true);
-              await prefs.setString(_scheduledDiagKey(baseUrl, member, 'last_fired_$slot'), now.toIso8601String());
-            }
-          }
-        } catch (_) {}
-      }
-    } catch (_) {}
-
-    await prefs.setString(_scheduledDiagKey(baseUrl, member, 'last_check'), now.toIso8601String());
+    await _rescheduleDailyWallClockReminders(
+      notifications: local,
+      baseUrl: baseUrl,
+      member: member,
+    );
 
     for (final item in items) {
       final id = _toInt(item['id']);
       if (id <= last) continue;
-      final title = '${item['title'] ?? item['event_type'] ?? 'HomeHub Notification'}';
+      final title =
+          '${item['title'] ?? item['event_type'] ?? 'HomeHub Notification'}';
       final msg = '${item['message'] ?? ''}';
       await local.show(
         id,
@@ -391,7 +364,13 @@ void notificationBackgroundDispatcher() {
             channelDescription: _notificationChannelDesc,
             importance: Importance.max,
             priority: Priority.high,
-            actions: const [AndroidNotificationAction(_ackActionId, 'Acknowledge', cancelNotification: true)],
+            actions: const [
+              AndroidNotificationAction(
+                _ackActionId,
+                'Acknowledge',
+                cancelNotification: true,
+              ),
+            ],
           ),
         ),
         payload: 'notif_ack_$id',
@@ -406,7 +385,12 @@ void notificationBackgroundDispatcher() {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await _configureLocalTimezone();
   Workmanager().initialize(notificationBackgroundDispatcher);
+  final supabaseBootstrap = await initializeHomeHubSupabase();
+  if (supabaseBootstrap.message.isNotEmpty) {
+    debugPrint('[Supabase] ${supabaseBootstrap.message}');
+  }
   runApp(const HomeHubMobileApp());
 }
 
@@ -468,7 +452,9 @@ class _HomeHubMobileAppState extends State<HomeHubMobileApp> {
         cardTheme: CardThemeData(
           color: Colors.white,
           elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
         ),
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
@@ -490,19 +476,16 @@ class _HomeHubMobileAppState extends State<HomeHubMobileApp> {
       home: _loading
           ? const Scaffold(body: Center(child: CircularProgressIndicator()))
           : (_settings == null || !_settings!.isValid)
-              ? SetupScreen(onSave: _saveSettings)
-              : (_settings!.member.trim().isEmpty)
-                  ? AuthGateScreen(
-                      settings: _settings!,
-                      onUpdateSettings: _saveSettings,
-                      onAuthenticated: (authedSettings) {
-                        setState(() => _settings = authedSettings);
-                      },
-                    )
-                  : HomeShell(
-                      settings: _settings!,
-                      onUpdateSettings: _saveSettings,
-                    ),
+          ? SetupScreen(onSave: _saveSettings)
+          : (_settings!.member.trim().isEmpty)
+          ? AuthGateScreen(
+              settings: _settings!,
+              onUpdateSettings: _saveSettings,
+              onAuthenticated: (authedSettings) {
+                setState(() => _settings = authedSettings);
+              },
+            )
+          : HomeShell(settings: _settings!, onUpdateSettings: _saveSettings),
     );
   }
 }
@@ -560,7 +543,9 @@ class SettingsStore {
 
 class HomeHubApi {
   HomeHubApi(this.settings)
-      : _activeBaseUrl = settings.baseUrl.trim().isEmpty ? _cloudBaseUrl : settings.baseUrl.trim();
+    : _activeBaseUrl = settings.baseUrl.trim().isEmpty
+          ? _cloudBaseUrl
+          : settings.baseUrl.trim();
 
   final AppSettings settings;
   String _activeBaseUrl;
@@ -571,11 +556,25 @@ class HomeHubApi {
     return _uri('/api/stream/events', {'member': settings.member});
   }
 
+  Future<Map<String, dynamic>> fetchSupabaseStatus() async {
+    final uri = _uri('/api/supabase/status');
+    final response = await _get(uri);
+    return _decodeObject(response);
+  }
+
+  Future<Map<String, dynamic>> probeSupabase() async {
+    final uri = _uri('/api/supabase/probe');
+    final response = await _get(uri, seconds: 20);
+    return _decodeObject(response);
+  }
+
   Uri _uri(String path, [Map<String, String>? query]) {
     // Always prioritize the configured URL (external DNS) and use runtime fallback only when needed.
     final preferred = settings.baseUrl.trim();
     final base = preferred.isEmpty
-        ? (_activeBaseUrl.trim().isEmpty ? _cloudBaseUrl : _activeBaseUrl.trim())
+        ? (_activeBaseUrl.trim().isEmpty
+              ? _cloudBaseUrl
+              : _activeBaseUrl.trim())
         : preferred;
     return _apiUri(base.isEmpty ? _cloudBaseUrl : base, path, query);
   }
@@ -589,7 +588,9 @@ class HomeHubApi {
   }
 
   bool _isRetryableNetworkError(Object error) {
-    return error is SocketException || error is TimeoutException || error is http.ClientException;
+    return error is SocketException ||
+        error is TimeoutException ||
+        error is http.ClientException;
   }
 
   Future<http.Response> _requestWithFailover({
@@ -608,10 +609,13 @@ class HomeHubApi {
     };
     for (final candidate in _endpointCandidates(settings.baseUrl)) {
       final mapped = _remapUriToBase(uri, candidate);
-      final key = '${mapped.scheme}://${mapped.host}${mapped.hasPort ? ':${mapped.port}' : ''}';
+      final key =
+          '${mapped.scheme}://${mapped.host}${mapped.hasPort ? ':${mapped.port}' : ''}';
       if (!tried.add(key)) continue;
       try {
-        final response = await sender(mapped).timeout(Duration(seconds: seconds));
+        final response = await sender(
+          mapped,
+        ).timeout(Duration(seconds: seconds));
         // Keep fallback non-sticky when a configured URL exists.
         if (settings.baseUrl.trim().isEmpty) {
           _activeBaseUrl = _normalizeBaseUrl(candidate);
@@ -622,13 +626,33 @@ class HomeHubApi {
       }
     }
 
-    throw http.ClientException('All configured HomeHub endpoints are unreachable', uri);
+    throw http.ClientException(
+      'All configured HomeHub endpoints are unreachable',
+      uri,
+    );
   }
 
   String _weatherLocationStoragePrefix() {
     final raw = '${settings.baseUrl.trim()}|${settings.member.trim()}';
     final safe = raw.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
     return 'homehub_weather_location_$safe';
+  }
+
+  String _syncInstanceStorageKey() {
+    final raw = '${settings.baseUrl.trim()}|${settings.member.trim()}';
+    final safe = raw.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
+    return 'homehub_sync_instance_id_$safe';
+  }
+
+  Future<String> _getOrCreateSyncInstanceId() async {
+    final prefs = await SharedPreferences.getInstance();
+    final key = _syncInstanceStorageKey();
+    final existing = (prefs.getString(key) ?? '').trim();
+    if (existing.isNotEmpty) return existing;
+    final created =
+        'hh_${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}_${settings.member.hashCode.abs().toRadixString(36)}';
+    await prefs.setString(key, created);
+    return created;
   }
 
   Future<void> _saveLocalWeatherLocation({
@@ -667,7 +691,11 @@ class HomeHubApi {
     );
   }
 
-  Future<http.Response> _postJson(Uri uri, Map<String, dynamic> body, {int seconds = 15}) {
+  Future<http.Response> _postJson(
+    Uri uri,
+    Map<String, dynamic> body, {
+    int seconds = 15,
+  }) {
     return _requestWithFailover(
       uri: uri,
       seconds: seconds,
@@ -679,7 +707,11 @@ class HomeHubApi {
     );
   }
 
-  Future<http.Response> _putJson(Uri uri, Map<String, dynamic> body, {int seconds = 15}) {
+  Future<http.Response> _putJson(
+    Uri uri,
+    Map<String, dynamic> body, {
+    int seconds = 15,
+  }) {
     return _requestWithFailover(
       uri: uri,
       seconds: seconds,
@@ -691,7 +723,11 @@ class HomeHubApi {
     );
   }
 
-  Future<http.Response> _deleteJson(Uri uri, Map<String, dynamic> body, {int seconds = 15}) {
+  Future<http.Response> _deleteJson(
+    Uri uri,
+    Map<String, dynamic> body, {
+    int seconds = 15,
+  }) {
     return _requestWithFailover(
       uri: uri,
       seconds: seconds,
@@ -703,40 +739,57 @@ class HomeHubApi {
     );
   }
 
-  Future<Map<String, dynamic>> fetchExpensesMonth(DateTime date) async {
+  Future<Map<String, dynamic>> fetchExpensesMonth(
+    DateTime date, {
+    bool privacyMode = false,
+  }) async {
     final uri = _uri('/api/expenses/month', {
       'year': '${date.year}',
       'month': '${date.month}',
       'user': settings.member,
+      if (privacyMode) 'privacy': '1',
     });
     final response = await _get(uri);
     return _decodeObject(response);
   }
 
-  Future<Map<String, dynamic>> fetchFinanceSummary(DateTime date) async {
+  Future<Map<String, dynamic>> fetchFinanceSummary(
+    DateTime date, {
+    bool privacyMode = false,
+  }) async {
     final uri = _uri('/api/expenses/finance/summary', {
       'year': '${date.year}',
       'month': '${date.month}',
       'member': settings.member,
+      if (privacyMode) 'privacy': '1',
     });
     final response = await _get(uri);
     return _decodeObject(response);
   }
 
-  Future<Map<String, dynamic>> fetchCollaboration(DateTime date, {int months = 6}) async {
+  Future<Map<String, dynamic>> fetchCollaboration(
+    DateTime date, {
+    int months = 6,
+    bool privacyMode = false,
+  }) async {
     final uri = _uri('/api/expenses/collaboration', {
       'year': '${date.year}',
       'month': '${date.month}',
       'months': '$months',
+      if (privacyMode) 'privacy': '1',
     });
     final response = await _get(uri);
     return _decodeObject(response);
   }
 
-  Future<Map<String, dynamic>> fetchDebtWorkflow(DateTime date) async {
+  Future<Map<String, dynamic>> fetchDebtWorkflow(
+    DateTime date, {
+    bool privacyMode = false,
+  }) async {
     final uri = _uri('/api/expenses/debt-workflow', {
       'year': '${date.year}',
       'month': '${date.month}',
+      if (privacyMode) 'privacy': '1',
     });
     final response = await _get(uri);
     return _decodeObject(response);
@@ -776,7 +829,10 @@ class HomeHubApi {
     String deleteMode = 'instance',
   }) async {
     final uri = _uri('/api/expenses/entries/$entryId');
-    final response = await _deleteJson(uri, {'user': settings.member, 'delete_mode': deleteMode});
+    final response = await _deleteJson(uri, {
+      'user': settings.member,
+      'delete_mode': deleteMode,
+    });
     return _decodeObject(response);
   }
 
@@ -821,24 +877,37 @@ class HomeHubApi {
     final response = await _get(uri);
     final obj = _decodeObject(response);
     final rows = obj['threads'] as List<dynamic>? ?? [];
-    return rows.whereType<Map<String, dynamic>>().map(ThreadSummary.fromJson).toList();
+    return rows
+        .whereType<Map<String, dynamic>>()
+        .map(ThreadSummary.fromJson)
+        .toList();
   }
 
   Future<List<ChatMessage>> fetchThreadMessages(String otherMember) async {
-    final uri = _uri('/api/messages/thread/$otherMember', {'member': settings.member});
+    final uri = _uri('/api/messages/thread/$otherMember', {
+      'member': settings.member,
+    });
     final response = await _get(uri);
     final obj = _decodeObject(response);
     final rows = obj['messages'] as List<dynamic>? ?? [];
-    return rows.whereType<Map<String, dynamic>>().map(ChatMessage.fromJson).toList();
+    return rows
+        .whereType<Map<String, dynamic>>()
+        .map(ChatMessage.fromJson)
+        .toList();
   }
 
-  Future<void> sendMessage({required String recipient, required String message}) async {
+  Future<void> sendMessage({
+    required String recipient,
+    required String message,
+  }) async {
     final uri = _uri('/api/messages/send');
     final req = http.MultipartRequest('POST', uri)
       ..fields['sender'] = settings.member
       ..fields['recipient'] = recipient
       ..fields['message'] = message;
-    final streamed = await _httpClient.send(req).timeout(const Duration(seconds: 15));
+    final streamed = await _httpClient
+        .send(req)
+        .timeout(const Duration(seconds: 15));
     final response = await http.Response.fromStream(streamed);
     _decodeObject(response);
   }
@@ -849,7 +918,10 @@ class HomeHubApi {
     _decodeObject(response);
   }
 
-  Future<List<AppNotificationItem>> fetchNotifications({bool unreadOnly = false, String eventType = ''}) async {
+  Future<List<AppNotificationItem>> fetchNotifications({
+    bool unreadOnly = false,
+    String eventType = '',
+  }) async {
     final uri = _uri('/api/notifications', {
       'member': settings.member,
       if (unreadOnly) 'unread_only': 'true',
@@ -858,7 +930,10 @@ class HomeHubApi {
     final response = await _get(uri);
     final obj = _decodeObject(response);
     final items = obj['items'] as List<dynamic>? ?? [];
-    return items.whereType<Map<String, dynamic>>().map(AppNotificationItem.fromJson).toList();
+    return items
+        .whereType<Map<String, dynamic>>()
+        .map(AppNotificationItem.fromJson)
+        .toList();
   }
 
   Future<List<TimelinePost>> fetchTimeline({
@@ -873,10 +948,16 @@ class HomeHubApi {
     final response = await _get(uri);
     final obj = _decodeObject(response);
     final rows = obj['posts'] as List<dynamic>? ?? [];
-    return rows.whereType<Map<String, dynamic>>().map(TimelinePost.fromJson).toList();
+    return rows
+        .whereType<Map<String, dynamic>>()
+        .map(TimelinePost.fromJson)
+        .toList();
   }
 
-  Future<TimelinePost> createTimelinePost(String summary, {String imageUrl = ''}) async {
+  Future<TimelinePost> createTimelinePost(
+    String summary, {
+    String imageUrl = '',
+  }) async {
     final uri = _uri('/api/timeline');
     final response = await _postJson(uri, {
       'actor': settings.member,
@@ -888,7 +969,10 @@ class HomeHubApi {
     return TimelinePost.fromJson(row);
   }
 
-  Future<TimelinePost> updateTimelinePostImage(int postId, String imageUrl) async {
+  Future<TimelinePost> updateTimelinePostImage(
+    int postId,
+    String imageUrl,
+  ) async {
     final uri = _uri('/api/timeline/$postId/image');
     final response = await _putJson(uri, {
       'user': settings.member,
@@ -911,7 +995,10 @@ class HomeHubApi {
     return _decodeObject(response);
   }
 
-  Future<Map<String, dynamic>> loginMember({required String name, String pin = ''}) async {
+  Future<Map<String, dynamic>> loginMember({
+    required String name,
+    String pin = '',
+  }) async {
     final uri = _uri('/api/member-login');
     final response = await _postJson(uri, {'name': name, 'pin': pin});
     return _decodeObject(response);
@@ -922,7 +1009,9 @@ class HomeHubApi {
     final req = http.MultipartRequest('POST', uri)
       ..fields['user'] = settings.member
       ..files.add(await http.MultipartFile.fromPath('image', filePath));
-    final streamed = await _httpClient.send(req).timeout(const Duration(seconds: 30));
+    final streamed = await _httpClient
+        .send(req)
+        .timeout(const Duration(seconds: 30));
     final response = await http.Response.fromStream(streamed);
     final body = _decodeObject(response);
     return '${body['url'] ?? ''}'.trim();
@@ -940,15 +1029,24 @@ class HomeHubApi {
     return _decodeObject(response);
   }
 
-  Future<Map<String, dynamic>> commentTimelinePost(int postId, String text) async {
+  Future<Map<String, dynamic>> commentTimelinePost(
+    int postId,
+    String text,
+  ) async {
     final uri = _uri('/api/timeline/$postId/comment');
-    final response = await _postJson(uri, {'user': settings.member, 'text': text});
+    final response = await _postJson(uri, {
+      'user': settings.member,
+      'text': text,
+    });
     return _decodeObject(response);
   }
 
   Future<Map<String, dynamic>> shareTimelinePost(int postId) async {
     final uri = _uri('/api/timeline/$postId/share');
-    final response = await _postJson(uri, {'user': settings.member, 'channel': 'android'});
+    final response = await _postJson(uri, {
+      'user': settings.member,
+      'channel': 'android',
+    });
     return _decodeObject(response);
   }
 
@@ -966,8 +1064,10 @@ class HomeHubApi {
       routines = Map<String, dynamic>.from(nested);
     } else if (payload['bedtime'] is Map || payload['bath'] is Map) {
       routines = {
-        if (payload['bedtime'] is Map) 'bedtime': Map<String, dynamic>.from(payload['bedtime'] as Map),
-        if (payload['bath'] is Map) 'bath': Map<String, dynamic>.from(payload['bath'] as Map),
+        if (payload['bedtime'] is Map)
+          'bedtime': Map<String, dynamic>.from(payload['bedtime'] as Map),
+        if (payload['bath'] is Map)
+          'bath': Map<String, dynamic>.from(payload['bath'] as Map),
       };
     } else {
       final data = payload['data'];
@@ -976,15 +1076,17 @@ class HomeHubApi {
       }
     }
 
-    return {
-      'ok': payload['ok'] != false,
-      'routines': routines,
-    };
+    return {'ok': payload['ok'] != false, 'routines': routines};
   }
 
   Future<Map<String, dynamic>> completeBathRoutine() async {
-    final uri = _uri('/api/routines/bath/complete', {'member': settings.member});
-    final response = await _postJson(uri, {'completed': true, 'member': settings.member});
+    final uri = _uri('/api/routines/bath/complete', {
+      'member': settings.member,
+    });
+    final response = await _postJson(uri, {
+      'completed': true,
+      'member': settings.member,
+    });
     return _decodeObject(response);
   }
 
@@ -1020,36 +1122,56 @@ class HomeHubApi {
     final response = await _get(uri);
     final obj = _decodeObject(response);
     final items = obj['members'] as List<dynamic>? ?? [];
-    return items.whereType<Map<String, dynamic>>().map(CalendarMember.fromJson).toList();
+    return items
+        .whereType<Map<String, dynamic>>()
+        .map(CalendarMember.fromJson)
+        .toList();
   }
 
-  Future<List<CalendarEvent>> fetchCalendarEvents({required DateTime start, required DateTime end, String? memberFilter}) async {
+  Future<List<CalendarEvent>> fetchCalendarEvents({
+    required DateTime start,
+    required DateTime end,
+    String? memberFilter,
+  }) async {
     final uri = _uri('/api/calendar/events', {
       'start': _fmtDate(start),
       'end': _fmtDate(end),
-      if (memberFilter != null && memberFilter.isNotEmpty) 'member': memberFilter,
+      if (memberFilter != null && memberFilter.isNotEmpty)
+        'member': memberFilter,
     });
     final response = await _get(uri);
     final obj = _decodeObject(response);
     final items = obj['events'] as List<dynamic>? ?? [];
-    return items.whereType<Map<String, dynamic>>().map(CalendarEvent.fromJson).toList();
+    return items
+        .whereType<Map<String, dynamic>>()
+        .map(CalendarEvent.fromJson)
+        .toList();
   }
 
-  Future<CalendarEvent> createCalendarEvent(CalendarEventDraft draft, {String? photoPath}) async {
+  Future<CalendarEvent> createCalendarEvent(
+    CalendarEventDraft draft, {
+    String? photoPath,
+  }) async {
     final uri = _uri('/api/calendar/events');
     if (photoPath == null || photoPath.trim().isEmpty) {
       final response = await _postJson(uri, draft.toApiJson());
       final obj = _decodeObject(response);
-      return CalendarEvent.fromJson((obj['event'] as Map<String, dynamic>? ?? {}));
+      return CalendarEvent.fromJson(
+        (obj['event'] as Map<String, dynamic>? ?? {}),
+      );
     }
 
     final req = http.MultipartRequest('POST', uri);
     _applyCalendarDraftToMultipart(req, draft);
     req.files.add(await http.MultipartFile.fromPath('photo', photoPath.trim()));
-    final streamed = await _httpClient.send(req).timeout(const Duration(seconds: 30));
+    final streamed = await _httpClient
+        .send(req)
+        .timeout(const Duration(seconds: 30));
     final response = await http.Response.fromStream(streamed);
     final obj = _decodeObject(response);
-    return CalendarEvent.fromJson((obj['event'] as Map<String, dynamic>? ?? {}));
+    return CalendarEvent.fromJson(
+      (obj['event'] as Map<String, dynamic>? ?? {}),
+    );
   }
 
   Future<CalendarEvent> updateCalendarEvent(
@@ -1066,7 +1188,9 @@ class HomeHubApi {
       }
       final response = await _putJson(uri, payload);
       final obj = _decodeObject(response);
-      return CalendarEvent.fromJson((obj['event'] as Map<String, dynamic>? ?? {}));
+      return CalendarEvent.fromJson(
+        (obj['event'] as Map<String, dynamic>? ?? {}),
+      );
     }
 
     final req = http.MultipartRequest('PUT', uri);
@@ -1075,13 +1199,20 @@ class HomeHubApi {
       req.fields['update_scope'] = updateScope;
     }
     req.files.add(await http.MultipartFile.fromPath('photo', photoPath.trim()));
-    final streamed = await _httpClient.send(req).timeout(const Duration(seconds: 30));
+    final streamed = await _httpClient
+        .send(req)
+        .timeout(const Duration(seconds: 30));
     final response = await http.Response.fromStream(streamed);
     final obj = _decodeObject(response);
-    return CalendarEvent.fromJson((obj['event'] as Map<String, dynamic>? ?? {}));
+    return CalendarEvent.fromJson(
+      (obj['event'] as Map<String, dynamic>? ?? {}),
+    );
   }
 
-  void _applyCalendarDraftToMultipart(http.MultipartRequest req, CalendarEventDraft draft) {
+  void _applyCalendarDraftToMultipart(
+    http.MultipartRequest req,
+    CalendarEventDraft draft,
+  ) {
     final payload = draft.toApiJson();
     payload.forEach((key, value) {
       if (value == null) return;
@@ -1106,7 +1237,10 @@ class HomeHubApi {
     final response = await _get(uri);
     final obj = _decodeObject(response);
     final rows = obj['entries'] as List<dynamic>? ?? [];
-    return rows.whereType<Map<String, dynamic>>().map(MealPlannerEntry.fromJson).toList();
+    return rows
+        .whereType<Map<String, dynamic>>()
+        .map(MealPlannerEntry.fromJson)
+        .toList();
   }
 
   Future<List<Map<String, dynamic>>> fetchMealLibrary() async {
@@ -1150,15 +1284,23 @@ class HomeHubApi {
     return _decodeObject(response);
   }
 
-  Future<Map<String, dynamic>> unlockMealEntry({required int entryId, required String pin}) async {
+  Future<Map<String, dynamic>> unlockMealEntry({
+    required int entryId,
+    required String pin,
+  }) async {
     final uri = _uri('/api/meal-planner/entries/$entryId/unlock');
-    final response = await _postJson(uri, {'member': settings.member, 'pin': pin});
+    final response = await _postJson(uri, {
+      'member': settings.member,
+      'pin': pin,
+    });
     return _decodeObject(response);
   }
 
   Future<void> deleteCalendarEvent(int eventId) async {
     final uri = _uri('/api/calendar/events/$eventId');
-    final response = await _httpClient.delete(uri).timeout(const Duration(seconds: 15));
+    final response = await _httpClient
+        .delete(uri)
+        .timeout(const Duration(seconds: 15));
     _decodeObject(response);
   }
 
@@ -1178,7 +1320,10 @@ class HomeHubApi {
     return rows.whereType<Map<String, dynamic>>().toList();
   }
 
-  Future<void> createPoll({required String question, required List<String> options}) async {
+  Future<void> createPoll({
+    required String question,
+    required List<String> options,
+  }) async {
     final uri = _uri('/api/polls/create');
     final response = await _postJson(uri, {
       'creator': settings.member,
@@ -1188,7 +1333,11 @@ class HomeHubApi {
     _decodeObject(response);
   }
 
-  Future<void> votePoll({required int pollId, String? selectedOption, String? responseText}) async {
+  Future<void> votePoll({
+    required int pollId,
+    String? selectedOption,
+    String? responseText,
+  }) async {
     final uri = _uri('/api/polls/$pollId/vote');
     final response = await _postJson(uri, {
       'member': settings.member,
@@ -1203,20 +1352,38 @@ class HomeHubApi {
     final response = await _get(uri);
     final obj = _decodeObject(response);
     final rows = obj['items'] as List<dynamic>? ?? [];
-    return rows.whereType<Map<String, dynamic>>().map(SharedCloudFile.fromJson).toList();
+    return rows
+        .whereType<Map<String, dynamic>>()
+        .map(SharedCloudFile.fromJson)
+        .toList();
   }
 
   Future<int> uploadSharedCloudFiles(List<PlatformFile> files) async {
     final uri = _uri('/api/files/upload');
-    final req = http.MultipartRequest('POST', uri)..fields['creator'] = settings.member;
+    final req = http.MultipartRequest('POST', uri)
+      ..fields['creator'] = settings.member;
     for (final file in files) {
       if (file.bytes != null) {
-        req.files.add(http.MultipartFile.fromBytes('files', file.bytes!, filename: file.name));
+        req.files.add(
+          http.MultipartFile.fromBytes(
+            'files',
+            file.bytes!,
+            filename: file.name,
+          ),
+        );
       } else if (file.path != null && file.path!.isNotEmpty) {
-        req.files.add(await http.MultipartFile.fromPath('files', file.path!, filename: file.name));
+        req.files.add(
+          await http.MultipartFile.fromPath(
+            'files',
+            file.path!,
+            filename: file.name,
+          ),
+        );
       }
     }
-    final streamed = await _httpClient.send(req).timeout(const Duration(seconds: 30));
+    final streamed = await _httpClient
+        .send(req)
+        .timeout(const Duration(seconds: 30));
     final response = await http.Response.fromStream(streamed);
     final obj = _decodeObject(response);
     return _toInt(obj['uploaded_count']);
@@ -1228,27 +1395,64 @@ class HomeHubApi {
     _decodeObject(response);
   }
 
+  Future<void> moveSharedCloudFile({
+    required int fileId,
+    required String category,
+  }) async {
+    final uri = _uri('/api/files/move/$fileId');
+    final response = await _postJson(uri, {'category': category});
+    _decodeObject(response);
+  }
+
   Future<List<PhotoAlbumSummary>> fetchPhotoAlbums() async {
     final uri = _uri('/api/photos/albums', {'member': settings.member});
     final response = await _get(uri);
     final obj = _decodeObject(response);
     final rows = obj['items'] as List<dynamic>? ?? [];
-    return rows.whereType<Map<String, dynamic>>().map(PhotoAlbumSummary.fromJson).toList();
+    return rows
+        .whereType<Map<String, dynamic>>()
+        .map(PhotoAlbumSummary.fromJson)
+        .toList();
   }
 
-  Future<List<PhotoAssetItem>> fetchPhotoAssets({int? albumId, String scope = 'all'}) async {
+  Future<List<PhotoAssetItem>> fetchPhotoAssets({
+    int? albumId,
+    String scope = 'all',
+    String sortBy = 'captured_at',
+    String sortDir = 'desc',
+    DateTime? startDate,
+    DateTime? endDate,
+  }) async {
+    String toDay(DateTime day) {
+      final utc = DateTime(day.year, day.month, day.day);
+      final month = utc.month.toString().padLeft(2, '0');
+      final date = utc.day.toString().padLeft(2, '0');
+      return '${utc.year}-$month-$date';
+    }
+
     final uri = _uri('/api/photos/assets', {
       'member': settings.member,
       if (scope.trim().isNotEmpty) 'scope': scope.trim(),
       if (albumId != null) 'album_id': '$albumId',
+      if (sortBy.trim().isNotEmpty) 'sort_by': sortBy.trim(),
+      if (sortDir.trim().isNotEmpty) 'sort_dir': sortDir.trim(),
+      if (startDate != null) 'start_date': toDay(startDate),
+      if (endDate != null) 'end_date': toDay(endDate),
     });
     final response = await _get(uri);
     final obj = _decodeObject(response);
     final rows = obj['items'] as List<dynamic>? ?? [];
-    return rows.whereType<Map<String, dynamic>>().map(PhotoAssetItem.fromJson).toList();
+    return rows
+        .whereType<Map<String, dynamic>>()
+        .map(PhotoAssetItem.fromJson)
+        .toList();
   }
 
-  Future<void> createPhotoAlbum({required String name, String description = '', String visibility = 'private'}) async {
+  Future<void> createPhotoAlbum({
+    required String name,
+    String description = '',
+    String visibility = 'private',
+  }) async {
     final uri = _uri('/api/photos/albums');
     final response = await _postJson(uri, {
       'creator': settings.member,
@@ -1259,7 +1463,11 @@ class HomeHubApi {
     _decodeObject(response);
   }
 
-  Future<int> uploadPhotoAssets(List<PlatformFile> files, {String visibility = 'private', int? albumId}) async {
+  Future<int> uploadPhotoAssets(
+    List<PlatformFile> files, {
+    String visibility = 'private',
+    int? albumId,
+  }) async {
     final uri = _uri('/api/photos/upload');
     final req = http.MultipartRequest('POST', uri)
       ..fields['creator'] = settings.member
@@ -1267,12 +1475,26 @@ class HomeHubApi {
     if (albumId != null) req.fields['album_id'] = '$albumId';
     for (final file in files) {
       if (file.bytes != null) {
-        req.files.add(http.MultipartFile.fromBytes('files', file.bytes!, filename: file.name));
+        req.files.add(
+          http.MultipartFile.fromBytes(
+            'files',
+            file.bytes!,
+            filename: file.name,
+          ),
+        );
       } else if (file.path != null && file.path!.isNotEmpty) {
-        req.files.add(await http.MultipartFile.fromPath('files', file.path!, filename: file.name));
+        req.files.add(
+          await http.MultipartFile.fromPath(
+            'files',
+            file.path!,
+            filename: file.name,
+          ),
+        );
       }
     }
-    final streamed = await _httpClient.send(req).timeout(const Duration(seconds: 45));
+    final streamed = await _httpClient
+        .send(req)
+        .timeout(const Duration(seconds: 45));
     final response = await http.Response.fromStream(streamed);
     final obj = _decodeObject(response);
     final rows = obj['items'] as List<dynamic>? ?? [];
@@ -1288,47 +1510,144 @@ class HomeHubApi {
     _decodeObject(response);
   }
 
-  Future<List<PhotoWatchFolderItem>> fetchPhotoWatchFolders() async {
-    final uri = _uri('/api/photos/watch-folders', {'member': settings.member});
-    final response = await _get(uri);
+  Future<Map<String, dynamic>> createPhotoDownloadJobForAssets(
+    List<int> assetIds,
+  ) async {
+    final uri = _uri('/api/photos/download-jobs');
+    final response = await _postJson(uri, {
+      'mode': 'selected_assets',
+      'asset_ids': assetIds,
+    });
     final obj = _decodeObject(response);
-    final rows = obj['items'] as List<dynamic>? ?? [];
-    return rows.whereType<Map<String, dynamic>>().map(PhotoWatchFolderItem.fromJson).toList();
+    return (obj['job'] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{};
   }
 
-  Future<void> createPhotoWatchFolder({required String folderUri, required String scope, int? targetAlbumId}) async {
-    final uri = _uri('/api/photos/watch-folders');
+  Future<Map<String, dynamic>> createPhotoDownloadJobForAlbum(
+    int albumId,
+  ) async {
+    final uri = _uri('/api/photos/download-jobs');
+    final response = await _postJson(uri, {
+      'mode': 'album',
+      'album_id': albumId,
+    });
+    final obj = _decodeObject(response);
+    return (obj['job'] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> fetchPhotoSyncSummary() async {
+    final uri = _uri('/api/photos/sync/status/summary', {
+      'member': settings.member,
+    });
+    final response = await _get(uri);
+    return _decodeObject(response);
+  }
+
+  Future<Map<String, dynamic>> fetchPhotoSyncJobDetail(int jobId) async {
+    final uri = _uri('/api/photos/sync/jobs/$jobId', {
+      'member': settings.member,
+    });
+    final response = await _get(uri);
+    return _decodeObject(response);
+  }
+
+  Future<PhotoSyncSourceItem> registerPhotoSyncSource({
+    required String sourceUri,
+    required String scope,
+    int? targetAlbumId,
+  }) async {
+    final uri = _uri('/api/photos/sync/sources/register');
+    final appInstanceId = await _getOrCreateSyncInstanceId();
+    final platform = Platform.isAndroid
+        ? 'android'
+        : (Platform.isIOS ? 'ios' : 'web');
     final response = await _postJson(uri, {
       'member': settings.member,
-      'folder_uri': folderUri,
+      'platform': platform,
+      'app_instance_id': appInstanceId,
+      'source_type': 'browser_import',
+      'source_uri': sourceUri,
       'scope': scope,
       if (targetAlbumId != null) 'target_album_id': targetAlbumId,
-      'platform': Platform.isAndroid ? 'android' : (Platform.isIOS ? 'ios' : 'mobile'),
     });
+    final obj = _decodeObject(response);
+    return PhotoSyncSourceItem.fromJson(
+      (obj['source'] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{},
+    );
+  }
+
+  Future<int> enqueuePhotoSyncScan(int sourceId) async {
+    final uri = _uri('/api/photos/sync/sources/$sourceId/enqueue-scan');
+    final response = await _postJson(uri, {'trigger_type': 'manual'});
+    final obj = _decodeObject(response);
+    return _toInt(obj['job_id']);
+  }
+
+  Future<void> addPhotoSyncJobItems(
+    int jobId,
+    List<Map<String, dynamic>> items,
+  ) async {
+    final uri = _uri('/api/photos/sync/jobs/$jobId/items');
+    final response = await _postJson(uri, {'items': items});
     _decodeObject(response);
   }
 
-  Future<void> updatePhotoWatchFolder({required int watchId, bool? isActive, String? scope, int? targetAlbumId}) async {
-    final uri = _uri('/api/photos/watch-folders/$watchId');
+  Future<void> ingestPhotoSyncItem({
+    required int jobId,
+    required int itemId,
+    required PlatformFile file,
+  }) async {
+    final uri = _uri('/api/photos/sync/jobs/$jobId/ingest-item');
+    final req = http.MultipartRequest('POST', uri)
+      ..fields['item_id'] = '$itemId';
+    if (file.bytes != null) {
+      req.files.add(
+        http.MultipartFile.fromBytes('file', file.bytes!, filename: file.name),
+      );
+    } else if (file.path != null && file.path!.isNotEmpty) {
+      req.files.add(
+        await http.MultipartFile.fromPath(
+          'file',
+          file.path!,
+          filename: file.name,
+        ),
+      );
+    } else {
+      throw Exception('File bytes/path missing for ${file.name}');
+    }
+    final streamed = await _httpClient
+        .send(req)
+        .timeout(const Duration(seconds: 60));
+    final response = await http.Response.fromStream(streamed);
+    _decodeObject(response);
+  }
+
+  Future<void> updatePhotoSyncSource({
+    required int sourceId,
+    bool? isActive,
+    String? scope,
+    int? targetAlbumId,
+  }) async {
+    final uri = _uri('/api/photos/sync/sources/$sourceId');
     final payload = <String, dynamic>{};
     if (isActive != null) payload['is_active'] = isActive;
-    if (scope != null && scope.trim().isNotEmpty) payload['scope'] = scope.trim();
+    if (scope != null && scope.trim().isNotEmpty)
+      payload['scope'] = scope.trim();
     if (targetAlbumId != null) payload['target_album_id'] = targetAlbumId;
     final response = await _requestWithFailover(
       uri: uri,
-      seconds: 15,
-      sender: (nextUri) => _httpClient.patch(nextUri, headers: {'Content-Type': 'application/json'}, body: jsonEncode(payload)),
+      seconds: 20,
+      sender: (nextUri) => _httpClient.patch(
+        nextUri,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(payload),
+      ),
     );
     _decodeObject(response);
   }
 
-  Future<void> deletePhotoWatchFolder(int watchId) async {
-    final uri = _uri('/api/photos/watch-folders/$watchId');
-    final response = await _requestWithFailover(
-      uri: uri,
-      seconds: 15,
-      sender: (nextUri) => _httpClient.delete(nextUri),
-    );
+  Future<void> retryPhotoSyncItem(int itemId) async {
+    final uri = _uri('/api/photos/sync/items/$itemId/retry');
+    final response = await _postJson(uri, {});
     _decodeObject(response);
   }
 
@@ -1419,13 +1738,19 @@ class HomeHubApi {
       if (price != null) 'price': price,
       if (quantity != null) 'quantity': quantity,
       if (store != null && store.trim().isNotEmpty) 'store': store.trim(),
-      if (category != null && category.trim().isNotEmpty) 'category': category.trim(),
+      if (category != null && category.trim().isNotEmpty)
+        'category': category.trim(),
       if (cleanTags.isNotEmpty) 'tags': cleanTags,
       if (repoItemId != null) 'repo_item_id': repoItemId,
-      if (purchasePhotoFilename != null && purchasePhotoFilename.trim().isNotEmpty) 'purchase_photo_filename': purchasePhotoFilename.trim(),
-      if (sizeRequirements != null && sizeRequirements.trim().isNotEmpty) 'size_requirements': sizeRequirements.trim(),
-      if (purchaseCategory != null && purchaseCategory.trim().isNotEmpty) 'purchase_category': purchaseCategory.trim(),
-      if (planningNotes != null && planningNotes.trim().isNotEmpty) 'planning_notes': planningNotes.trim(),
+      if (purchasePhotoFilename != null &&
+          purchasePhotoFilename.trim().isNotEmpty)
+        'purchase_photo_filename': purchasePhotoFilename.trim(),
+      if (sizeRequirements != null && sizeRequirements.trim().isNotEmpty)
+        'size_requirements': sizeRequirements.trim(),
+      if (purchaseCategory != null && purchaseCategory.trim().isNotEmpty)
+        'purchase_category': purchaseCategory.trim(),
+      if (planningNotes != null && planningNotes.trim().isNotEmpty)
+        'planning_notes': planningNotes.trim(),
       if (targetPrice != null) 'target_price': targetPrice,
       if (budgetCeiling != null) 'budget_ceiling': budgetCeiling,
     });
@@ -1455,28 +1780,41 @@ class HomeHubApi {
     if (quantity != null) payload['quantity'] = quantity;
     if (listId != null) payload['list_id'] = listId;
     if (tags != null) {
-      payload['tags'] = tags.map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+      payload['tags'] = tags
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
     }
-    if (purchaseCategory != null) payload['purchase_category'] = purchaseCategory;
+    if (purchaseCategory != null)
+      payload['purchase_category'] = purchaseCategory;
     if (planningNotes != null) payload['planning_notes'] = planningNotes;
     if (targetPrice != null) payload['target_price'] = targetPrice;
     if (budgetCeiling != null) payload['budget_ceiling'] = budgetCeiling;
-    if (sizeRequirements != null) payload['size_requirements'] = sizeRequirements;
-    if (purchasePhotoFilename != null) payload['purchase_photo_filename'] = purchasePhotoFilename;
+    if (sizeRequirements != null)
+      payload['size_requirements'] = sizeRequirements;
+    if (purchasePhotoFilename != null)
+      payload['purchase_photo_filename'] = purchasePhotoFilename;
     final response = await _putJson(uri, payload);
     return _decodeObject(response);
   }
 
-  Future<Map<String, dynamic>> uploadShoppingPurchasePhoto(String photoPath) async {
+  Future<Map<String, dynamic>> uploadShoppingPurchasePhoto(
+    String photoPath,
+  ) async {
     final uri = _uri('/api/shopping/purchase-photo');
     final req = http.MultipartRequest('POST', uri);
     req.files.add(await http.MultipartFile.fromPath('photo', photoPath));
-    final streamed = await _httpClient.send(req).timeout(const Duration(seconds: 30));
+    final streamed = await _httpClient
+        .send(req)
+        .timeout(const Duration(seconds: 30));
     final response = await http.Response.fromStream(streamed);
     return _decodeObject(response);
   }
 
-  Future<List<Map<String, dynamic>>> fetchShoppingRepo({String? query, String? store}) async {
+  Future<List<Map<String, dynamic>>> fetchShoppingRepo({
+    String? query,
+    String? store,
+  }) async {
     final uri = _uri('/api/shopping/repo', {
       if (query != null && query.trim().isNotEmpty) 'q': query.trim(),
       if (store != null && store.trim().isNotEmpty) 'store': store.trim(),
@@ -1497,7 +1835,8 @@ class HomeHubApi {
     final response = await _postJson(uri, {
       'name': name,
       if (store != null && store.trim().isNotEmpty) 'store': store.trim(),
-      if (category != null && category.trim().isNotEmpty) 'category': category.trim(),
+      if (category != null && category.trim().isNotEmpty)
+        'category': category.trim(),
       if (price != null) 'price': price,
       'created_by': settings.member,
     });
@@ -1523,18 +1862,22 @@ class HomeHubApi {
 
   Future<void> deleteShoppingRepoItem(int repoId) async {
     final uri = _uri('/api/shopping/repo/$repoId');
-    final response = await _httpClient.delete(uri).timeout(const Duration(seconds: 20));
+    final response = await _httpClient
+        .delete(uri)
+        .timeout(const Duration(seconds: 20));
     _decodeObject(response);
   }
 
   Future<void> deleteShoppingItem(int itemId) async {
     final uri = _uri('/api/shopping/items/$itemId', {'user': settings.member});
-    final response = await _httpClient.delete(uri).timeout(const Duration(seconds: 15));
+    final response = await _httpClient
+        .delete(uri)
+        .timeout(const Duration(seconds: 15));
     _decodeObject(response);
   }
 
   Future<List<Map<String, dynamic>>> fetchChores() async {
-    final uri = _uri('/api/chores');
+    final uri = _uri('/api/chores', {'include_completed': '1'});
     final response = await _get(uri);
     final body = jsonDecode(response.body);
     if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -1546,24 +1889,93 @@ class HomeHubApi {
     return body.whereType<Map<String, dynamic>>().toList();
   }
 
-  Future<void> createChore(String description) async {
+  Future<void> createChore({
+    required String description,
+    String taskType = 'todo',
+    String? assignee,
+    String? dueDate,
+    String status = 'todo',
+    List<String> statusOptions = const ['todo', 'in_progress', 'completed'],
+    List<String> tags = const <String>[],
+    List<String> mentions = const <String>[],
+    String detailsHtml = '',
+    List<Map<String, dynamic>> checklist = const <Map<String, dynamic>>[],
+    List<Map<String, dynamic>> chartData = const <Map<String, dynamic>>[],
+    Map<String, dynamic> tableData = const {
+      'headers': <String>[],
+      'rows': <List<String>>[],
+    },
+  }) async {
     final uri = _uri('/api/chores');
     final response = await _postJson(uri, {
       'description': description,
       'creator': settings.member,
+      'task_type': taskType,
+      if (assignee != null && assignee.trim().isNotEmpty)
+        'assignee': assignee.trim(),
+      if (dueDate != null && dueDate.trim().isNotEmpty)
+        'due_date': dueDate.trim(),
+      'status': status,
+      'status_options': statusOptions,
+      'tags': tags,
+      'mentions': mentions,
+      'details_html': detailsHtml,
+      'checklist': checklist,
+      'chart_data': chartData,
+      'table_data': tableData,
     });
+    _decodeObject(response);
+  }
+
+  Future<void> updateChore({
+    required int choreId,
+    String? description,
+    String? taskType,
+    String? assignee,
+    String? dueDate,
+    String? status,
+    List<String>? statusOptions,
+    List<String>? tags,
+    List<String>? mentions,
+    String? detailsHtml,
+    List<Map<String, dynamic>>? checklist,
+    List<Map<String, dynamic>>? chartData,
+    Map<String, dynamic>? tableData,
+    bool? done,
+  }) async {
+    final uri = _uri('/api/chores/$choreId');
+    final payload = <String, dynamic>{'actor': settings.member};
+    if (description != null) payload['description'] = description;
+    if (taskType != null) payload['task_type'] = taskType;
+    if (assignee != null) payload['assignee'] = assignee;
+    if (dueDate != null) payload['due_date'] = dueDate;
+    if (status != null) payload['status'] = status;
+    if (statusOptions != null) payload['status_options'] = statusOptions;
+    if (tags != null) payload['tags'] = tags;
+    if (mentions != null) payload['mentions'] = mentions;
+    if (detailsHtml != null) payload['details_html'] = detailsHtml;
+    if (checklist != null) payload['checklist'] = checklist;
+    if (chartData != null) payload['chart_data'] = chartData;
+    if (tableData != null) payload['table_data'] = tableData;
+    if (done != null) payload['done'] = done;
+    final response = await _putJson(uri, payload);
     _decodeObject(response);
   }
 
   Future<void> setChoreDone({required int choreId, required bool done}) async {
     final uri = _uri('/api/chores/$choreId/done');
-    final response = await _postJson(uri, {'done': done});
+    final response = await _postJson(uri, {
+      'done': done,
+      'actor': settings.member,
+    });
     _decodeObject(response);
   }
 
   Future<void> deleteChore(int choreId) async {
     final uri = _uri('/api/chores/$choreId', {'user': settings.member});
-    final response = await _httpClient.delete(uri).timeout(const Duration(seconds: 15));
+    final response = await _httpClient
+        .delete(uri)
+        .timeout(const Duration(seconds: 15));
     _decodeObject(response);
   }
 
@@ -1575,13 +1987,19 @@ class HomeHubApi {
 
   Future<void> createWorkspaceProject(String name) async {
     final uri = _uri('/api/workspaces/wizard/create');
-    final response = await _postJson(uri, {'entity_type': 'project', 'name': name});
+    final response = await _postJson(uri, {
+      'entity_type': 'project',
+      'name': name,
+    });
     _decodeObject(response);
   }
 
   Future<void> createWorkspaceSpace(String name) async {
     final uri = _uri('/api/workspaces/wizard/create');
-    final response = await _postJson(uri, {'entity_type': 'space', 'name': name});
+    final response = await _postJson(uri, {
+      'entity_type': 'space',
+      'name': name,
+    });
     _decodeObject(response);
   }
 
@@ -1605,7 +2023,12 @@ class HomeHubApi {
     _decodeObject(response);
   }
 
-  Future<void> createWorkspaceTemplate({required String name, required String templateType, String description = '', Map<String, dynamic> config = const {}}) async {
+  Future<void> createWorkspaceTemplate({
+    required String name,
+    required String templateType,
+    String description = '',
+    Map<String, dynamic> config = const {},
+  }) async {
     final uri = _uri('/api/workspaces/templates');
     final response = await _postJson(uri, {
       'name': name,
@@ -1618,7 +2041,9 @@ class HomeHubApi {
 
   Future<void> deleteWorkspaceTemplate(int templateId) async {
     final uri = _uri('/api/workspaces/templates/$templateId');
-    final response = await _httpClient.delete(uri).timeout(const Duration(seconds: 15));
+    final response = await _httpClient
+        .delete(uri)
+        .timeout(const Duration(seconds: 15));
     _decodeObject(response);
   }
 
@@ -1645,7 +2070,9 @@ class HomeHubApi {
 
   Future<void> deleteWorkspaceProject(int projectId) async {
     final uri = _uri('/api/workspaces/projects/$projectId');
-    final response = await _httpClient.delete(uri).timeout(const Duration(seconds: 15));
+    final response = await _httpClient
+        .delete(uri)
+        .timeout(const Duration(seconds: 15));
     _decodeObject(response);
   }
 
@@ -1672,7 +2099,9 @@ class HomeHubApi {
 
   Future<void> deleteWorkspaceSpace(int spaceId) async {
     final uri = _uri('/api/workspaces/spaces/$spaceId');
-    final response = await _httpClient.delete(uri).timeout(const Duration(seconds: 15));
+    final response = await _httpClient
+        .delete(uri)
+        .timeout(const Duration(seconds: 15));
     _decodeObject(response);
   }
 
@@ -1734,7 +2163,10 @@ class HomeHubApi {
     return rows.whereType<Map<String, dynamic>>().toList();
   }
 
-  Future<void> saveExpiryItem({required String name, required String expiryDate}) async {
+  Future<void> saveExpiryItem({
+    required String name,
+    required String expiryDate,
+  }) async {
     final uri = _uri('/api/expiry/items');
     final response = await _postJson(uri, {
       'member': settings.member,
@@ -1751,7 +2183,9 @@ class HomeHubApi {
   }
 
   Future<List<Map<String, dynamic>>> fetchExpiryPendingReminders() async {
-    final uri = _uri('/api/expiry/reminders/pending', {'member': settings.member});
+    final uri = _uri('/api/expiry/reminders/pending', {
+      'member': settings.member,
+    });
     final response = await _get(uri);
     final obj = _decodeObject(response);
     final rows = obj['items'] as List<dynamic>? ?? [];
@@ -1774,14 +2208,19 @@ class HomeHubApi {
 
   Future<Map<String, dynamic>> createQr(String text) async {
     final uri = _uri('/api/qr');
-    final response = await _postJson(uri, {'text': text, 'creator': settings.member});
+    final response = await _postJson(uri, {
+      'text': text,
+      'creator': settings.member,
+    });
     final obj = _decodeObject(response);
     return (obj['item'] as Map<String, dynamic>? ?? {});
   }
 
   Future<void> deleteQr(int qrId) async {
     final uri = _uri('/api/qr/$qrId', {'user': settings.member});
-    final response = await _httpClient.delete(uri).timeout(const Duration(seconds: 15));
+    final response = await _httpClient
+        .delete(uri)
+        .timeout(const Duration(seconds: 15));
     _decodeObject(response);
   }
 
@@ -1818,7 +2257,10 @@ class HomeHubApi {
 
   Future<void> saveCurrentMemberStatus(String status) async {
     final uri = _uri('/api/member-status');
-    final response = await _postJson(uri, {'member': settings.member, 'status': status});
+    final response = await _postJson(uri, {
+      'member': settings.member,
+      'status': status,
+    });
     _decodeObject(response);
   }
 
@@ -1844,7 +2286,9 @@ class HomeHubApi {
   }
 
   Future<List<Map<String, dynamic>>> fetchPendingFamilyNotices() async {
-    final uri = _uri('/api/family-notices/pending', {'member': settings.member});
+    final uri = _uri('/api/family-notices/pending', {
+      'member': settings.member,
+    });
     final response = await _get(uri);
     final obj = _decodeObject(response);
     final rows = obj['items'] as List<dynamic>? ?? [];
@@ -1927,13 +2371,19 @@ class HomeHubApi {
     return _decodeMapLoose(response);
   }
 
-  Future<void> addFamilyMember({required String name, String role = 'standard'}) async {
+  Future<void> addFamilyMember({
+    required String name,
+    String role = 'standard',
+  }) async {
     final uri = _uri('/api/family-members');
     final response = await _postJson(uri, {'name': name, 'role': role});
     _decodeObject(response);
   }
 
-  Future<void> addProjectColumn({required int projectId, required String name}) async {
+  Future<void> addProjectColumn({
+    required int projectId,
+    required String name,
+  }) async {
     final uri = _uri('/api/workspaces/projects/$projectId/columns');
     final response = await _postJson(uri, {'name': name});
     _decodeObject(response);
@@ -1956,7 +2406,10 @@ class HomeHubApi {
     _decodeObject(response);
   }
 
-  Future<void> moveProjectCard({required int cardId, required int columnId}) async {
+  Future<void> moveProjectCard({
+    required int cardId,
+    required int columnId,
+  }) async {
     final uri = _uri('/api/workspaces/cards/$cardId/move');
     final response = await _postJson(uri, {'column_id': columnId});
     _decodeObject(response);
@@ -1968,12 +2421,18 @@ class HomeHubApi {
     _decodeObject(response);
   }
 
-  Future<void> createSpacePage({required int spaceId, required String title, required String content}) async {
+  Future<void> createSpacePage({
+    required int spaceId,
+    required String title,
+    required String content,
+  }) async {
     final uri = _uri('/api/workspaces/spaces/$spaceId/pages');
     final req = http.MultipartRequest('POST', uri)
       ..fields['title'] = title
       ..fields['content'] = content;
-    final streamed = await _httpClient.send(req).timeout(const Duration(seconds: 20));
+    final streamed = await _httpClient
+        .send(req)
+        .timeout(const Duration(seconds: 20));
     final response = await http.Response.fromStream(streamed);
     _decodeObject(response);
   }
@@ -1998,7 +2457,12 @@ class HomeHubApi {
     return _decodeMapLoose(response);
   }
 
-  Future<void> createBudget({required String name, required int month, required int year, required double totalAmount}) async {
+  Future<void> createBudget({
+    required String name,
+    required int month,
+    required int year,
+    required double totalAmount,
+  }) async {
     final uri = _uri('/expenses/budgets');
     final response = await _postJson(uri, {
       'name': name,
@@ -2010,9 +2474,16 @@ class HomeHubApi {
     _decodeMapLoose(response);
   }
 
-  Future<void> addBudgetCategory({required int budgetId, required String categoryName, required double allocatedAmount}) async {
+  Future<void> addBudgetCategory({
+    required int budgetId,
+    required String categoryName,
+    required double allocatedAmount,
+  }) async {
     final uri = _uri('/expenses/budgets/$budgetId/categories');
-    final response = await _postJson(uri, {'category_name': categoryName, 'allocated_amount': allocatedAmount}, seconds: 20);
+    final response = await _postJson(uri, {
+      'category_name': categoryName,
+      'allocated_amount': allocatedAmount,
+    }, seconds: 20);
     _decodeMapLoose(response);
   }
 
@@ -2042,7 +2513,11 @@ class HomeHubApi {
     _decodeMapLoose(response);
   }
 
-  Future<void> recordDebtPayment({required int debtId, required double amountPaid, DateTime? paymentDate}) async {
+  Future<void> recordDebtPayment({
+    required int debtId,
+    required double amountPaid,
+    DateTime? paymentDate,
+  }) async {
     final uri = _uri('/expenses/debts/$debtId/payments');
     final response = await _postJson(uri, {
       'payment_date': _fmtDate(paymentDate ?? DateTime.now()),
@@ -2054,7 +2529,9 @@ class HomeHubApi {
 
   Future<void> deleteDebt(int debtId) async {
     final uri = _uri('/expenses/debts/$debtId');
-    final response = await _httpClient.delete(uri).timeout(const Duration(seconds: 20));
+    final response = await _httpClient
+        .delete(uri)
+        .timeout(const Duration(seconds: 20));
     _decodeMapLoose(response);
   }
 
@@ -2066,7 +2543,11 @@ class HomeHubApi {
     return rows.whereType<Map<String, dynamic>>().toList();
   }
 
-  Future<void> createGoal({required String name, required double targetAmount, String category = 'savings'}) async {
+  Future<void> createGoal({
+    required String name,
+    required double targetAmount,
+    String category = 'savings',
+  }) async {
     final uri = _uri('/expenses/goals');
     final response = await _postJson(uri, {
       'name': name,
@@ -2077,7 +2558,10 @@ class HomeHubApi {
     _decodeMapLoose(response);
   }
 
-  Future<void> contributeGoal({required int goalId, required double amount}) async {
+  Future<void> contributeGoal({
+    required int goalId,
+    required double amount,
+  }) async {
     final uri = _uri('/expenses/goals/$goalId/contributions');
     final response = await _postJson(uri, {
       'amount': amount,
@@ -2086,7 +2570,9 @@ class HomeHubApi {
     _decodeMapLoose(response);
   }
 
-  Future<List<Map<String, dynamic>>> listSharedExpenses({DateTime? monthDate}) async {
+  Future<List<Map<String, dynamic>>> listSharedExpenses({
+    DateTime? monthDate,
+  }) async {
     final query = <String, String>{};
     if (monthDate != null) {
       query['month'] = '${monthDate.month}';
@@ -2122,33 +2608,61 @@ class HomeHubApi {
 
   Future<void> setSharedExpenseSettled(int expenseId, bool settled) async {
     final uri = _uri('/expenses/shared-expenses/$expenseId');
-    final response = await _putJson(uri, {'user': settings.member, 'settled': settled}, seconds: 20);
+    final response = await _putJson(uri, {
+      'user': settings.member,
+      'settled': settled,
+    }, seconds: 20);
     _decodeMapLoose(response);
   }
 
   Future<void> deleteSharedExpense(int expenseId) async {
     final uri = _uri('/expenses/shared-expenses/$expenseId');
-    final response = await _deleteJson(uri, {'user': settings.member}, seconds: 20);
+    final response = await _deleteJson(uri, {
+      'user': settings.member,
+    }, seconds: 20);
     _decodeMapLoose(response);
   }
 
-  Future<void> uploadSharedExpenseReceipt(int expenseId, PlatformFile file) async {
+  Future<void> uploadSharedExpenseReceipt(
+    int expenseId,
+    PlatformFile file,
+  ) async {
     final uri = _uri('/expenses/shared-expenses/$expenseId/receipt');
-    final req = http.MultipartRequest('POST', uri)..fields['user'] = settings.member;
+    final req = http.MultipartRequest('POST', uri)
+      ..fields['user'] = settings.member;
     if (file.bytes != null) {
-      req.files.add(http.MultipartFile.fromBytes('receipt', file.bytes!, filename: file.name));
+      req.files.add(
+        http.MultipartFile.fromBytes(
+          'receipt',
+          file.bytes!,
+          filename: file.name,
+        ),
+      );
     } else if (file.path != null && file.path!.isNotEmpty) {
-      req.files.add(await http.MultipartFile.fromPath('receipt', file.path!, filename: file.name));
+      req.files.add(
+        await http.MultipartFile.fromPath(
+          'receipt',
+          file.path!,
+          filename: file.name,
+        ),
+      );
     } else {
       throw Exception('No file data');
     }
-    final streamed = await _httpClient.send(req).timeout(const Duration(seconds: 30));
+    final streamed = await _httpClient
+        .send(req)
+        .timeout(const Duration(seconds: 30));
     final response = await http.Response.fromStream(streamed);
     _decodeMapLoose(response);
   }
 
-  Future<Map<String, dynamic>> fetchAnalyticsSummary() async {
-    final uri = _uri('/expenses/analytics/summary');
+  Future<Map<String, dynamic>> fetchAnalyticsSummary({
+    bool privacyMode = false,
+  }) async {
+    final uri = _uri(
+      '/expenses/analytics/summary',
+      privacyMode ? {'privacy': '1'} : null,
+    );
     final response = await _get(uri, seconds: 20);
     return _decodeMapLoose(response);
   }
@@ -2159,8 +2673,13 @@ class HomeHubApi {
     return _decodeMapLoose(response);
   }
 
-  Future<List<Map<String, dynamic>>> listPlaidAccounts() async {
-    final uri = _uri('/expenses/plaid/accounts');
+  Future<List<Map<String, dynamic>>> listPlaidAccounts({
+    bool privacyMode = false,
+  }) async {
+    final uri = _uri(
+      '/expenses/plaid/accounts',
+      privacyMode ? {'privacy': '1'} : null,
+    );
     final response = await _get(uri, seconds: 20);
     final obj = _decodeMapLoose(response);
     final rows = obj['accounts'] as List<dynamic>? ?? [];
@@ -2169,37 +2688,56 @@ class HomeHubApi {
 
   Future<void> syncPlaidAccount(int accountId) async {
     final uri = _uri('/expenses/plaid/accounts/$accountId/sync');
-    final response = await _postJson(uri, {'user': settings.member}, seconds: 20);
+    final response = await _postJson(uri, {
+      'user': settings.member,
+    }, seconds: 20);
     _decodeMapLoose(response);
   }
 
   Future<void> disconnectPlaidAccount(int accountId) async {
     final uri = _uri('/expenses/plaid/accounts/$accountId');
-    final response = await _httpClient.delete(uri).timeout(const Duration(seconds: 20));
+    final response = await _httpClient
+        .delete(uri)
+        .timeout(const Duration(seconds: 20));
     _decodeMapLoose(response);
   }
 
   Future<Map<String, dynamic>> createPlaidLinkToken() async {
     final uri = _uri('/expenses/plaid/link-token');
-    final response = await _postJson(uri, {'user': settings.member}, seconds: 20);
+    final response = await _postJson(uri, {
+      'user': settings.member,
+    }, seconds: 20);
     return _decodeMapLoose(response);
   }
 
-  Future<Map<String, dynamic>> exchangePlaidPublicToken(String publicToken) async {
+  Future<Map<String, dynamic>> exchangePlaidPublicToken(
+    String publicToken,
+  ) async {
     final uri = _uri('/expenses/plaid/exchange-token');
-    final response = await _postJson(uri, {'public_token': publicToken, 'user': settings.member}, seconds: 20);
+    final response = await _postJson(uri, {
+      'public_token': publicToken,
+      'user': settings.member,
+    }, seconds: 20);
     return _decodeMapLoose(response);
   }
 
-  Future<List<Map<String, dynamic>>> fetchPendingIncomeConfirmations() async {
-    final uri = _uri('/api/expenses/income/pending-confirmations', {'member': settings.member});
+  Future<List<Map<String, dynamic>>> fetchPendingIncomeConfirmations({
+    bool privacyMode = false,
+  }) async {
+    final uri = _uri('/api/expenses/income/pending-confirmations', {
+      'member': settings.member,
+      if (privacyMode) 'privacy': '1',
+    });
     final response = await _get(uri, seconds: 20);
     final obj = _decodeObject(response);
     final rows = obj['items'] as List<dynamic>? ?? [];
     return rows.whereType<Map<String, dynamic>>().toList();
   }
 
-  Future<void> confirmIncomeEntry({required int incomeId, double? amount}) async {
+  Future<void> confirmIncomeEntry({
+    required int incomeId,
+    double? amount,
+  }) async {
     final uri = _uri('/expenses/income/confirm/$incomeId');
     final payload = <String, dynamic>{'user': settings.member};
     if (amount != null) payload['amount'] = amount;
@@ -2227,7 +2765,9 @@ class HomeHubApi {
 
   Future<void> deleteFamilyMember(int memberId) async {
     final uri = _uri('/api/family-members/$memberId');
-    final response = await _httpClient.delete(uri).timeout(const Duration(seconds: 15));
+    final response = await _httpClient
+        .delete(uri)
+        .timeout(const Duration(seconds: 15));
     _decodeObject(response);
   }
 
@@ -2243,7 +2783,10 @@ class HomeHubApi {
     return _decodeObject(response);
   }
 
-  Future<void> setMenuVisibility({required String menuItem, required bool visible}) async {
+  Future<void> setMenuVisibility({
+    required String menuItem,
+    required bool visible,
+  }) async {
     final uri = _uri('/api/menu-visibility/$menuItem');
     final response = await _putJson(uri, {'visible': visible});
     _decodeObject(response);
@@ -2255,31 +2798,61 @@ class HomeHubApi {
     return _decodeObject(response);
   }
 
-  Future<void> updateAppPermissionScheme({required String moduleKey, required String visibility, required List<String> allowedMembers}) async {
+  Future<void> updateAppPermissionScheme({
+    required String moduleKey,
+    required String visibility,
+    required List<String> allowedMembers,
+  }) async {
     final uri = _uri('/api/permission-schemes/app/$moduleKey');
-    final response = await _putJson(uri, {'visibility': visibility, 'allowed_members': allowedMembers});
+    final response = await _putJson(uri, {
+      'visibility': visibility,
+      'allowed_members': allowedMembers,
+    });
     _decodeObject(response);
   }
 
-  Future<void> updateProjectPermissionScheme({required int projectId, required String visibility, required List<String> allowedMembers}) async {
+  Future<void> updateProjectPermissionScheme({
+    required int projectId,
+    required String visibility,
+    required List<String> allowedMembers,
+  }) async {
     final uri = _uri('/api/permission-schemes/project/$projectId');
-    final response = await _putJson(uri, {'visibility': visibility, 'allowed_members': allowedMembers});
+    final response = await _putJson(uri, {
+      'visibility': visibility,
+      'allowed_members': allowedMembers,
+    });
     _decodeObject(response);
   }
 
-  Future<void> updateSpacePermissionScheme({required int spaceId, required String visibility, required List<String> allowedMembers}) async {
+  Future<void> updateSpacePermissionScheme({
+    required int spaceId,
+    required String visibility,
+    required List<String> allowedMembers,
+  }) async {
     final uri = _uri('/api/permission-schemes/space/$spaceId');
-    final response = await _putJson(uri, {'visibility': visibility, 'allowed_members': allowedMembers});
+    final response = await _putJson(uri, {
+      'visibility': visibility,
+      'allowed_members': allowedMembers,
+    });
     _decodeObject(response);
   }
 
-  Future<void> createPermissionGroup({required String name, String description = ''}) async {
+  Future<void> createPermissionGroup({
+    required String name,
+    String description = '',
+  }) async {
     final uri = _uri('/api/permission-groups');
-    final response = await _postJson(uri, {'name': name, 'description': description});
+    final response = await _postJson(uri, {
+      'name': name,
+      'description': description,
+    });
     _decodeObject(response);
   }
 
-  Future<void> setPermissionGroupMembers({required int groupId, required List<String> members}) async {
+  Future<void> setPermissionGroupMembers({
+    required int groupId,
+    required List<String> members,
+  }) async {
     final uri = _uri('/api/permission-groups/$groupId/members');
     final response = await _putJson(uri, {'members': members});
     _decodeObject(response);
@@ -2287,7 +2860,9 @@ class HomeHubApi {
 
   Future<void> deletePermissionGroup(int groupId) async {
     final uri = _uri('/api/permission-groups/$groupId');
-    final response = await _httpClient.delete(uri).timeout(const Duration(seconds: 15));
+    final response = await _httpClient
+        .delete(uri)
+        .timeout(const Duration(seconds: 15));
     _decodeObject(response);
   }
 
@@ -2317,7 +2892,9 @@ class HomeHubApi {
 
   Future<void> deletePermissionGrant(int grantId) async {
     final uri = _uri('/api/permission-grants/$grantId');
-    final response = await _httpClient.delete(uri).timeout(const Duration(seconds: 15));
+    final response = await _httpClient
+        .delete(uri)
+        .timeout(const Duration(seconds: 15));
     _decodeObject(response);
   }
 
@@ -2327,7 +2904,10 @@ class HomeHubApi {
     return _decodeObject(response);
   }
 
-  Future<Map<String, dynamic>> updateMemberProfile(int memberId, Map<String, dynamic> payload) async {
+  Future<Map<String, dynamic>> updateMemberProfile(
+    int memberId,
+    Map<String, dynamic> payload,
+  ) async {
     final uri = _uri('/api/member/$memberId/profile');
     final response = await _postJson(uri, payload, seconds: 20);
     return _decodeObject(response);
@@ -2350,10 +2930,14 @@ class HomeHubApi {
       throw Exception('Unexpected server response');
     }
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw Exception('${body['error'] ?? body['message'] ?? 'Request failed'} (${response.statusCode})');
+      throw Exception(
+        '${body['error'] ?? body['message'] ?? 'Request failed'} (${response.statusCode})',
+      );
     }
     if (body['ok'] == false) {
-      throw Exception('${body['error'] ?? body['message'] ?? 'Request failed'}');
+      throw Exception(
+        '${body['error'] ?? body['message'] ?? 'Request failed'}',
+      );
     }
     return body;
   }
@@ -2367,7 +2951,9 @@ class HomeHubApi {
     }
     if (response.statusCode < 200 || response.statusCode >= 300) {
       if (body is Map<String, dynamic>) {
-        throw Exception('${body['error'] ?? body['message'] ?? 'Request failed'} (${response.statusCode})');
+        throw Exception(
+          '${body['error'] ?? body['message'] ?? 'Request failed'} (${response.statusCode})',
+        );
       }
       throw Exception('Request failed (${response.statusCode})');
     }
@@ -2488,10 +3074,11 @@ class TimelinePost {
   final List<TimelineComment> comments;
 
   factory TimelinePost.fromJson(Map<String, dynamic> json) {
-    final commentRows = (json['comments'] as List<dynamic>? ?? const <dynamic>[])
-        .whereType<Map<String, dynamic>>()
-        .map(TimelineComment.fromJson)
-        .toList();
+    final commentRows =
+        (json['comments'] as List<dynamic>? ?? const <dynamic>[])
+            .whereType<Map<String, dynamic>>()
+            .map(TimelineComment.fromJson)
+            .toList();
     return TimelinePost(
       id: _toInt(json['id']),
       timestamp: _parseDateTime(json['timestamp']),
@@ -2621,6 +3208,283 @@ _TimelineVisualMeta _timelineVisualMeta(String action) {
   );
 }
 
+bool _isLikelyVideoUrl(String raw) {
+  final value = raw.trim().toLowerCase();
+  if (value.isEmpty) return false;
+  return value.endsWith('.mp4') ||
+      value.endsWith('.mov') ||
+      value.endsWith('.m4v') ||
+      value.endsWith('.webm') ||
+      value.endsWith('.mkv') ||
+      value.endsWith('.avi');
+}
+
+class _InlineMutedVideo extends StatefulWidget {
+  const _InlineMutedVideo({
+    required this.url,
+    this.autoplay = true,
+    this.startMuted = true,
+    this.onEnded,
+    this.borderRadius = 12,
+    this.fit = BoxFit.contain,
+  });
+
+  final String url;
+  final bool autoplay;
+  final bool startMuted;
+  final VoidCallback? onEnded;
+  final double borderRadius;
+  final BoxFit fit;
+
+  @override
+  State<_InlineMutedVideo> createState() => _InlineMutedVideoState();
+}
+
+class _InlineMutedVideoState extends State<_InlineMutedVideo> {
+  VideoPlayerController? _controller;
+  bool _ready = false;
+  bool _muted = true;
+  bool _endedNotified = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _muted = widget.startMuted;
+    _init();
+  }
+
+  @override
+  void didUpdateWidget(covariant _InlineMutedVideo oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.url != widget.url) {
+      _disposeController();
+      _muted = widget.startMuted;
+      _init();
+    }
+  }
+
+  Future<void> _init() async {
+    final raw = widget.url.trim();
+    if (raw.isEmpty) return;
+    final ctrl = VideoPlayerController.networkUrl(Uri.parse(raw));
+    _controller = ctrl;
+    ctrl.addListener(_handleTick);
+    try {
+      await ctrl.initialize();
+      await ctrl.setLooping(false);
+      await ctrl.setVolume(_muted ? 0 : 1);
+      if (widget.autoplay) {
+        await ctrl.play();
+      }
+      if (!mounted) return;
+      setState(() => _ready = true);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _ready = false);
+    }
+  }
+
+  void _handleTick() {
+    final ctrl = _controller;
+    if (ctrl == null) return;
+    final value = ctrl.value;
+    if (!value.isInitialized) return;
+    final ended =
+        value.position >= value.duration &&
+        value.duration.inMilliseconds > 0 &&
+        !value.isPlaying;
+    if (ended && !_endedNotified) {
+      _endedNotified = true;
+      widget.onEnded?.call();
+    }
+    if (!ended) {
+      _endedNotified = false;
+    }
+  }
+
+  Future<void> _toggleMute() async {
+    final ctrl = _controller;
+    if (ctrl == null) return;
+    final nextMuted = !_muted;
+    _muted = nextMuted;
+    await ctrl.setVolume(nextMuted ? 0 : 1);
+    if (!mounted) return;
+    setState(() {});
+  }
+
+  void _disposeController() {
+    final ctrl = _controller;
+    if (ctrl == null) return;
+    ctrl.removeListener(_handleTick);
+    ctrl.dispose();
+    _controller = null;
+    _ready = false;
+    _endedNotified = false;
+  }
+
+  @override
+  void dispose() {
+    _disposeController();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ctrl = _controller;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(widget.borderRadius),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Container(color: Colors.black),
+          if (ctrl != null && _ready)
+            FittedBox(
+              fit: widget.fit,
+              child: SizedBox(
+                width: ctrl.value.size.width,
+                height: ctrl.value.size.height,
+                child: VideoPlayer(ctrl),
+              ),
+            )
+          else
+            const Center(
+              child: Icon(
+                Icons.play_circle_outline,
+                color: Colors.white70,
+                size: 36,
+              ),
+            ),
+          Positioned(
+            right: 8,
+            bottom: 8,
+            child: InkWell(
+              onTap: _toggleMute,
+              borderRadius: BorderRadius.circular(999),
+              child: Ink(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.6),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      _muted ? Icons.volume_off : Icons.volume_up,
+                      color: Colors.white,
+                      size: 15,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      _muted ? 'Muted' : 'Sound',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+Future<void> _showMediaPreviewDialog({
+  required BuildContext context,
+  required String title,
+  required String mediaUrl,
+  required bool isVideo,
+}) {
+  return showDialog<void>(
+    context: context,
+    barrierColor: Colors.black.withValues(alpha: 0.72),
+    builder: (context) {
+      final mq = MediaQuery.of(context);
+      final maxH = mq.size.height - 48;
+      return Dialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+        backgroundColor: Colors.transparent,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: maxH),
+          child: Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFF030712),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFF1F2937)),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(context),
+                        icon: const Icon(Icons.close, color: Colors.white),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Expanded(
+                    child: isVideo
+                        ? _InlineMutedVideo(
+                            url: mediaUrl,
+                            autoplay: true,
+                            startMuted: true,
+                            borderRadius: 12,
+                          )
+                        : ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: Container(
+                              color: Colors.black,
+                              child: InteractiveViewer(
+                                minScale: 1,
+                                maxScale: 4,
+                                child: Center(
+                                  child: Image.network(
+                                    mediaUrl,
+                                    fit: BoxFit.contain,
+                                    errorBuilder: (_, __, ___) => const Icon(
+                                      Icons.broken_image_outlined,
+                                      color: Colors.white70,
+                                      size: 38,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    },
+  );
+}
+
 class _TimelineSocialCard extends StatefulWidget {
   const _TimelineSocialCard({
     required this.post,
@@ -2652,7 +3516,8 @@ class _TimelineSocialCard extends StatefulWidget {
   State<_TimelineSocialCard> createState() => _TimelineSocialCardState();
 }
 
-class _TimelineSocialCardState extends State<_TimelineSocialCard> with SingleTickerProviderStateMixin {
+class _TimelineSocialCardState extends State<_TimelineSocialCard>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _heartController;
   late final Animation<double> _heartScale;
   final TextEditingController _inlineCommentCtrl = TextEditingController();
@@ -2665,8 +3530,14 @@ class _TimelineSocialCardState extends State<_TimelineSocialCard> with SingleTic
   void initState() {
     super.initState();
     _showInlineComposer = widget.showInlineCommentComposer;
-    _heartController = AnimationController(vsync: this, duration: const Duration(milliseconds: 360));
-    _heartScale = CurvedAnimation(parent: _heartController, curve: Curves.easeOutBack);
+    _heartController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 360),
+    );
+    _heartScale = CurvedAnimation(
+      parent: _heartController,
+      curve: Curves.easeOutBack,
+    );
   }
 
   @override
@@ -2709,7 +3580,9 @@ class _TimelineSocialCardState extends State<_TimelineSocialCard> with SingleTic
   }
 
   bool _isEventPost() {
-    final text = '${widget.post.action} ${widget.post.summary} ${widget.post.entityType}'.toLowerCase();
+    final text =
+        '${widget.post.action} ${widget.post.summary} ${widget.post.entityType}'
+            .toLowerCase();
     return text.contains('event') || text.contains('calendar');
   }
 
@@ -2721,31 +3594,31 @@ class _TimelineSocialCardState extends State<_TimelineSocialCard> with SingleTic
     final icon = isFood
         ? Icons.restaurant
         : isMoney
-            ? Icons.savings
-            : isEvent
-                ? Icons.calendar_month
-                : Icons.image_outlined;
+        ? Icons.savings
+        : isEvent
+        ? Icons.calendar_month
+        : Icons.image_outlined;
     final label = isFood
         ? 'Fork, knife, and plate'
         : isMoney
-            ? 'Money'
-            : isEvent
-                ? 'Event'
-                : 'Timeline';
+        ? 'Money'
+        : isEvent
+        ? 'Event'
+        : 'Timeline';
     final bg = isFood
         ? const LinearGradient(colors: [Color(0xFFFFEDD5), Color(0xFFFED7AA)])
         : isMoney
-            ? const LinearGradient(colors: [Color(0xFFDCFCE7), Color(0xFFBBF7D0)])
-            : isEvent
-                ? const LinearGradient(colors: [Color(0xFFDBEAFE), Color(0xFFBFDBFE)])
-                : const LinearGradient(colors: [Color(0xFFE5E7EB), Color(0xFFD1D5DB)]);
+        ? const LinearGradient(colors: [Color(0xFFDCFCE7), Color(0xFFBBF7D0)])
+        : isEvent
+        ? const LinearGradient(colors: [Color(0xFFDBEAFE), Color(0xFFBFDBFE)])
+        : const LinearGradient(colors: [Color(0xFFE5E7EB), Color(0xFFD1D5DB)]);
     final fg = isFood
         ? const Color(0xFF9A3412)
         : isMoney
-            ? const Color(0xFF166534)
-            : isEvent
-                ? const Color(0xFF1D4ED8)
-                : const Color(0xFF374151);
+        ? const Color(0xFF166534)
+        : isEvent
+        ? const Color(0xFF1D4ED8)
+        : const Color(0xFF374151);
 
     return Container(
       decoration: BoxDecoration(gradient: bg),
@@ -2755,7 +3628,10 @@ class _TimelineSocialCardState extends State<_TimelineSocialCard> with SingleTic
           children: [
             Icon(icon, size: 46, color: fg),
             const SizedBox(height: 8),
-            Text(label, style: TextStyle(color: fg, fontWeight: FontWeight.w700)),
+            Text(
+              label,
+              style: TextStyle(color: fg, fontWeight: FontWeight.w700),
+            ),
           ],
         ),
       ),
@@ -2782,12 +3658,21 @@ class _TimelineSocialCardState extends State<_TimelineSocialCard> with SingleTic
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final meta = _timelineVisualMeta(widget.post.action);
-    final summary = widget.post.summary.trim().isEmpty ? widget.post.action : widget.post.summary.trim();
-    final timestamp = widget.post.timestamp == null ? '' : _relativeTime(widget.post.timestamp!.toIso8601String());
-    final actor = widget.post.actor.trim().isEmpty ? 'Family' : widget.post.actor.trim();
+    final summary = widget.post.summary.trim().isEmpty
+        ? widget.post.action
+        : widget.post.summary.trim();
+    final timestamp = widget.post.timestamp == null
+        ? ''
+        : _relativeTime(widget.post.timestamp!.toIso8601String());
+    final actor = widget.post.actor.trim().isEmpty
+        ? 'Family'
+        : widget.post.actor.trim();
     final radius = BorderRadius.circular(widget.compact ? 14 : 18);
     final avatarSize = widget.compact ? 36.0 : 42.0;
-    final hasImage = widget.imageUrl.trim().startsWith('http://') || widget.imageUrl.trim().startsWith('https://');
+    final mediaUrl = widget.imageUrl.trim();
+    final hasRemoteMedia =
+        mediaUrl.startsWith('http://') || mediaUrl.startsWith('https://');
+    final isVideo = _isLikelyVideoUrl(mediaUrl);
 
     return Container(
       decoration: BoxDecoration(
@@ -2813,7 +3698,11 @@ class _TimelineSocialCardState extends State<_TimelineSocialCard> with SingleTic
                   child: Center(
                     child: Text(
                       actor.substring(0, 1).toUpperCase(),
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 16),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                      ),
                     ),
                   ),
                 ),
@@ -2826,20 +3715,29 @@ class _TimelineSocialCardState extends State<_TimelineSocialCard> with SingleTic
                         actor,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700, color: const Color(0xFF111827)),
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: const Color(0xFF111827),
+                        ),
                       ),
                       if (timestamp.isNotEmpty)
                         Text(
                           '$timestamp • ${meta.label}',
-                          style: theme.textTheme.bodySmall?.copyWith(color: const Color(0xFF6B7280)),
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: const Color(0xFF6B7280),
+                          ),
                         ),
                     ],
                   ),
                 ),
-                if (widget.onDelete != null || (widget.canEditImage && widget.onEditImage != null))
+                if (widget.onDelete != null ||
+                    (widget.canEditImage && widget.onEditImage != null))
                   PopupMenuButton<String>(
                     tooltip: 'Post actions',
-                    icon: const Icon(Icons.more_horiz, color: Color(0xFF4B5563)),
+                    icon: const Icon(
+                      Icons.more_horiz,
+                      color: Color(0xFF4B5563),
+                    ),
                     onSelected: (value) {
                       if (value == 'delete') widget.onDelete?.call();
                       if (value == 'edit-image') widget.onEditImage?.call();
@@ -2878,7 +3776,11 @@ class _TimelineSocialCardState extends State<_TimelineSocialCard> with SingleTic
                 const SizedBox(width: 5),
                 Text(
                   meta.label,
-                  style: TextStyle(color: meta.onSoft, fontWeight: FontWeight.w700, fontSize: 12),
+                  style: TextStyle(
+                    color: meta.onSoft,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                  ),
                 ),
               ],
             ),
@@ -2894,11 +3796,28 @@ class _TimelineSocialCardState extends State<_TimelineSocialCard> with SingleTic
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      if (hasImage)
-                        Image.network(
-                          widget.imageUrl.trim(),
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) => _buildMediaFallback(),
+                      if (hasRemoteMedia && isVideo)
+                        _InlineMutedVideo(
+                          url: mediaUrl,
+                          autoplay: true,
+                          startMuted: true,
+                          borderRadius: 14,
+                          fit: BoxFit.contain,
+                        )
+                      else if (hasRemoteMedia)
+                        InkWell(
+                          onTap: () => _showMediaPreviewDialog(
+                            context: context,
+                            title: summary,
+                            mediaUrl: mediaUrl,
+                            isVideo: false,
+                          ),
+                          child: Image.network(
+                            mediaUrl,
+                            fit: BoxFit.contain,
+                            errorBuilder: (context, error, stackTrace) =>
+                                _buildMediaFallback(),
+                          ),
                         )
                       else
                         _buildMediaFallback(),
@@ -2908,7 +3827,11 @@ class _TimelineSocialCardState extends State<_TimelineSocialCard> with SingleTic
                           child: Center(
                             child: ScaleTransition(
                               scale: _heartScale,
-                              child: const Icon(Icons.favorite, color: Colors.white, size: 84),
+                              child: const Icon(
+                                Icons.favorite,
+                                color: Colors.white,
+                                size: 84,
+                              ),
                             ),
                           ),
                         ),
@@ -2921,10 +3844,17 @@ class _TimelineSocialCardState extends State<_TimelineSocialCard> with SingleTic
                             borderRadius: BorderRadius.circular(999),
                           ),
                           child: const Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                            padding: EdgeInsets.symmetric(
+                              horizontal: 9,
+                              vertical: 5,
+                            ),
                             child: Text(
                               'Double tap to like',
-                              style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           ),
                         ),
@@ -2937,7 +3867,10 @@ class _TimelineSocialCardState extends State<_TimelineSocialCard> with SingleTic
                             onTap: widget.onEditImage,
                             borderRadius: BorderRadius.circular(999),
                             child: Ink(
-                              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 9,
+                                vertical: 5,
+                              ),
                               decoration: BoxDecoration(
                                 color: Colors.black.withValues(alpha: 0.6),
                                 borderRadius: BorderRadius.circular(999),
@@ -2945,9 +3878,20 @@ class _TimelineSocialCardState extends State<_TimelineSocialCard> with SingleTic
                               child: const Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Icon(Icons.image_outlined, size: 13, color: Colors.white),
+                                  Icon(
+                                    Icons.image_outlined,
+                                    size: 13,
+                                    color: Colors.white,
+                                  ),
                                   SizedBox(width: 4),
-                                  Text('Edit image', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700)),
+                                  Text(
+                                    'Edit image',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
                                 ],
                               ),
                             ),
@@ -2963,7 +3907,11 @@ class _TimelineSocialCardState extends State<_TimelineSocialCard> with SingleTic
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
             child: Text(
               summary,
-              style: theme.textTheme.bodyMedium?.copyWith(height: 1.45, fontSize: widget.compact ? 14 : 15, color: const Color(0xFF111827)),
+              style: theme.textTheme.bodyMedium?.copyWith(
+                height: 1.45,
+                fontSize: widget.compact ? 14 : 15,
+                color: const Color(0xFF111827),
+              ),
             ),
           ),
           if (!widget.compact)
@@ -2971,14 +3919,19 @@ class _TimelineSocialCardState extends State<_TimelineSocialCard> with SingleTic
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
               child: Container(
                 width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 9,
+                ),
                 decoration: BoxDecoration(
                   color: const Color(0xFFF9FAFB),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
                   'Shared on your HomeHub timeline',
-                  style: theme.textTheme.bodySmall?.copyWith(color: const Color(0xFF6B7280)),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: const Color(0xFF6B7280),
+                  ),
                 ),
               ),
             ),
@@ -2989,18 +3942,30 @@ class _TimelineSocialCardState extends State<_TimelineSocialCard> with SingleTic
               children: [
                 Row(
                   children: [
-                    const Icon(Icons.favorite, size: 14, color: Color(0xFFF43F5E)),
+                    const Icon(
+                      Icons.favorite,
+                      size: 14,
+                      color: Color(0xFFF43F5E),
+                    ),
                     const SizedBox(width: 4),
-                    const Icon(Icons.thumb_up, size: 14, color: Color(0xFF3B82F6)),
+                    const Icon(
+                      Icons.thumb_up,
+                      size: 14,
+                      color: Color(0xFF3B82F6),
+                    ),
                     const SizedBox(width: 6),
                     Text(
                       '${widget.post.likesCount} likes',
-                      style: theme.textTheme.bodySmall?.copyWith(color: const Color(0xFF6B7280)),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: const Color(0xFF6B7280),
+                      ),
                     ),
                     const Spacer(),
                     Text(
                       '${widget.post.commentsCount} comments • ${widget.post.sharesCount} shares',
-                      style: theme.textTheme.bodySmall?.copyWith(color: const Color(0xFF6B7280)),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: const Color(0xFF6B7280),
+                      ),
                     ),
                   ],
                 ),
@@ -3009,9 +3974,13 @@ class _TimelineSocialCardState extends State<_TimelineSocialCard> with SingleTic
                   children: [
                     Expanded(
                       child: _TimelineActionPill(
-                        icon: widget.post.likedByMe ? Icons.favorite : Icons.favorite_border,
+                        icon: widget.post.likedByMe
+                            ? Icons.favorite
+                            : Icons.favorite_border,
                         label: widget.post.likedByMe ? 'Liked' : 'Like',
-                        bg: widget.post.likedByMe ? const Color(0xFFFECDD3) : const Color(0xFFFFE4E6),
+                        bg: widget.post.likedByMe
+                            ? const Color(0xFFFECDD3)
+                            : const Color(0xFFFFE4E6),
                         fg: const Color(0xFFBE123C),
                         onTap: widget.onLike,
                       ),
@@ -3024,7 +3993,8 @@ class _TimelineSocialCardState extends State<_TimelineSocialCard> with SingleTic
                         bg: const Color(0xFFDBEAFE),
                         fg: const Color(0xFF1D4ED8),
                         onTap: () {
-                          if (widget.showInlineCommentComposer || widget.onCommentSubmit != null) {
+                          if (widget.showInlineCommentComposer ||
+                              widget.onCommentSubmit != null) {
                             setState(() => _showInlineComposer = true);
                             _inlineCommentFocus.requestFocus();
                           } else {
@@ -3074,26 +4044,42 @@ class _TimelineSocialCardState extends State<_TimelineSocialCard> with SingleTic
                 ],
                 if (widget.post.comments.isNotEmpty) ...[
                   const SizedBox(height: 8),
-                  ...widget.post.comments.take(3).map((row) => Container(
-                        width: double.infinity,
-                        margin: const EdgeInsets.only(bottom: 6),
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.55),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Text.rich(
-                          TextSpan(
-                            children: [
-                              TextSpan(
-                                text: '${row.author}: ',
-                                style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w700, color: const Color(0xFF111827)),
-                              ),
-                              TextSpan(text: row.text, style: theme.textTheme.bodySmall?.copyWith(color: const Color(0xFF374151))),
-                            ],
+                  ...widget.post.comments
+                      .take(3)
+                      .map(
+                        (row) => Container(
+                          width: double.infinity,
+                          margin: const EdgeInsets.only(bottom: 6),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.surfaceContainerHighest
+                                .withValues(alpha: 0.55),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text.rich(
+                            TextSpan(
+                              children: [
+                                TextSpan(
+                                  text: '${row.author}: ',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                    color: const Color(0xFF111827),
+                                  ),
+                                ),
+                                TextSpan(
+                                  text: row.text,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: const Color(0xFF374151),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
-                      )),
+                      ),
                 ],
               ],
             ),
@@ -3125,16 +4111,26 @@ class _TimelineActionPill extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(10),
       child: Ink(
-      height: 36,
-      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(10)),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, size: 16, color: fg),
-          const SizedBox(width: 5),
-          Text(label, style: TextStyle(color: fg, fontWeight: FontWeight.w600, fontSize: 12)),
-        ],
-      ),
+        height: 36,
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 16, color: fg),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: TextStyle(
+                color: fg,
+                fontWeight: FontWeight.w600,
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -3168,7 +4164,8 @@ class _TimelineFeedWrapper extends StatelessWidget {
   final VoidCallback? Function(TimelinePost post)? onShareBuilder;
   final VoidCallback? Function(TimelinePost post)? onDeleteBuilder;
   final VoidCallback? Function(TimelinePost post)? onEditImageBuilder;
-  final Future<void> Function(TimelinePost post, String text)? onCommentSubmitBuilder;
+  final Future<void> Function(TimelinePost post, String text)?
+  onCommentSubmitBuilder;
   final bool Function(TimelinePost post)? canEditImageBuilder;
   final bool showInlineCommentComposer;
   final bool compact;
@@ -3184,17 +4181,29 @@ class _TimelineFeedWrapper extends StatelessWidget {
           children: [
             Row(
               children: [
-                Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+                Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
                 const SizedBox(width: 8),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: const Color(0xFFEDE9FE),
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: Text(
                     badgeLabel,
-                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF5B21B6)),
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF5B21B6),
+                    ),
                   ),
                 ),
               ],
@@ -3221,7 +4230,9 @@ class _TimelineFeedWrapper extends StatelessWidget {
                     onEditImage: onEditImageBuilder?.call(post),
                     canEditImage: canEditImageBuilder?.call(post) ?? false,
                     showInlineCommentComposer: showInlineCommentComposer,
-                    onCommentSubmit: onCommentSubmitBuilder == null ? null : (text) => onCommentSubmitBuilder!(post, text),
+                    onCommentSubmit: onCommentSubmitBuilder == null
+                        ? null
+                        : (text) => onCommentSubmitBuilder!(post, text),
                   ),
                 ),
               ),
@@ -3233,7 +4244,11 @@ class _TimelineFeedWrapper extends StatelessWidget {
 }
 
 class CalendarMember {
-  const CalendarMember({required this.id, required this.name, required this.role});
+  const CalendarMember({
+    required this.id,
+    required this.name,
+    required this.role,
+  });
 
   final int id;
   final String name;
@@ -3300,7 +4315,8 @@ class CalendarEvent {
   final String? photoUrl;
 
   factory CalendarEvent.fromJson(Map<String, dynamic> json) {
-    final start = DateTime.tryParse('${json['start_date'] ?? ''}') ?? DateTime.now();
+    final start =
+        DateTime.tryParse('${json['start_date'] ?? ''}') ?? DateTime.now();
     final end = DateTime.tryParse('${json['end_date'] ?? ''}') ?? start;
     final baseStart = _parseDateTime(json['base_start_date']);
     final baseEnd = _parseDateTime(json['base_end_date']);
@@ -3321,15 +4337,25 @@ class CalendarEvent {
       visibility: '${json['visibility'] ?? 'family'}',
       isRecurring: json['is_recurring'] == true,
       invitedMembers: invited,
-      baseStartDate: baseStart == null ? null : DateTime(baseStart.year, baseStart.month, baseStart.day),
-      baseEndDate: baseEnd == null ? null : DateTime(baseEnd.year, baseEnd.month, baseEnd.day),
-      descriptionHtml: json['description_html'] == null ? null : '${json['description_html']}',
+      baseStartDate: baseStart == null
+          ? null
+          : DateTime(baseStart.year, baseStart.month, baseStart.day),
+      baseEndDate: baseEnd == null
+          ? null
+          : DateTime(baseEnd.year, baseEnd.month, baseEnd.day),
+      descriptionHtml: json['description_html'] == null
+          ? null
+          : '${json['description_html']}',
       startTime: _cleanNullableString(json['start_time']),
       endTime: _cleanNullableString(json['end_time']),
       recurrenceFrequency: _cleanNullableString(json['recurrence_frequency']),
-      recurrenceInterval: json['recurrence_interval'] == null ? null : _toInt(json['recurrence_interval']),
+      recurrenceInterval: json['recurrence_interval'] == null
+          ? null
+          : _toInt(json['recurrence_interval']),
       recurrenceUntil: _parseDateTime(json['recurrence_until']),
-      recurrenceCount: json['recurrence_count'] == null ? null : _toInt(json['recurrence_count']),
+      recurrenceCount: json['recurrence_count'] == null
+          ? null
+          : _toInt(json['recurrence_count']),
       occurrenceStart: _parseDateTime(json['occurrence_start']),
       reminderAt: _parseDateTime(json['reminder_at']),
       photoUrl: _cleanNullableString(json['photo_url']),
@@ -3411,14 +4437,18 @@ class CalendarEventDraft {
       'start_time': isAllDay ? null : startTime,
       'end_time': isAllDay ? null : endTime,
       'is_recurring': isRecurring,
-      'recurrence_frequency': isRecurring ? (recurrenceFrequency ?? 'weekly') : null,
+      'recurrence_frequency': isRecurring
+          ? (recurrenceFrequency ?? 'weekly')
+          : null,
       'recurrence_interval': isRecurring ? (recurrenceInterval ?? 1) : null,
-      'recurrence_until': isRecurring && recurrenceUntil != null ? _fmtDate(recurrenceUntil!) : null,
+      'recurrence_until': isRecurring && recurrenceUntil != null
+          ? _fmtDate(recurrenceUntil!)
+          : null,
       'recurrence_count': isRecurring ? recurrenceCount : null,
       'invited_members': invitedMembers,
       'reminder_at': reminderAt == null
           ? ''
-          : '${_fmtDate(reminderAt!)}T${reminderAt!.hour.toString().padLeft(2, '0')}:${reminderAt!.minute.toString().padLeft(2, '0')}',
+          : reminderAt!.toUtc().toIso8601String(),
     };
   }
 }
@@ -3455,7 +4485,8 @@ class MealPlannerEntry {
   final bool canEdit;
 
   factory MealPlannerEntry.fromJson(Map<String, dynamic> json) {
-    final parsedDate = DateTime.tryParse('${json['date'] ?? ''}') ?? DateTime.now();
+    final parsedDate =
+        DateTime.tryParse('${json['date'] ?? ''}') ?? DateTime.now();
     final rawAllowed = json['allowed_members'];
     final allowed = (rawAllowed is List ? rawAllowed : const <dynamic>[])
         .map((value) => '$value'.trim())
@@ -3548,9 +4579,12 @@ class PhotoAssetItem {
     required this.uploader,
     required this.visibility,
     required this.isVideo,
+    required this.capturedAt,
     required this.uploadedAt,
     required this.downloadUrl,
     required this.previewUrl,
+    required this.streamUrl,
+    required this.originalDownloadUrl,
   });
 
   final int id;
@@ -3559,53 +4593,142 @@ class PhotoAssetItem {
   final String uploader;
   final String visibility;
   final bool isVideo;
+  final DateTime? capturedAt;
   final DateTime? uploadedAt;
   final String downloadUrl;
   final String previewUrl;
+  final String streamUrl;
+  final String originalDownloadUrl;
 
   factory PhotoAssetItem.fromJson(Map<String, dynamic> json) {
     return PhotoAssetItem(
       id: _toInt(json['id']),
       albumId: json['album_id'] == null ? null : _toInt(json['album_id']),
-      originalFilename: '${json['original_filename'] ?? json['filename'] ?? ''}',
+      originalFilename:
+          '${json['original_filename'] ?? json['filename'] ?? ''}',
       uploader: '${json['uploader'] ?? ''}',
       visibility: '${json['visibility'] ?? 'private'}',
       isVideo: json['is_video'] == true,
+      capturedAt: _parseDateTime(json['captured_at']),
       uploadedAt: _parseDateTime(json['uploaded_at']),
       downloadUrl: '${json['download_url'] ?? ''}',
       previewUrl: '${json['preview_url'] ?? ''}',
+      streamUrl: '${json['stream_url'] ?? ''}',
+      originalDownloadUrl:
+          '${json['original_download_url'] ?? json['download_url'] ?? ''}',
     );
   }
 }
 
-class PhotoWatchFolderItem {
-  const PhotoWatchFolderItem({
+class PhotoSyncSourceItem {
+  const PhotoSyncSourceItem({
     required this.id,
-    required this.folderUri,
+    required this.sourceType,
+    required this.sourceUri,
     required this.scope,
     required this.targetAlbumId,
     required this.isActive,
-    required this.lastSyncedAt,
+    required this.lastScanAt,
+    required this.memberName,
     required this.platform,
+    required this.deviceLabel,
   });
 
   final int id;
-  final String folderUri;
+  final String sourceType;
+  final String sourceUri;
   final String scope;
   final int? targetAlbumId;
   final bool isActive;
-  final DateTime? lastSyncedAt;
+  final DateTime? lastScanAt;
+  final String memberName;
   final String platform;
+  final String deviceLabel;
 
-  factory PhotoWatchFolderItem.fromJson(Map<String, dynamic> json) {
-    return PhotoWatchFolderItem(
+  factory PhotoSyncSourceItem.fromJson(Map<String, dynamic> json) {
+    return PhotoSyncSourceItem(
       id: _toInt(json['id']),
-      folderUri: '${json['folder_uri'] ?? ''}',
+      sourceType: '${json['source_type'] ?? ''}',
+      sourceUri: '${json['source_uri'] ?? ''}',
       scope: '${json['scope'] ?? 'private'}',
-      targetAlbumId: json['target_album_id'] == null ? null : _toInt(json['target_album_id']),
+      targetAlbumId: json['target_album_id'] == null
+          ? null
+          : _toInt(json['target_album_id']),
       isActive: json['is_active'] == true,
-      lastSyncedAt: _parseDateTime(json['last_synced_at']),
+      lastScanAt: _parseDateTime(json['last_scan_at']),
+      memberName: '${json['member_name'] ?? ''}',
       platform: '${json['platform'] ?? ''}',
+      deviceLabel: '${json['device_label'] ?? ''}',
+    );
+  }
+}
+
+class PhotoSyncJobSummary {
+  const PhotoSyncJobSummary({
+    required this.id,
+    required this.sourceId,
+    required this.state,
+    required this.totalItems,
+    required this.processedItems,
+    required this.ingestedItems,
+    required this.dedupedItems,
+    required this.failedItems,
+    required this.progressPercent,
+    required this.updatedAt,
+  });
+
+  final int id;
+  final int sourceId;
+  final String state;
+  final int totalItems;
+  final int processedItems;
+  final int ingestedItems;
+  final int dedupedItems;
+  final int failedItems;
+  final int progressPercent;
+  final DateTime? updatedAt;
+
+  factory PhotoSyncJobSummary.fromJson(Map<String, dynamic> json) {
+    return PhotoSyncJobSummary(
+      id: _toInt(json['id']),
+      sourceId: _toInt(json['source_id']),
+      state: '${json['state'] ?? 'queued'}',
+      totalItems: _toInt(json['total_items']),
+      processedItems: _toInt(json['processed_items']),
+      ingestedItems: _toInt(json['ingested_items']),
+      dedupedItems: _toInt(json['deduped_items']),
+      failedItems: _toInt(json['failed_items']),
+      progressPercent: _toInt(json['progress_percent']),
+      updatedAt: _parseDateTime(json['updated_at']),
+    );
+  }
+}
+
+class PhotoSyncJobItem {
+  const PhotoSyncJobItem({
+    required this.id,
+    required this.jobId,
+    required this.filename,
+    required this.sourceRelPath,
+    required this.state,
+    required this.lastError,
+  });
+
+  final int id;
+  final int jobId;
+  final String filename;
+  final String sourceRelPath;
+  final String state;
+  final String lastError;
+
+  factory PhotoSyncJobItem.fromJson(Map<String, dynamic> json) {
+    return PhotoSyncJobItem(
+      id: _toInt(json['id']),
+      jobId: _toInt(json['job_id']),
+      filename: '${json['filename'] ?? ''}',
+      sourceRelPath: '${json['source_rel_path'] ?? ''}',
+      state: '${json['state'] ?? ''}',
+      lastError: '${json['last_error'] ?? ''}',
     );
   }
 }
@@ -3668,7 +4791,9 @@ class _SetupScreenState extends State<SetupScreen> {
                 TextFormField(
                   controller: _urlCtrl,
                   decoration: const InputDecoration(labelText: 'Backend URL'),
-                  validator: (v) => (v == null || v.trim().isEmpty) ? 'Backend URL is required' : null,
+                  validator: (v) => (v == null || v.trim().isEmpty)
+                      ? 'Backend URL is required'
+                      : null,
                 ),
                 const SizedBox(height: 20),
                 FilledButton.icon(
@@ -3704,12 +4829,15 @@ class AuthGateScreen extends StatefulWidget {
 class _AuthGateScreenState extends State<AuthGateScreen> {
   final _passwordCtrl = TextEditingController();
   final _pinCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController();
+  final _supabasePasswordCtrl = TextEditingController();
 
   bool _loading = true;
   bool _submitting = false;
   String? _error;
   bool _requiresPassword = false;
   bool _authed = false;
+  bool _useSupabaseAuth = false;
   String? _selectedMember;
   String _effectiveBaseUrl = '';
   String _selectedEndpoint = '';
@@ -3720,9 +4848,13 @@ class _AuthGateScreenState extends State<AuthGateScreen> {
   void initState() {
     super.initState();
     _configuredEndpoints = _seedEndpoints(widget.settings.baseUrl);
-    final preferred = widget.settings.baseUrl.trim().isEmpty ? _cloudBaseUrl : widget.settings.baseUrl.trim();
+    final preferred = widget.settings.baseUrl.trim().isEmpty
+        ? _cloudBaseUrl
+        : widget.settings.baseUrl.trim();
     final normalizedPreferred = _normalizeBaseUrl(preferred);
-    _selectedEndpoint = _configuredEndpoints.contains(normalizedPreferred) ? normalizedPreferred : _configuredEndpoints.first;
+    _selectedEndpoint = _configuredEndpoints.contains(normalizedPreferred)
+        ? normalizedPreferred
+        : _configuredEndpoints.first;
     _effectiveBaseUrl = _selectedEndpoint;
     _bootstrap();
   }
@@ -3731,14 +4863,17 @@ class _AuthGateScreenState extends State<AuthGateScreen> {
   void dispose() {
     _passwordCtrl.dispose();
     _pinCtrl.dispose();
+    _emailCtrl.dispose();
+    _supabasePasswordCtrl.dispose();
     super.dispose();
   }
 
   List<String> _seedEndpoints(String configuredBaseUrl) {
-    final values = <String>[configuredBaseUrl.trim(), _cloudBaseUrl, _localBaseUrl]
-        .where((value) => value.isNotEmpty)
-        .map(_normalizeBaseUrl)
-        .toList();
+    final values = <String>[
+      configuredBaseUrl.trim(),
+      _cloudBaseUrl,
+      _localBaseUrl,
+    ].where((value) => value.isNotEmpty).map(_normalizeBaseUrl).toList();
     final seen = <String>{};
     final out = <String>[];
     for (final value in values) {
@@ -3747,7 +4882,9 @@ class _AuthGateScreenState extends State<AuthGateScreen> {
     return out;
   }
 
-  String get _preferredBaseUrl => _normalizeBaseUrl(_selectedEndpoint.trim().isEmpty ? _cloudBaseUrl : _selectedEndpoint.trim());
+  String get _preferredBaseUrl => _normalizeBaseUrl(
+    _selectedEndpoint.trim().isEmpty ? _cloudBaseUrl : _selectedEndpoint.trim(),
+  );
 
   String _endpointLabel(String endpoint) {
     if (endpoint == _cloudBaseUrl) return 'Cloud (DNS) - $endpoint';
@@ -3762,7 +4899,9 @@ class _AuthGateScreenState extends State<AuthGateScreen> {
       _selectedEndpoint = normalized;
       _error = null;
     });
-    await widget.onUpdateSettings(AppSettings(baseUrl: normalized, member: widget.settings.member));
+    await widget.onUpdateSettings(
+      AppSettings(baseUrl: normalized, member: widget.settings.member),
+    );
   }
 
   Future<void> _showAddServerDialog() async {
@@ -3804,7 +4943,9 @@ class _AuthGateScreenState extends State<AuthGateScreen> {
       _selectedEndpoint = normalized;
       _error = null;
     });
-    await widget.onUpdateSettings(AppSettings(baseUrl: normalized, member: widget.settings.member));
+    await widget.onUpdateSettings(
+      AppSettings(baseUrl: normalized, member: widget.settings.member),
+    );
   }
 
   Future<void> _bootstrap() async {
@@ -3816,7 +4957,10 @@ class _AuthGateScreenState extends State<AuthGateScreen> {
       final preferredBaseUrl = _preferredBaseUrl;
       final reachable = await _firstReachableEndpoint(preferredBaseUrl);
       _effectiveBaseUrl = reachable ?? preferredBaseUrl;
-      await widget.onUpdateSettings(AppSettings(baseUrl: preferredBaseUrl, member: widget.settings.member));
+      await _bootstrapSupabaseRuntime(_effectiveBaseUrl);
+      await widget.onUpdateSettings(
+        AppSettings(baseUrl: preferredBaseUrl, member: widget.settings.member),
+      );
       await _loadAuthStatus();
     } catch (err) {
       if (!mounted) return;
@@ -3827,7 +4971,41 @@ class _AuthGateScreenState extends State<AuthGateScreen> {
     }
   }
 
-  Future<T> _runWithEndpointFailover<T>(Future<T> Function(String baseUrl) action) async {
+
+  Future<void> _bootstrapSupabaseRuntime(String baseUrl) async {
+    try {
+      final response = await _runWithEndpointFailover((candidateBaseUrl) {
+        final uri = _apiUri(candidateBaseUrl, '/api/supabase/client-config');
+        return _httpClient.get(uri).timeout(const Duration(seconds: 15));
+      });
+      final body = jsonDecode(response.body);
+      if (response.statusCode < 200 ||
+          response.statusCode >= 300 ||
+          body is! Map<String, dynamic>) {
+        return;
+      }
+
+      final configured = body['configured'] == true;
+      final url = '${body['url'] ?? ''}'.trim();
+      final anonKey = '${body['anon_key'] ?? ''}'.trim();
+      if (!configured || url.isEmpty || anonKey.isEmpty) {
+        return;
+      }
+
+      final result = await initializeHomeHubSupabaseWithConfig(
+        supabaseUrl: url,
+        supabaseAnonKey: anonKey,
+      );
+      if (result.message.isNotEmpty) {
+        debugPrint('[Supabase] ${result.message}');
+      }
+    } catch (_) {
+      // Ignore bootstrap failures here; API auth fallback remains available.
+    }
+  }
+  Future<T> _runWithEndpointFailover<T>(
+    Future<T> Function(String baseUrl) action,
+  ) async {
     final seed = _preferredBaseUrl;
     final rawCandidates = <String>[
       _preferredBaseUrl,
@@ -3873,34 +5051,119 @@ class _AuthGateScreenState extends State<AuthGateScreen> {
       return _httpClient.get(uri).timeout(const Duration(seconds: 15));
     });
     final body = jsonDecode(response.body);
-    if (response.statusCode < 200 || response.statusCode >= 300 || body is! Map<String, dynamic>) {
+    if (response.statusCode < 200 ||
+        response.statusCode >= 300 ||
+        body is! Map<String, dynamic>) {
       throw Exception('Auth status failed (${response.statusCode})');
     }
 
-    final members = (body['members'] as List<dynamic>? ?? const <dynamic>[]).whereType<Map<String, dynamic>>().toList();
+    final members = (body['members'] as List<dynamic>? ?? const <dynamic>[])
+        .whereType<Map<String, dynamic>>()
+        .toList();
     final currentMember = '${body['current_member'] ?? ''}'.trim();
+    final supabaseAuthEnabled = body['supabase_auth_enabled'] == true;
+    final account = body['account'] is Map<String, dynamic>
+        ? body['account'] as Map<String, dynamic>
+        : null;
+    final accountEmail = '${account?['email'] ?? ''}'.trim();
+    if (accountEmail.isNotEmpty) {
+      _emailCtrl.text = accountEmail;
+    }
     final selected = currentMember.isNotEmpty
         ? currentMember
         : (widget.settings.member.trim().isNotEmpty
-            ? widget.settings.member.trim()
-            : (members.isNotEmpty ? '${members.first['name'] ?? ''}'.trim() : ''));
+              ? widget.settings.member.trim()
+              : (members.isNotEmpty
+                    ? '${members.first['name'] ?? ''}'.trim()
+                    : ''));
 
     if (!mounted) return;
     setState(() {
       _requiresPassword = body['requires_password'] == true;
       _authed = body['authed'] == true;
+      _useSupabaseAuth = supabaseAuthEnabled;
       _members = members;
       _selectedMember = selected.isEmpty ? null : selected;
       _loading = false;
       _error = null;
     });
 
-    if ((_requiresPassword == false || _authed) && currentMember.isNotEmpty) {
+    if (supabaseAuthEnabled &&
+        body['supabase_authenticated'] == true &&
+        currentMember.isNotEmpty) {
       final configuredBase = _preferredBaseUrl;
       final next = AppSettings(baseUrl: configuredBase, member: currentMember);
       await widget.onUpdateSettings(next);
       if (!mounted) return;
       widget.onAuthenticated(next);
+      return;
+    }
+
+    if (!supabaseAuthEnabled &&
+        (_requiresPassword == false || _authed) &&
+        currentMember.isNotEmpty) {
+      final configuredBase = _preferredBaseUrl;
+      final next = AppSettings(baseUrl: configuredBase, member: currentMember);
+      await widget.onUpdateSettings(next);
+      if (!mounted) return;
+      widget.onAuthenticated(next);
+    }
+  }
+
+  Future<void> _submitSupabaseLogin() async {
+    final email = _emailCtrl.text.trim();
+    final password = _supabasePasswordCtrl.text;
+    if (email.isEmpty || password.isEmpty) {
+      setState(() => _error = 'Email and password are required');
+      return;
+    }
+
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    try {
+      final response = await _runWithEndpointFailover((baseUrl) {
+        final uri = _apiUri(baseUrl, '/api/supabase/auth/login');
+        return _httpClient
+            .post(
+              uri,
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode({'email': email, 'password': password}),
+            )
+            .timeout(const Duration(seconds: 15));
+      });
+      final body = jsonDecode(response.body);
+      if (response.statusCode < 200 ||
+          response.statusCode >= 300 ||
+          body is! Map<String, dynamic> ||
+          body['ok'] == false) {
+        throw Exception(
+          '${body is Map<String, dynamic> ? (body['error'] ?? 'Login failed') : 'Login failed'}',
+        );
+      }
+
+      final account = body['account'];
+      String accountDisplayName = '';
+      if (account is Map<String, dynamic>) {
+        accountDisplayName = '${account['display_name'] ?? ''}'.trim();
+      }
+      String memberName = '${body['member_name'] ?? ''}'.trim();
+      if (memberName.isEmpty) memberName = accountDisplayName;
+      if (memberName.isEmpty) memberName = email;
+      if (memberName.isEmpty) {
+        throw Exception('Authenticated but no member profile was returned');
+      }
+      final configuredBase = _preferredBaseUrl;
+      final next = AppSettings(baseUrl: configuredBase, member: memberName);
+      await widget.onUpdateSettings(next);
+      if (!mounted) return;
+      widget.onAuthenticated(next);
+    } catch (err) {
+      if (!mounted) return;
+      setState(() => _error = '$err');
+    } finally {
+      if (mounted) setState(() => _submitting = false);
     }
   }
 
@@ -3921,8 +5184,13 @@ class _AuthGateScreenState extends State<AuthGateScreen> {
             .timeout(const Duration(seconds: 15));
       });
       final body = jsonDecode(response.body);
-      if (response.statusCode < 200 || response.statusCode >= 300 || body is! Map<String, dynamic> || body['ok'] == false) {
-        throw Exception('${body is Map<String, dynamic> ? (body['error'] ?? 'Invalid password') : 'Invalid password'}');
+      if (response.statusCode < 200 ||
+          response.statusCode >= 300 ||
+          body is! Map<String, dynamic> ||
+          body['ok'] == false) {
+        throw Exception(
+          '${body is Map<String, dynamic> ? (body['error'] ?? 'Invalid password') : 'Invalid password'}',
+        );
       }
       await _loadAuthStatus();
     } catch (err) {
@@ -3955,8 +5223,13 @@ class _AuthGateScreenState extends State<AuthGateScreen> {
             .timeout(const Duration(seconds: 15));
       });
       final body = jsonDecode(response.body);
-      if (response.statusCode < 200 || response.statusCode >= 300 || body is! Map<String, dynamic> || body['ok'] == false) {
-        throw Exception('${body is Map<String, dynamic> ? (body['error'] ?? 'Login failed') : 'Login failed'}');
+      if (response.statusCode < 200 ||
+          response.statusCode >= 300 ||
+          body is! Map<String, dynamic> ||
+          body['ok'] == false) {
+        throw Exception(
+          '${body is Map<String, dynamic> ? (body['error'] ?? 'Login failed') : 'Login failed'}',
+        );
       }
       final configuredBase = _preferredBaseUrl;
       final next = AppSettings(baseUrl: configuredBase, member: name);
@@ -3993,7 +5266,12 @@ class _AuthGateScreenState extends State<AuthGateScreen> {
               initialValue: _selectedEndpoint,
               decoration: const InputDecoration(labelText: 'Backend URL'),
               items: _configuredEndpoints
-                  .map((endpoint) => DropdownMenuItem<String>(value: endpoint, child: Text(_endpointLabel(endpoint))))
+                  .map(
+                    (endpoint) => DropdownMenuItem<String>(
+                      value: endpoint,
+                      child: Text(_endpointLabel(endpoint)),
+                    ),
+                  )
                   .toList(),
               onChanged: _submitting
                   ? null
@@ -4021,11 +5299,41 @@ class _AuthGateScreenState extends State<AuthGateScreen> {
             const SizedBox(height: 8),
             Text(
               'Current endpoint used: $_effectiveBaseUrl',
-              style: const TextStyle(fontSize: 12, color: Color(0xFF475569), fontWeight: FontWeight.w600),
+              style: const TextStyle(
+                fontSize: 12,
+                color: Color(0xFF475569),
+                fontWeight: FontWeight.w600,
+              ),
             ),
             const SizedBox(height: 8),
-            if (_requiresPassword && !_authed) ...[
-              const Text('Hub password required', style: TextStyle(fontWeight: FontWeight.w700)),
+            if (_useSupabaseAuth) ...[
+              const Text(
+                'Sign in with your Supabase account',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _emailCtrl,
+                keyboardType: TextInputType.emailAddress,
+                decoration: const InputDecoration(labelText: 'Email'),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _supabasePasswordCtrl,
+                obscureText: true,
+                decoration: const InputDecoration(labelText: 'Password'),
+              ),
+              const SizedBox(height: 10),
+              FilledButton.icon(
+                onPressed: _submitting ? null : _submitSupabaseLogin,
+                icon: const Icon(Icons.lock_open),
+                label: Text(_submitting ? 'Signing in...' : 'Sign In'),
+              ),
+            ] else if (_requiresPassword && !_authed) ...[
+              const Text(
+                'Hub password required',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
               const SizedBox(height: 8),
               TextField(
                 controller: _passwordCtrl,
@@ -4043,7 +5351,12 @@ class _AuthGateScreenState extends State<AuthGateScreen> {
                 initialValue: _selectedMember,
                 decoration: const InputDecoration(labelText: 'Member'),
                 items: _members
-                    .map((row) => DropdownMenuItem<String>(value: '${row['name'] ?? ''}', child: Text('${row['name'] ?? ''}')))
+                    .map(
+                      (row) => DropdownMenuItem<String>(
+                        value: '${row['name'] ?? ''}',
+                        child: Text('${row['name'] ?? ''}'),
+                      ),
+                    )
                     .toList(),
                 onChanged: (value) => setState(() => _selectedMember = value),
               ),
@@ -4052,7 +5365,11 @@ class _AuthGateScreenState extends State<AuthGateScreen> {
                 controller: _pinCtrl,
                 keyboardType: TextInputType.number,
                 obscureText: true,
-                decoration: InputDecoration(labelText: selectedMemberHasPin ? 'PIN' : 'PIN (optional for first login)'),
+                decoration: InputDecoration(
+                  labelText: selectedMemberHasPin
+                      ? 'PIN'
+                      : 'PIN (optional for first login)',
+                ),
               ),
               const SizedBox(height: 10),
               FilledButton.icon(
@@ -4087,7 +5404,8 @@ class HomeShell extends StatefulWidget {
 }
 
 class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
-  final FlutterLocalNotificationsPlugin _notifications = FlutterLocalNotificationsPlugin();
+  final FlutterLocalNotificationsPlugin _notifications =
+      FlutterLocalNotificationsPlugin();
   late HomeHubApi _api;
   bool _bootstrapping = true;
   int _index = 0;
@@ -4099,12 +5417,20 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   bool _memberHasPin = false;
   bool _pinLocked = false;
   bool _unlockPromptOpen = false;
+  DateTime? _lastBackgroundedAt;
   StreamSubscription<_SseEvent>? _eventsSub;
   Timer? _eventsReconnectTimer;
+  static const Duration _pinRelockGrace = Duration(minutes: 5);
 
   String get _privacyMaskKey {
-    final base = widget.settings.baseUrl.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
-    final member = widget.settings.member.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
+    final base = widget.settings.baseUrl.replaceAll(
+      RegExp(r'[^a-zA-Z0-9]'),
+      '_',
+    );
+    final member = widget.settings.member.replaceAll(
+      RegExp(r'[^a-zA-Z0-9]'),
+      '_',
+    );
     return 'homehub_privacy_mask_${base}_$member';
   }
 
@@ -4117,21 +5443,44 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (!_memberHasPin) return;
-    if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
-      _pinLocked = true;
+    if (_memberHasPin &&
+        (state == AppLifecycleState.inactive ||
+            state == AppLifecycleState.paused ||
+            state == AppLifecycleState.detached)) {
+      _lastBackgroundedAt = DateTime.now();
       return;
     }
     if (state == AppLifecycleState.resumed) {
-      _ensurePinUnlocked();
+      final pausedAt = _lastBackgroundedAt;
+      _lastBackgroundedAt = null;
+      if (_memberHasPin && pausedAt != null) {
+        final awayFor = DateTime.now().difference(pausedAt);
+        if (awayFor >= _pinRelockGrace) {
+          _pinLocked = true;
+        }
+      }
+      unawaited(
+        _rescheduleDailyWallClockReminders(
+          notifications: _notifications,
+          baseUrl: widget.settings.baseUrl,
+          member: widget.settings.member,
+        ),
+      );
+      if (_memberHasPin) {
+        _ensurePinUnlocked();
+      }
     }
   }
 
   Future<void> _bootstrapApi() async {
     AppSettings effective = widget.settings;
     final reachable = await _firstReachableEndpoint(widget.settings.baseUrl);
-    if (reachable != null && _normalizeBaseUrl(widget.settings.baseUrl) != reachable) {
-      effective = AppSettings(baseUrl: reachable, member: widget.settings.member);
+    if (reachable != null &&
+        _normalizeBaseUrl(widget.settings.baseUrl) != reachable) {
+      effective = AppSettings(
+        baseUrl: reachable,
+        member: widget.settings.member,
+      );
       await widget.onUpdateSettings(effective);
     }
 
@@ -4159,9 +5508,13 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   Future<void> _refreshPinRequirement() async {
     try {
       final status = await _api.fetchAuthStatus();
-      final members = (status['members'] as List<dynamic>? ?? const <dynamic>[]).whereType<Map<String, dynamic>>().toList();
+      final members = (status['members'] as List<dynamic>? ?? const <dynamic>[])
+          .whereType<Map<String, dynamic>>()
+          .toList();
       final row = members.firstWhere(
-        (m) => '${m['name'] ?? ''}'.trim().toLowerCase() == widget.settings.member.trim().toLowerCase(),
+        (m) =>
+            '${m['name'] ?? ''}'.trim().toLowerCase() ==
+            widget.settings.member.trim().toLowerCase(),
         orElse: () => const <String, dynamic>{},
       );
       final hasPin = row['has_pin'] == true;
@@ -4195,14 +5548,19 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         barrierDismissible: false,
         builder: (context) => StatefulBuilder(
           builder: (context, setDialogState) => AlertDialog(
-            insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+            insetPadding: const EdgeInsets.symmetric(
+              horizontal: 24,
+              vertical: 24,
+            ),
             title: const Text('Unlock HomeHub'),
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Enter the PIN for ${widget.settings.member} to continue.'),
+                  Text(
+                    'Enter the PIN for ${widget.settings.member} to continue.',
+                  ),
                   const SizedBox(height: 10),
                   TextField(
                     controller: pinCtrl,
@@ -4227,7 +5585,10 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
                     return;
                   }
                   try {
-                    await _api.loginMember(name: widget.settings.member, pin: pin);
+                    await _api.loginMember(
+                      name: widget.settings.member,
+                      pin: pin,
+                    );
                     if (!context.mounted) return;
                     Navigator.pop(context, true);
                   } catch (_) {
@@ -4252,7 +5613,9 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   Future<void> _loadPrivacyMask() async {
     final prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
-    setState(() => _privacyMaskEnabled = prefs.getBool(_privacyMaskKey) ?? false);
+    setState(
+      () => _privacyMaskEnabled = prefs.getBool(_privacyMaskKey) ?? false,
+    );
   }
 
   Future<void> _togglePrivacyMask() async {
@@ -4264,7 +5627,9 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   }
 
   Future<void> _initNativeNotifications() async {
-    const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const androidSettings = AndroidInitializationSettings(
+      '@mipmap/ic_launcher',
+    );
     const settings = InitializationSettings(android: androidSettings);
     await _notifications.initialize(
       settings,
@@ -4272,11 +5637,21 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       onDidReceiveBackgroundNotificationResponse: notificationTapBackground,
     );
 
-    final android = _notifications.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+    final android = _notifications
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >();
     await android?.requestNotificationsPermission();
 
     final prefs = await SharedPreferences.getInstance();
     _lastNotifiedId = prefs.getInt(_notificationKey) ?? 0;
+
+    await _rescheduleDailyWallClockReminders(
+      notifications: _notifications,
+      baseUrl: widget.settings.baseUrl,
+      member: widget.settings.member,
+      force: true,
+    );
 
     await Workmanager().registerPeriodicTask(
       'homehub-notification-poll-${widget.settings.member}',
@@ -4309,7 +5684,11 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       }
     }
     if (response.id != null) {
-      await _notifications.cancel(response.id!);
+      try {
+        await _notifications.cancel(response.id!);
+      } catch (_) {
+        // Some Android plugin cache states can throw on cancel; ignore safely.
+      }
     }
   }
 
@@ -4344,14 +5723,24 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   }
 
   String get _notificationKey {
-    final base = widget.settings.baseUrl.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
-    final member = widget.settings.member.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
+    final base = widget.settings.baseUrl.replaceAll(
+      RegExp(r'[^a-zA-Z0-9]'),
+      '_',
+    );
+    final member = widget.settings.member.replaceAll(
+      RegExp(r'[^a-zA-Z0-9]'),
+      '_',
+    );
     return 'homehub_last_notification_${base}_$member';
   }
 
   Future<void> _pollAndNotify() async {
     try {
-      await _checkScheduledFamilyNotifications();
+      await _rescheduleDailyWallClockReminders(
+        notifications: _notifications,
+        baseUrl: widget.settings.baseUrl,
+        member: widget.settings.member,
+      );
 
       final unread = await _api.fetchNotifications(unreadOnly: true);
       if (unread.isEmpty) return;
@@ -4359,7 +5748,9 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
 
       if (!_notificationBootstrapDone) {
         _notificationBootstrapDone = true;
-        _lastNotifiedId = unread.last.id > _lastNotifiedId ? unread.last.id : _lastNotifiedId;
+        _lastNotifiedId = unread.last.id > _lastNotifiedId
+            ? unread.last.id
+            : _lastNotifiedId;
         final prefs = await SharedPreferences.getInstance();
         await prefs.setInt(_notificationKey, _lastNotifiedId);
         return;
@@ -4378,7 +5769,13 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
               channelDescription: _notificationChannelDesc,
               importance: Importance.max,
               priority: Priority.high,
-              actions: const [AndroidNotificationAction(_ackActionId, 'Acknowledge', cancelNotification: true)],
+              actions: const [
+                AndroidNotificationAction(
+                  _ackActionId,
+                  'Acknowledge',
+                  cancelNotification: true,
+                ),
+              ],
             ),
           ),
           payload: 'notif_ack_${item.id}',
@@ -4390,155 +5787,6 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       await prefs.setInt(_notificationKey, _lastNotifiedId);
     } catch (_) {
       // keep silent; network may be temporarily unavailable
-    }
-  }
-
-  Future<void> _checkScheduledFamilyNotifications() async {
-    final now = _easternNow();
-    final prefs = await SharedPreferences.getInstance();
-    final minuteKey = 'homehub_schedule_minute_${widget.settings.member}_${_todayKey(now)}_${now.hour}_${now.minute}';
-    if (prefs.getBool(minuteKey) == true) return;
-    bool completed = false;
-    try {
-      final today = _fmtDate(now);
-      List<MealPlannerEntry> todaysMeals = const <MealPlannerEntry>[];
-      try {
-        final meals = await _api.fetchMealEntries(now);
-        todaysMeals = meals.where((entry) => _fmtDate(entry.date) == today && !entry.isLocked).toList();
-      } catch (_) {}
-
-      for (final mealType in _mealTypes) {
-        final trigger = _timeForToday(now, _mealReminderTime[mealType] ?? '');
-        if (trigger == null || !_isWithinScheduledWindow(now, trigger)) continue;
-
-        final slotItems = todaysMeals.where((entry) => entry.mealType == mealType).toList();
-
-        final shownKey = _scheduledShownKey(widget.settings.baseUrl, widget.settings.member, 'meal_$mealType', now);
-        if (prefs.getBool(shownKey) == true) continue;
-
-        final label = _mealLabel(mealType);
-        final planned = slotItems.map((entry) => entry.title).where((value) => value.trim().isNotEmpty).take(3).join(' • ');
-        final title = '$label reminder';
-        final body = planned.isEmpty ? '$label - no meal planned.' : '$label - $planned';
-
-        await _notifications.show(
-          _scheduledNotificationId('meal_$mealType', now),
-          title,
-          body.isEmpty ? 'It is time for ${_mealLabel(mealType).toLowerCase()}.' : body,
-          NotificationDetails(
-            android: AndroidNotificationDetails(
-              _notificationChannelId,
-              _notificationChannelName,
-              channelDescription: _notificationChannelDesc,
-              importance: Importance.max,
-              priority: Priority.high,
-              actions: const [
-                AndroidNotificationAction(_ackActionId, 'Acknowledge', cancelNotification: true),
-              ],
-            ),
-          ),
-          payload: shownKey,
-        );
-        await prefs.setBool(shownKey, true);
-        await prefs.setString(
-          _scheduledDiagKey(widget.settings.baseUrl, widget.settings.member, 'last_fired_meal_$mealType'),
-          now.toIso8601String(),
-        );
-      }
-
-      final storyTrigger = _timeForToday(now, _storyReminderTime);
-      if (storyTrigger != null && _isWithinScheduledWindow(now, storyTrigger)) {
-        final shownKey = _scheduledShownKey(widget.settings.baseUrl, widget.settings.member, 'story_reader', now);
-        if (prefs.getBool(shownKey) != true) {
-          String reader = 'Story reader not set';
-          try {
-            final routines = await _api.fetchRoutines();
-            final info = routines['routines'] as Map<String, dynamic>? ?? {};
-            final bedtime = info['bedtime'] as Map<String, dynamic>? ?? {};
-            final value = '${bedtime['reader'] ?? ''}'.trim();
-            if (value.isNotEmpty) reader = value;
-          } catch (_) {}
-
-          await _notifications.show(
-            _scheduledNotificationId('story_reader', now),
-            'Bedtime Reader Tonight',
-            '$reader is the reader tonight.',
-            NotificationDetails(
-              android: AndroidNotificationDetails(
-                _notificationChannelId,
-                _notificationChannelName,
-                channelDescription: _notificationChannelDesc,
-                importance: Importance.max,
-                priority: Priority.high,
-                actions: const [
-                  AndroidNotificationAction(_ackActionId, 'Acknowledge', cancelNotification: true),
-                ],
-              ),
-            ),
-            payload: shownKey,
-          );
-          await prefs.setBool(shownKey, true);
-          await prefs.setString(
-            _scheduledDiagKey(widget.settings.baseUrl, widget.settings.member, 'last_fired_story_reader'),
-            now.toIso8601String(),
-          );
-        }
-      }
-
-      try {
-        final remindersData = await _api.fetchRemindersMonth(now);
-        final reminders = remindersData['reminders'] as List<dynamic>? ?? const [];
-        for (final raw in reminders) {
-          if (raw is! Map<String, dynamic>) continue;
-          if ('${raw['date'] ?? ''}' != today) continue;
-          final rawTime = '${raw['time'] ?? ''}'.trim();
-          if (rawTime.length < 5) continue;
-          final trigger = _timeForToday(now, rawTime.substring(0, 5));
-          if (trigger == null || !_isWithinScheduledWindow(now, trigger)) continue;
-
-          final slot = _reminderSlot(raw);
-          final shownKey = _scheduledShownKey(widget.settings.baseUrl, widget.settings.member, slot, now);
-          if (prefs.getBool(shownKey) == true) continue;
-
-          final title = '${raw['title'] ?? 'Reminder'}'.trim();
-          final description = '${raw['description'] ?? ''}'.trim();
-          final body = description.isNotEmpty ? description : 'Reminder for $rawTime';
-
-          await _notifications.show(
-            _scheduledNotificationId(slot, now),
-            title.isEmpty ? 'Reminder' : title,
-            body,
-            NotificationDetails(
-              android: AndroidNotificationDetails(
-                _notificationChannelId,
-                _notificationChannelName,
-                channelDescription: _notificationChannelDesc,
-                importance: Importance.max,
-                priority: Priority.high,
-                actions: const [
-                  AndroidNotificationAction(_ackActionId, 'Acknowledge', cancelNotification: true),
-                ],
-              ),
-            ),
-            payload: shownKey,
-          );
-          await prefs.setBool(shownKey, true);
-          await prefs.setString(
-            _scheduledDiagKey(widget.settings.baseUrl, widget.settings.member, 'last_fired_$slot'),
-            now.toIso8601String(),
-          );
-        }
-      } catch (_) {}
-
-      await prefs.setString(
-        _scheduledDiagKey(widget.settings.baseUrl, widget.settings.member, 'last_check'),
-        now.toIso8601String(),
-      );
-      completed = true;
-    } finally {
-      if (completed) {
-        await prefs.setBool(minuteKey, true);
-      }
     }
   }
 
@@ -4574,10 +5822,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       useSafeArea: true,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (_) => AppLauncherSheet(
-        sections: sections,
-        selectedIndex: _index,
-      ),
+      builder: (_) =>
+          AppLauncherSheet(sections: sections, selectedIndex: _index),
     );
     if (result == null) return;
 
@@ -4618,7 +5864,10 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _addShoppingItemFromSearch(String query, List<AppSection> sections) async {
+  Future<void> _addShoppingItemFromSearch(
+    String query,
+    List<AppSection> sections,
+  ) async {
     try {
       final lists = await _api.fetchShoppingLists();
       if (lists.isEmpty) throw Exception('No shopping lists found');
@@ -4628,7 +5877,10 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         final selected = await showDialog<int>(
           context: context,
           builder: (context) => AlertDialog(
-            insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+            insetPadding: const EdgeInsets.symmetric(
+              horizontal: 24,
+              vertical: 24,
+            ),
             title: const Text('Choose Shopping List'),
             content: SizedBox(
               width: 360,
@@ -4638,7 +5890,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
                     .map(
                       (row) => ListTile(
                         title: Text('${row['name'] ?? 'List'}'),
-                        onTap: () => Navigator.of(context).pop(_toInt(row['id'])),
+                        onTap: () =>
+                            Navigator.of(context).pop(_toInt(row['id'])),
                       ),
                     )
                     .toList(),
@@ -4654,14 +5907,21 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       if (!mounted) return;
       final idx = _sectionIndexByLabel(sections, 'Shopping List');
       if (idx >= 0) setState(() => _index = idx);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Added "$query" to shopping list')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Added "$query" to shopping list')),
+      );
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not add shopping item: $err')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not add shopping item: $err')),
+      );
     }
   }
 
-  Future<void> _findOrCreateEventFromSearch(String query, List<AppSection> sections) async {
+  Future<void> _findOrCreateEventFromSearch(
+    String query,
+    List<AppSection> sections,
+  ) async {
     try {
       final now = DateTime.now();
       final rows = await _api.fetchCalendarEvents(
@@ -4669,14 +5929,20 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         end: now.add(const Duration(days: 365)),
       );
       final q = query.toLowerCase();
-      final matches = rows.where((e) => e.title.toLowerCase().contains(q)).take(6).toList();
+      final matches = rows
+          .where((e) => e.title.toLowerCase().contains(q))
+          .take(6)
+          .toList();
 
       if (matches.isNotEmpty) {
         if (!mounted) return;
         final pick = await showDialog<CalendarEvent?>(
           context: context,
           builder: (context) => AlertDialog(
-            insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+            insetPadding: const EdgeInsets.symmetric(
+              horizontal: 24,
+              vertical: 24,
+            ),
             title: const Text('Matching Events'),
             content: SizedBox(
               width: 420,
@@ -4686,7 +5952,9 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
                   ...matches.map(
                     (event) => ListTile(
                       title: Text(event.title),
-                      subtitle: Text('${_fmtDate(event.startDate)} • ${event.eventType}'),
+                      subtitle: Text(
+                        '${_fmtDate(event.startDate)} • ${event.eventType}',
+                      ),
                       onTap: () => Navigator.of(context).pop(event),
                     ),
                   ),
@@ -4707,7 +5975,11 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         if (calendarIdx >= 0) setState(() => _index = calendarIdx);
         if (pick != null) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Located event: ${pick.title} (${_fmtDate(pick.startDate)})')),
+            SnackBar(
+              content: Text(
+                'Located event: ${pick.title} (${_fmtDate(pick.startDate)})',
+              ),
+            ),
           );
           return;
         }
@@ -4716,14 +5988,21 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       await _createEventFromSearch(query, sections);
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Event search failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Event search failed: $err')));
     }
   }
 
-  Future<void> _createEventFromSearch(String query, List<AppSection> sections) async {
+  Future<void> _createEventFromSearch(
+    String query,
+    List<AppSection> sections,
+  ) async {
     try {
       final now = DateTime.now();
-      final isParty = query.toLowerCase().contains('party') || query.toLowerCase().contains('birthday');
+      final isParty =
+          query.toLowerCase().contains('party') ||
+          query.toLowerCase().contains('birthday');
       final draft = CalendarEventDraft(
         title: query,
         eventType: isParty ? 'party' : 'event',
@@ -4739,34 +6018,47 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       if (!mounted) return;
       final idx = _sectionIndexByLabel(sections, 'Family Calendar');
       if (idx >= 0) setState(() => _index = idx);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Created event "$query"')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Created event "$query"')));
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Create event failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Create event failed: $err')));
     }
   }
 
-  Future<void> _addRecipeFromSearch(String query, List<AppSection> sections) async {
+  Future<void> _addRecipeFromSearch(
+    String query,
+    List<AppSection> sections,
+  ) async {
     try {
-      await _api.saveRecipe(
-        title: query,
-        ingredients: '',
-        instructions: '',
-      );
+      await _api.saveRecipe(title: query, ingredients: '', instructions: '');
       if (!mounted) return;
       final idx = _sectionIndexByLabel(sections, 'Recipe Book');
       if (idx >= 0) setState(() => _index = idx);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Created recipe draft "$query"')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Created recipe draft "$query"')));
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not create recipe: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Could not create recipe: $err')));
     }
   }
 
-  Future<void> _quickAddMoneyFromSearch(String query, String type, List<AppSection> sections) async {
+  Future<void> _quickAddMoneyFromSearch(
+    String query,
+    String type,
+    List<AppSection> sections,
+  ) async {
     try {
       final amountMatch = RegExp(r'(\d+(?:\.\d{1,2})?)').firstMatch(query);
-      final amount = amountMatch == null ? 1.0 : (double.tryParse(amountMatch.group(1) ?? '') ?? 1.0);
+      final amount = amountMatch == null
+          ? 1.0
+          : (double.tryParse(amountMatch.group(1) ?? '') ?? 1.0);
       await _api.quickAdd(
         entryType: type,
         recurrence: 'one-time',
@@ -4780,11 +6072,17 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       final idx = _sectionIndexByLabel(sections, 'Expense & Money');
       if (idx >= 0) setState(() => _index = idx);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Added ${type == 'income' ? 'income' : 'expense'}: "$query"')),
+        SnackBar(
+          content: Text(
+            'Added ${type == 'income' ? 'income' : 'expense'}: "$query"',
+          ),
+        ),
       );
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Quick add failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Quick add failed: $err')));
     }
   }
 
@@ -4798,23 +6096,84 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       AppSection(
         label: 'Welcome',
         icon: Icons.home_outlined,
-        nativeBuilder: (api, settings) => DashboardPage(api: api, member: settings.member),
+        nativeBuilder: (api, settings) =>
+            DashboardPage(api: api, member: settings.member),
       ),
-      AppSection(label: 'Timeline', icon: Icons.timeline, nativeBuilder: (api, settings) => TimelinePage(api: api)),
-      AppSection(label: 'Messages', icon: Icons.chat_bubble_outline, nativeBuilder: (api, settings) => ChatThreadsPage(api: api)),
-      AppSection(label: 'Polls', icon: Icons.poll_outlined, nativeBuilder: (api, settings) => PollsPage(api: api)),
-      AppSection(label: 'Projects & Spaces', icon: Icons.account_tree_outlined, nativeBuilder: (api, settings) => ProjectsSpacesPage(api: api)),
-      AppSection(label: 'Shared Cloud', icon: Icons.cloud_outlined, nativeBuilder: (api, settings) => SharedCloudPage(api: api)),
-      AppSection(label: 'Shopping List', icon: Icons.shopping_cart_outlined, nativeBuilder: (api, settings) => ShoppingListPage(api: api)),
-      AppSection(label: 'To-Do/Chores', icon: Icons.checklist_outlined, nativeBuilder: (api, settings) => ChoresPage(api: api)),
-      AppSection(label: 'Recipe Book', icon: Icons.menu_book_outlined, nativeBuilder: (api, settings) => RecipeBookPage(api: api)),
-      AppSection(label: 'Expiry Tracker', icon: Icons.hourglass_top_outlined, nativeBuilder: (api, settings) => ExpiryTrackerPage(api: api)),
-      AppSection(label: 'QR Generator', icon: Icons.qr_code_2_outlined, nativeBuilder: (api, settings) => QrGeneratorPage(api: api)),
-      AppSection(label: 'Expense & Money', icon: Icons.receipt_long_outlined, nativeBuilder: (api, settings) => ExpensesPage(api: api)),
-      AppSection(label: 'Family Calendar', icon: Icons.calendar_month_outlined, nativeBuilder: (api, settings) => CalendarPage(api: api)),
-      AppSection(label: 'Meal Planner', icon: Icons.restaurant_menu, nativeBuilder: (api, settings) => MealPlannerPage(api: api)),
-      AppSection(label: 'Notifications', icon: Icons.notifications_none, nativeBuilder: (api, settings) => NotificationsPage(api: api)),
-      AppSection(label: 'Settings', icon: Icons.settings_outlined, nativeBuilder: (api, settings) => SettingsNativePage(api: api)),
+      AppSection(
+        label: 'Timeline',
+        icon: Icons.timeline,
+        nativeBuilder: (api, settings) => TimelinePage(api: api),
+      ),
+      AppSection(
+        label: 'Messages',
+        icon: Icons.chat_bubble_outline,
+        nativeBuilder: (api, settings) => ChatThreadsPage(api: api),
+      ),
+      AppSection(
+        label: 'Polls',
+        icon: Icons.poll_outlined,
+        nativeBuilder: (api, settings) => PollsPage(api: api),
+      ),
+      AppSection(
+        label: 'Projects & Spaces',
+        icon: Icons.account_tree_outlined,
+        nativeBuilder: (api, settings) => ProjectsSpacesPage(api: api),
+      ),
+      AppSection(
+        label: 'Shared Cloud',
+        icon: Icons.cloud_outlined,
+        nativeBuilder: (api, settings) => SharedCloudPage(api: api),
+      ),
+      AppSection(
+        label: 'Shopping List',
+        icon: Icons.shopping_cart_outlined,
+        nativeBuilder: (api, settings) => ShoppingListPage(api: api),
+      ),
+      AppSection(
+        label: 'To-Do/Chores',
+        icon: Icons.checklist_outlined,
+        nativeBuilder: (api, settings) => ChoresPage(api: api),
+      ),
+      AppSection(
+        label: 'Recipe Book',
+        icon: Icons.menu_book_outlined,
+        nativeBuilder: (api, settings) => RecipeBookPage(api: api),
+      ),
+      AppSection(
+        label: 'Expiry Tracker',
+        icon: Icons.hourglass_top_outlined,
+        nativeBuilder: (api, settings) => ExpiryTrackerPage(api: api),
+      ),
+      AppSection(
+        label: 'QR Generator',
+        icon: Icons.qr_code_2_outlined,
+        nativeBuilder: (api, settings) => QrGeneratorPage(api: api),
+      ),
+      AppSection(
+        label: 'Expense & Money',
+        icon: Icons.receipt_long_outlined,
+        nativeBuilder: (api, settings) => ExpensesPage(api: api),
+      ),
+      AppSection(
+        label: 'Family Calendar',
+        icon: Icons.calendar_month_outlined,
+        nativeBuilder: (api, settings) => CalendarPage(api: api),
+      ),
+      AppSection(
+        label: 'Meal Planner',
+        icon: Icons.restaurant_menu,
+        nativeBuilder: (api, settings) => MealPlannerPage(api: api),
+      ),
+      AppSection(
+        label: 'Notifications',
+        icon: Icons.notifications_none,
+        nativeBuilder: (api, settings) => NotificationsPage(api: api),
+      ),
+      AppSection(
+        label: 'Settings',
+        icon: Icons.settings_outlined,
+        nativeBuilder: (api, settings) => SettingsNativePage(api: api),
+      ),
     ];
     if (_index >= sections.length) {
       _index = 0;
@@ -4845,7 +6204,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       'Meal Planner',
       'Notifications',
     };
-    final isMaskedSection = _privacyMaskEnabled && maskedSections.contains(activeSection.label);
+    final isMaskedSection =
+        _privacyMaskEnabled && maskedSections.contains(activeSection.label);
 
     return Scaffold(
       appBar: AppBar(
@@ -4854,18 +6214,28 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
           icon: const Icon(Icons.apps),
           onPressed: () => _openLauncher(sections),
         ),
-        title: Text(activeSection.label == 'Welcome' ? _hubName : '${activeSection.label} • ${widget.settings.member}'),
+        title: Text(
+          activeSection.label == 'Welcome'
+              ? _hubName
+              : '${activeSection.label} • ${widget.settings.member}',
+        ),
         actions: [
           IconButton(
-            tooltip: _privacyMaskEnabled ? 'Disable privacy mask' : 'Enable privacy mask',
-            icon: Icon(_privacyMaskEnabled ? Icons.visibility_off : Icons.visibility),
+            tooltip: _privacyMaskEnabled
+                ? 'Disable privacy mask'
+                : 'Enable privacy mask',
+            icon: Icon(
+              _privacyMaskEnabled ? Icons.visibility_off : Icons.visibility,
+            ),
             onPressed: _togglePrivacyMask,
           ),
           IconButton(
             icon: const Icon(Icons.settings),
             onPressed: () async {
               final next = await Navigator.of(context).push<AppSettings>(
-                MaterialPageRoute(builder: (_) => EditSettingsScreen(initial: widget.settings)),
+                MaterialPageRoute(
+                  builder: (_) => EditSettingsScreen(initial: widget.settings),
+                ),
               );
               if (next != null) {
                 await widget.onUpdateSettings(next);
@@ -4877,7 +6247,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
                 }
               }
             },
-          )
+          ),
         ],
       ),
       body: SafeArea(
@@ -4901,11 +6271,18 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.lock_outline, size: 34, color: Color(0xFF4F46E5)),
+                        const Icon(
+                          Icons.lock_outline,
+                          size: 34,
+                          color: Color(0xFF4F46E5),
+                        ),
                         const SizedBox(height: 10),
                         const Text(
                           'Privacy Mask is ON',
-                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                         const SizedBox(height: 8),
                         const Text(
@@ -4979,16 +6356,21 @@ class _AppLauncherSheetState extends State<AppLauncherSheet> {
   }
 
   void _submitAction(LauncherSearchAction action) {
-    Navigator.of(context).pop(
-      _LauncherResult(action: action, query: _searchCtrl.text.trim()),
-    );
+    Navigator.of(
+      context,
+    ).pop(_LauncherResult(action: action, query: _searchCtrl.text.trim()));
   }
 
   @override
   Widget build(BuildContext context) {
     final query = _searchCtrl.text.trim();
     return Padding(
-      padding: EdgeInsets.fromLTRB(16, 8, 16, 16 + MediaQuery.of(context).viewInsets.bottom),
+      padding: EdgeInsets.fromLTRB(
+        16,
+        8,
+        16,
+        16 + MediaQuery.of(context).viewInsets.bottom,
+      ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -4999,8 +6381,15 @@ class _AppLauncherSheetState extends State<AppLauncherSheet> {
             onChanged: (_) => setState(() {}),
             onSubmitted: (_) {
               if (query.isEmpty) return;
-              final eventLike = query.toLowerCase().contains('event') || query.toLowerCase().contains('party') || query.toLowerCase().contains('birthday');
-              _submitAction(eventLike ? LauncherSearchAction.findEvent : LauncherSearchAction.addShopping);
+              final eventLike =
+                  query.toLowerCase().contains('event') ||
+                  query.toLowerCase().contains('party') ||
+                  query.toLowerCase().contains('birthday');
+              _submitAction(
+                eventLike
+                    ? LauncherSearchAction.findEvent
+                    : LauncherSearchAction.addShopping,
+              );
             },
             decoration: InputDecoration(
               hintText: 'Global search',
@@ -5022,12 +6411,36 @@ class _AppLauncherSheetState extends State<AppLauncherSheet> {
               spacing: 8,
               runSpacing: 8,
               children: [
-                _LauncherActionChip(icon: Icons.shopping_cart_outlined, label: 'Add to Shopping', onTap: () => _submitAction(LauncherSearchAction.addShopping)),
-                _LauncherActionChip(icon: Icons.event_outlined, label: 'Find Event', onTap: () => _submitAction(LauncherSearchAction.findEvent)),
-                _LauncherActionChip(icon: Icons.add_circle_outline, label: 'Create Event', onTap: () => _submitAction(LauncherSearchAction.addEvent)),
-                _LauncherActionChip(icon: Icons.menu_book_outlined, label: 'Add Recipe', onTap: () => _submitAction(LauncherSearchAction.addRecipe)),
-                _LauncherActionChip(icon: Icons.receipt_long_outlined, label: 'Add Expense', onTap: () => _submitAction(LauncherSearchAction.addExpense)),
-                _LauncherActionChip(icon: Icons.attach_money_outlined, label: 'Add Income', onTap: () => _submitAction(LauncherSearchAction.addIncome)),
+                _LauncherActionChip(
+                  icon: Icons.shopping_cart_outlined,
+                  label: 'Add to Shopping',
+                  onTap: () => _submitAction(LauncherSearchAction.addShopping),
+                ),
+                _LauncherActionChip(
+                  icon: Icons.event_outlined,
+                  label: 'Find Event',
+                  onTap: () => _submitAction(LauncherSearchAction.findEvent),
+                ),
+                _LauncherActionChip(
+                  icon: Icons.add_circle_outline,
+                  label: 'Create Event',
+                  onTap: () => _submitAction(LauncherSearchAction.addEvent),
+                ),
+                _LauncherActionChip(
+                  icon: Icons.menu_book_outlined,
+                  label: 'Add Recipe',
+                  onTap: () => _submitAction(LauncherSearchAction.addRecipe),
+                ),
+                _LauncherActionChip(
+                  icon: Icons.receipt_long_outlined,
+                  label: 'Add Expense',
+                  onTap: () => _submitAction(LauncherSearchAction.addExpense),
+                ),
+                _LauncherActionChip(
+                  icon: Icons.attach_money_outlined,
+                  label: 'Add Income',
+                  onTap: () => _submitAction(LauncherSearchAction.addIncome),
+                ),
               ],
             ),
             const SizedBox(height: 12),
@@ -5048,25 +6461,40 @@ class _AppLauncherSheetState extends State<AppLauncherSheet> {
                 final selected = i == widget.selectedIndex;
                 return InkWell(
                   borderRadius: BorderRadius.circular(14),
-                  onTap: () => Navigator.of(context).pop(_LauncherResult(sectionIndex: i)),
+                  onTap: () => Navigator.of(
+                    context,
+                  ).pop(_LauncherResult(sectionIndex: i)),
                   child: Container(
                     decoration: BoxDecoration(
-                      color: selected ? const Color(0xFFEDE9FE) : const Color(0xFFF8FAFC),
+                      color: selected
+                          ? const Color(0xFFEDE9FE)
+                          : const Color(0xFFF8FAFC),
                       borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: selected ? const Color(0xFF8B5CF6) : const Color(0xFFE2E8F0)),
+                      border: Border.all(
+                        color: selected
+                            ? const Color(0xFF8B5CF6)
+                            : const Color(0xFFE2E8F0),
+                      ),
                     ),
                     padding: const EdgeInsets.all(8),
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(section.icon, color: const Color(0xFF4F46E5), size: 24),
+                        Icon(
+                          section.icon,
+                          color: const Color(0xFF4F46E5),
+                          size: 24,
+                        ),
                         const SizedBox(height: 6),
                         Text(
                           section.label,
                           textAlign: TextAlign.center,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ],
                     ),
@@ -5082,7 +6510,11 @@ class _AppLauncherSheetState extends State<AppLauncherSheet> {
 }
 
 class _LauncherActionChip extends StatelessWidget {
-  const _LauncherActionChip({required this.icon, required this.label, required this.onTap});
+  const _LauncherActionChip({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
 
   final IconData icon;
   final String label;
@@ -5100,8 +6532,12 @@ class _LauncherActionChip extends StatelessWidget {
 
 class _EditSettingsScreenState extends State<EditSettingsScreen> {
   final _formKey = GlobalKey<FormState>();
-  late final TextEditingController _urlCtrl = TextEditingController(text: widget.initial.baseUrl);
-  late final TextEditingController _memberCtrl = TextEditingController(text: widget.initial.member);
+  late final TextEditingController _urlCtrl = TextEditingController(
+    text: widget.initial.baseUrl,
+  );
+  late final TextEditingController _memberCtrl = TextEditingController(
+    text: widget.initial.member,
+  );
 
   @override
   void dispose() {
@@ -5123,20 +6559,25 @@ class _EditSettingsScreenState extends State<EditSettingsScreen> {
               TextFormField(
                 controller: _urlCtrl,
                 decoration: const InputDecoration(labelText: 'Backend URL'),
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+                validator: (v) =>
+                    (v == null || v.trim().isEmpty) ? 'Required' : null,
               ),
               const SizedBox(height: 12),
               TextFormField(
                 controller: _memberCtrl,
                 decoration: const InputDecoration(labelText: 'Member name'),
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+                validator: (v) =>
+                    (v == null || v.trim().isEmpty) ? 'Required' : null,
               ),
               const SizedBox(height: 16),
               FilledButton(
                 onPressed: () {
                   if (!_formKey.currentState!.validate()) return;
                   Navigator.of(context).pop(
-                    AppSettings(baseUrl: _urlCtrl.text.trim(), member: _memberCtrl.text.trim()),
+                    AppSettings(
+                      baseUrl: _urlCtrl.text.trim(),
+                      member: _memberCtrl.text.trim(),
+                    ),
                   );
                 },
                 child: const Text('Save'),
@@ -5183,7 +6624,9 @@ class _ModuleWebPageState extends State<ModuleWebPage> {
           },
         ),
       )
-      ..loadRequest(Uri.parse(_moduleUrl(widget.settings.baseUrl, widget.path)));
+      ..loadRequest(
+        Uri.parse(_moduleUrl(widget.settings.baseUrl, widget.path)),
+      );
   }
 
   @override
@@ -5191,7 +6634,9 @@ class _ModuleWebPageState extends State<ModuleWebPage> {
     return Column(
       children: [
         if (_loadingProgress < 100)
-          LinearProgressIndicator(value: _loadingProgress == 0 ? null : _loadingProgress / 100),
+          LinearProgressIndicator(
+            value: _loadingProgress == 0 ? null : _loadingProgress / 100,
+          ),
         Expanded(
           child: RefreshIndicator(
             onRefresh: () => _controller.reload(),
@@ -5271,8 +6716,18 @@ class _DashboardPageState extends State<DashboardPage> {
         return <String, dynamic>{'members': <dynamic>[]};
       }
     })();
+    final timelineMediaF = (() async {
+      try {
+        return await widget.api.fetchPhotoAssets(scope: 'family');
+      } catch (_) {
+        return <PhotoAssetItem>[];
+      }
+    })();
 
-    Map<String, dynamic> routines = const {'ok': false, 'routines': <String, dynamic>{}};
+    Map<String, dynamic> routines = const {
+      'ok': false,
+      'routines': <String, dynamic>{},
+    };
     try {
       routines = await widget.api.fetchRoutines();
     } catch (_) {
@@ -5326,8 +6781,28 @@ class _DashboardPageState extends State<DashboardPage> {
     final reminders = await remindersF;
     final notifications = await notificationsF;
     final timeline = await timelineF;
+    final timelineMedia = await timelineMediaF;
     final membersPayload = await membersF;
-    final members = (membersPayload['members'] as List<dynamic>? ?? const <dynamic>[]).whereType<Map<String, dynamic>>().toList();
+    final members =
+        (membersPayload['members'] as List<dynamic>? ?? const <dynamic>[])
+            .whereType<Map<String, dynamic>>()
+            .toList();
+
+    bool miniSlideshowEnabled = false;
+    try {
+      final current = members.firstWhere(
+        (row) =>
+            '${row['name'] ?? ''}'.trim().toLowerCase() ==
+            widget.member.trim().toLowerCase(),
+      );
+      final memberId = _toInt(current['id']);
+      if (memberId > 0) {
+        final profile = await widget.api.getMemberProfile(memberId);
+        miniSlideshowEnabled = profile['mini_slideshow_enabled'] == true;
+      }
+    } catch (_) {
+      miniSlideshowEnabled = false;
+    }
 
     return _DashboardData(
       hubName: hubName,
@@ -5340,6 +6815,8 @@ class _DashboardPageState extends State<DashboardPage> {
       weatherLocation: weatherLocation,
       pendingNotices: pendingNotices,
       unreadNotifications: notifications.length,
+      timelineMedia: timelineMedia,
+      miniSlideshowEnabled: miniSlideshowEnabled,
     );
   }
 
@@ -5354,7 +6831,9 @@ class _DashboardPageState extends State<DashboardPage> {
     final text = _statusCtrl.text.trim();
     if (text.isEmpty) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Status cannot be empty')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Status cannot be empty')));
       return;
     }
     setState(() => _statusBusy = true);
@@ -5362,10 +6841,14 @@ class _DashboardPageState extends State<DashboardPage> {
       await widget.api.saveCurrentMemberStatus(text);
       await _refresh();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Status saved')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Status saved')));
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Save failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Save failed: $err')));
     } finally {
       if (mounted) setState(() => _statusBusy = false);
     }
@@ -5378,10 +6861,14 @@ class _DashboardPageState extends State<DashboardPage> {
       _statusCtrl.clear();
       await _refresh();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Status cleared')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Status cleared')));
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Clear failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Clear failed: $err')));
     } finally {
       if (mounted) setState(() => _statusBusy = false);
     }
@@ -5396,7 +6883,10 @@ class _DashboardPageState extends State<DashboardPage> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 24,
+            vertical: 24,
+          ),
           title: const Text('Send Family Notice'),
           content: SingleChildScrollView(
             child: Column(
@@ -5429,14 +6919,21 @@ class _DashboardPageState extends State<DashboardPage> {
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Require acknowledgement'),
                   value: requireAck,
-                  onChanged: (v) => setDialogState(() => requireAck = v == true),
+                  onChanged: (v) =>
+                      setDialogState(() => requireAck = v == true),
                 ),
               ],
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Send')),
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Send'),
+            ),
           ],
         ),
       ),
@@ -5446,7 +6943,9 @@ class _DashboardPageState extends State<DashboardPage> {
     final message = messageCtrl.text.trim();
     if (message.isEmpty) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Notice message is required')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Notice message is required')),
+      );
       return;
     }
 
@@ -5455,13 +6954,21 @@ class _DashboardPageState extends State<DashboardPage> {
     if (mobile) channels.add('mobile');
 
     try {
-      await widget.api.sendFamilyNotice(message: message, channels: channels, requireAck: requireAck);
+      await widget.api.sendFamilyNotice(
+        message: message,
+        channels: channels,
+        requireAck: requireAck,
+      );
       await _refresh();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Family notice sent')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Family notice sent')));
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Send failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Send failed: $err')));
     }
   }
 
@@ -5471,7 +6978,9 @@ class _DashboardPageState extends State<DashboardPage> {
       await _refresh();
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Acknowledge failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Acknowledge failed: $err')));
     }
   }
 
@@ -5491,10 +7000,14 @@ class _DashboardPageState extends State<DashboardPage> {
       await widget.api.completeBathRoutine();
       await _refresh();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Bath assignments switched')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Bath assignments switched')),
+      );
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to switch bath assignments: $err')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to switch bath assignments: $err')),
+      );
     } finally {
       if (mounted) setState(() => _bathCompleteBusy = false);
     }
@@ -5506,7 +7019,9 @@ class _DashboardPageState extends State<DashboardPage> {
       await _refresh();
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Like failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Like failed: $err')));
     }
   }
 
@@ -5524,8 +7039,14 @@ class _DashboardPageState extends State<DashboardPage> {
           decoration: const InputDecoration(hintText: 'Write a comment...'),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, ctrl.text.trim()), child: const Text('Post')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, ctrl.text.trim()),
+            child: const Text('Post'),
+          ),
         ],
       ),
     );
@@ -5536,25 +7057,45 @@ class _DashboardPageState extends State<DashboardPage> {
       await widget.api.commentTimelinePost(post.id, value);
       await _refresh();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Comment added')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Comment added')));
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Comment failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Comment failed: $err')));
     }
   }
 
   Future<void> _timelineShare(TimelinePost post) async {
     try {
       await widget.api.shareTimelinePost(post.id);
-      final link = '${widget.api.settings.baseUrl.replaceAll(RegExp(r'/$'), '')}/timeline';
+      final link =
+          '${widget.api.settings.baseUrl.replaceAll(RegExp(r'/$'), '')}/timeline';
       await Clipboard.setData(ClipboardData(text: link));
       await _refresh();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Timeline link copied and share recorded')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Timeline link copied and share recorded'),
+        ),
+      );
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Share failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Share failed: $err')));
     }
+  }
+
+  String _absoluteUrl(String value) {
+    final raw = value.trim();
+    if (raw.isEmpty) return '';
+    if (raw.startsWith('http://') || raw.startsWith('https://')) return raw;
+    if (!raw.startsWith('/')) return raw;
+    final base = widget.api.settings.baseUrl.replaceAll(RegExp(r'/$'), '');
+    return '$base$raw';
   }
 
   bool _hasWeatherCoords(Map<String, dynamic> weatherLocation) {
@@ -5567,9 +7108,13 @@ class _DashboardPageState extends State<DashboardPage> {
     return weatherLocation['use_gps_location'] == true;
   }
 
-  Future<void> _maybePromptForGpsWeather(Map<String, dynamic> weatherLocation) async {
+  Future<void> _maybePromptForGpsWeather(
+    Map<String, dynamic> weatherLocation,
+  ) async {
     if (_gpsPromptShown || !mounted) return;
-    if (_hasWeatherCoords(weatherLocation) && _isGpsWeatherEnabled(weatherLocation)) return;
+    if (_hasWeatherCoords(weatherLocation) &&
+        _isGpsWeatherEnabled(weatherLocation))
+      return;
     _gpsPromptShown = true;
 
     final shouldUseGps = await showDialog<bool>(
@@ -5578,11 +7123,19 @@ class _DashboardPageState extends State<DashboardPage> {
         insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
         title: const Text('Use your location for weather?'),
         content: const SingleChildScrollView(
-          child: Text('Allow HomeHub to use Android location so Weather shows your current local forecast automatically.'),
+          child: Text(
+            'Allow HomeHub to use Android location so Weather shows your current local forecast automatically.',
+          ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Not now')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Use My Location')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Not now'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Use My Location'),
+          ),
         ],
       ),
     );
@@ -5605,7 +7158,9 @@ class _DashboardPageState extends State<DashboardPage> {
       if (!serviceEnabled) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Turn on location services to use GPS weather.')),
+          const SnackBar(
+            content: Text('Turn on location services to use GPS weather.'),
+          ),
         );
         return;
       }
@@ -5618,7 +7173,9 @@ class _DashboardPageState extends State<DashboardPage> {
       if (permission == LocationPermission.denied) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Location permission is required for GPS weather.')),
+          const SnackBar(
+            content: Text('Location permission is required for GPS weather.'),
+          ),
         );
         return;
       }
@@ -5628,14 +7185,25 @@ class _DashboardPageState extends State<DashboardPage> {
         final shouldOpen = await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
-            insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+            insetPadding: const EdgeInsets.symmetric(
+              horizontal: 24,
+              vertical: 24,
+            ),
             title: const Text('Location Permission Blocked'),
             content: const SingleChildScrollView(
-              child: Text('Android is blocking location permission for HomeHub. Open app settings and enable Location to use weather from your current position.'),
+              child: Text(
+                'Android is blocking location permission for HomeHub. Open app settings and enable Location to use weather from your current position.',
+              ),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-              FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Open Settings')),
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Open Settings'),
+              ),
             ],
           ),
         );
@@ -5668,20 +7236,27 @@ class _DashboardPageState extends State<DashboardPage> {
 
       Position? position;
       try {
-        position = await Geolocator.getCurrentPosition(locationSettings: highSettings);
+        position = await Geolocator.getCurrentPosition(
+          locationSettings: highSettings,
+        );
       } catch (_) {
         position = await Geolocator.getLastKnownPosition();
       }
 
       if (position == null) {
-        position = await Geolocator.getCurrentPosition(locationSettings: mediumSettings);
+        position = await Geolocator.getCurrentPosition(
+          locationSettings: mediumSettings,
+        );
       }
 
       final lat = position.latitude;
       final lon = position.longitude;
       var locationName = 'My Location';
       try {
-        final reverse = await widget.api.fetchLocationName(latitude: lat, longitude: lon);
+        final reverse = await widget.api.fetchLocationName(
+          latitude: lat,
+          longitude: lon,
+        );
         final resolved = '${reverse['location_name'] ?? ''}'.trim();
         if (resolved.isNotEmpty) locationName = resolved;
       } catch (_) {}
@@ -5694,7 +7269,11 @@ class _DashboardPageState extends State<DashboardPage> {
       );
 
       try {
-        await widget.api.fetchWeather(latitude: lat, longitude: lon, locationName: locationName);
+        await widget.api.fetchWeather(
+          latitude: lat,
+          longitude: lon,
+          locationName: locationName,
+        );
       } catch (_) {}
 
       await _refresh();
@@ -5704,9 +7283,9 @@ class _DashboardPageState extends State<DashboardPage> {
       );
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('GPS weather setup failed: $err')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('GPS weather setup failed: $err')));
     } finally {
       if (mounted) {
         setState(() {
@@ -5729,18 +7308,46 @@ class _DashboardPageState extends State<DashboardPage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(controller: latCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true), decoration: const InputDecoration(labelText: 'Latitude')),
+              TextField(
+                controller: latCtrl,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                  signed: true,
+                ),
+                decoration: const InputDecoration(labelText: 'Latitude'),
+              ),
               const SizedBox(height: 8),
-              TextField(controller: lonCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true), decoration: const InputDecoration(labelText: 'Longitude')),
+              TextField(
+                controller: lonCtrl,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                  signed: true,
+                ),
+                decoration: const InputDecoration(labelText: 'Longitude'),
+              ),
               const SizedBox(height: 8),
-              TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Location name (optional)')),
+              TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Location name (optional)',
+                ),
+              ),
             ],
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, 0), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(context, 2), child: const Text('Use My Location')),
-          FilledButton(onPressed: () => Navigator.pop(context, 1), child: const Text('Save Manual')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, 0),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, 2),
+            child: const Text('Use My Location'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, 1),
+            child: const Text('Save Manual'),
+          ),
         ],
       ),
     );
@@ -5755,15 +7362,23 @@ class _DashboardPageState extends State<DashboardPage> {
     final lon = double.tryParse(lonCtrl.text.trim());
     if (lat == null || lon == null) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Latitude and longitude are required')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Latitude and longitude are required')),
+      );
       return;
     }
     try {
-      await widget.api.saveWeatherLocation(latitude: lat, longitude: lon, locationName: nameCtrl.text.trim());
+      await widget.api.saveWeatherLocation(
+        latitude: lat,
+        longitude: lon,
+        locationName: nameCtrl.text.trim(),
+      );
       await _refresh();
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Save location failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Save location failed: $err')));
     }
   }
 
@@ -5789,20 +7404,26 @@ class _DashboardPageState extends State<DashboardPage> {
           }
 
           final data = snapshot.data!;
-          final reminders = (data.reminders['reminders'] as List<dynamic>? ?? []);
+          final reminders =
+              (data.reminders['reminders'] as List<dynamic>? ?? []);
           final routinesRaw = data.routines['routines'];
-          final routines = routinesRaw is Map ? Map<String, dynamic>.from(routinesRaw) : <String, dynamic>{};
+          final routines = routinesRaw is Map
+              ? Map<String, dynamic>.from(routinesRaw)
+              : <String, dynamic>{};
           final bedtime = routines['bedtime'] as Map<String, dynamic>? ?? {};
           final bath = routines['bath'] as Map<String, dynamic>? ?? {};
           final members = data.members;
           final timeline = data.timeline;
+          final timelineMedia = data.timelineMedia;
           final pendingNotices = data.pendingNotices;
           final weather = data.weather;
           final locationName = weather == null
               ? '${data.weatherLocation['location_name'] ?? ''}'
               : '${weather['location_name'] ?? data.weatherLocation['location_name'] ?? ''}';
 
-          if (!_gpsPromptShown && (!_hasWeatherCoords(data.weatherLocation) || !_isGpsWeatherEnabled(data.weatherLocation))) {
+          if (!_gpsPromptShown &&
+              (!_hasWeatherCoords(data.weatherLocation) ||
+                  !_isGpsWeatherEnabled(data.weatherLocation))) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
               _maybePromptForGpsWeather(data.weatherLocation);
             });
@@ -5824,12 +7445,26 @@ class _DashboardPageState extends State<DashboardPage> {
                       final headline = Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(data.hubName, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800)),
+                          Text(
+                            data.hubName,
+                            style: const TextStyle(
+                              fontSize: 24,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
                           const SizedBox(height: 4),
-                          Text('Welcome back, ${widget.member}', style: const TextStyle(color: Color(0xFF1E293B), fontWeight: FontWeight.w600)),
+                          Text(
+                            'Welcome back, ${widget.member}',
+                            style: const TextStyle(
+                              color: Color(0xFF1E293B),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
                           const SizedBox(height: 6),
                           Text(
-                            data.myStatus.trim().isEmpty ? 'My status: No status set yet.' : 'My status: ${data.myStatus}',
+                            data.myStatus.trim().isEmpty
+                                ? 'My status: No status set yet.'
+                                : 'My status: ${data.myStatus}',
                             style: const TextStyle(color: Color(0xFF64748B)),
                           ),
                         ],
@@ -5874,7 +7509,9 @@ class _DashboardPageState extends State<DashboardPage> {
                         controller: _statusCtrl,
                         minLines: 2,
                         maxLines: 4,
-                        decoration: const InputDecoration(hintText: 'Update my status...'),
+                        decoration: const InputDecoration(
+                          hintText: 'Update my status...',
+                        ),
                       ),
                       const SizedBox(height: 10),
                       LayoutBuilder(
@@ -5886,7 +7523,9 @@ class _DashboardPageState extends State<DashboardPage> {
                               children: [
                                 FilledButton(
                                   onPressed: _statusBusy ? null : _saveStatus,
-                                  child: Text(_statusBusy ? 'Saving...' : 'Save'),
+                                  child: Text(
+                                    _statusBusy ? 'Saving...' : 'Save',
+                                  ),
                                 ),
                                 const SizedBox(height: 8),
                                 OutlinedButton(
@@ -5901,7 +7540,9 @@ class _DashboardPageState extends State<DashboardPage> {
                               Expanded(
                                 child: FilledButton(
                                   onPressed: _statusBusy ? null : _saveStatus,
-                                  child: Text(_statusBusy ? 'Saving...' : 'Save'),
+                                  child: Text(
+                                    _statusBusy ? 'Saving...' : 'Save',
+                                  ),
                                 ),
                               ),
                               const SizedBox(width: 10),
@@ -5975,10 +7616,24 @@ class _DashboardPageState extends State<DashboardPage> {
                     children: [
                       Row(
                         children: [
-                          const Icon(Icons.wb_cloudy_outlined, color: Color(0xFF8B5CF6)),
+                          const Icon(
+                            Icons.wb_cloudy_outlined,
+                            color: Color(0xFF8B5CF6),
+                          ),
                           const SizedBox(width: 8),
-                          const Expanded(child: Text('Weather', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 22))),
-                          TextButton(onPressed: _configureWeatherLocation, child: const Text('Settings')),
+                          const Expanded(
+                            child: Text(
+                              'Weather',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 22,
+                              ),
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: _configureWeatherLocation,
+                            child: const Text('Settings'),
+                          ),
                         ],
                       ),
                       const SizedBox(height: 8),
@@ -5986,17 +7641,30 @@ class _DashboardPageState extends State<DashboardPage> {
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(locationName.trim().isEmpty ? 'Location not configured.' : 'Unable to load weather for $locationName.'),
+                            Text(
+                              locationName.trim().isEmpty
+                                  ? 'Location not configured.'
+                                  : 'Unable to load weather for $locationName.',
+                            ),
                             const SizedBox(height: 10),
                             Wrap(
                               spacing: 8,
                               runSpacing: 8,
                               children: [
                                 FilledButton(
-                                  onPressed: _weatherGpsBusy ? null : _useCurrentLocationForWeather,
-                                  child: Text(_weatherGpsBusy ? 'Locating...' : 'Use My Location'),
+                                  onPressed: _weatherGpsBusy
+                                      ? null
+                                      : _useCurrentLocationForWeather,
+                                  child: Text(
+                                    _weatherGpsBusy
+                                        ? 'Locating...'
+                                        : 'Use My Location',
+                                  ),
                                 ),
-                                OutlinedButton(onPressed: _configureWeatherLocation, child: const Text('Set Manually')),
+                                OutlinedButton(
+                                  onPressed: _configureWeatherLocation,
+                                  child: const Text('Set Manually'),
+                                ),
                               ],
                             ),
                           ],
@@ -6005,61 +7673,126 @@ class _DashboardPageState extends State<DashboardPage> {
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(locationName.trim().isEmpty ? 'Current location' : locationName, style: const TextStyle(color: Color(0xFF64748B))),
+                            Text(
+                              locationName.trim().isEmpty
+                                  ? 'Current location'
+                                  : locationName,
+                              style: const TextStyle(color: Color(0xFF64748B)),
+                            ),
                             const SizedBox(height: 8),
                             Row(
                               children: [
-                                Text(_weatherEmoji(_toInt(weather['weather_code'])), style: const TextStyle(fontSize: 38)),
+                                Text(
+                                  _weatherEmoji(
+                                    _toInt(weather['weather_code']),
+                                  ),
+                                  style: const TextStyle(fontSize: 38),
+                                ),
                                 const SizedBox(width: 10),
                                 Expanded(
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
-                                      Text('${_toDouble(weather['temperature']).toStringAsFixed(0)}°F', style: const TextStyle(fontSize: 40, fontWeight: FontWeight.w800)),
+                                      Text(
+                                        '${_toDouble(weather['temperature']).toStringAsFixed(0)}°F',
+                                        style: const TextStyle(
+                                          fontSize: 40,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
                                       Text('${weather['description'] ?? ''}'),
-                                      Text('Feels like ${_toDouble(weather['apparent_temperature']).toStringAsFixed(0)}°F', style: const TextStyle(color: Color(0xFF64748B))),
+                                      Text(
+                                        'Feels like ${_toDouble(weather['apparent_temperature']).toStringAsFixed(0)}°F',
+                                        style: const TextStyle(
+                                          color: Color(0xFF64748B),
+                                        ),
+                                      ),
                                     ],
                                   ),
                                 ),
                               ],
                             ),
                             const SizedBox(height: 8),
-                            Text('Wind ${_toDouble(weather['wind_speed']).toStringAsFixed(1)} mph • Humidity ${_toDouble(weather['humidity']).toStringAsFixed(0)}%'),
+                            Text(
+                              'Wind ${_toDouble(weather['wind_speed']).toStringAsFixed(1)} mph • Humidity ${_toDouble(weather['humidity']).toStringAsFixed(0)}%',
+                            ),
                             const SizedBox(height: 8),
-                            Text('Last updated: ${_relativeTime('${weather['timestamp'] ?? ''}')}', style: const TextStyle(color: Color(0xFF64748B))),
+                            Text(
+                              'Last updated: ${_relativeTime('${weather['timestamp'] ?? ''}')}',
+                              style: const TextStyle(color: Color(0xFF64748B)),
+                            ),
                             const SizedBox(height: 8),
-                            const Text('7-Day Forecast', style: TextStyle(fontWeight: FontWeight.w700)),
+                            const Text(
+                              '7-Day Forecast',
+                              style: TextStyle(fontWeight: FontWeight.w700),
+                            ),
                             const SizedBox(height: 6),
                             SizedBox(
                               height: 110,
                               child: ListView(
                                 scrollDirection: Axis.horizontal,
-                                children: (weather['daily_forecast'] as List<dynamic>? ?? const <dynamic>[])
-                                    .whereType<Map>()
-                                    .map((raw) {
-                                  final day = Map<String, dynamic>.from(raw);
-                                  final max = _toDouble(day['max_temp']).toStringAsFixed(0);
-                                  final min = _toDouble(day['min_temp']).toStringAsFixed(0);
-                                  final date = '${day['date'] ?? ''}';
-                                  final label = date.length >= 10 ? _weekdayShort(date) : date;
-                                  return Container(
-                                    width: 82,
-                                    margin: const EdgeInsets.only(right: 8),
-                                    padding: const EdgeInsets.all(8),
-                                    decoration: BoxDecoration(
-                                      border: Border.all(color: const Color(0xFFE2E8F0)),
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: Column(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: [
-                                        Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
-                                        Text(_weatherEmoji(_toInt(day['weather_code'])), style: const TextStyle(fontSize: 24)),
-                                        Text('$max°  $min°', style: const TextStyle(fontSize: 12)),
-                                      ],
-                                    ),
-                                  );
-                                }).toList(),
+                                children:
+                                    (weather['daily_forecast']
+                                                as List<dynamic>? ??
+                                            const <dynamic>[])
+                                        .whereType<Map>()
+                                        .map((raw) {
+                                          final day = Map<String, dynamic>.from(
+                                            raw,
+                                          );
+                                          final max = _toDouble(
+                                            day['max_temp'],
+                                          ).toStringAsFixed(0);
+                                          final min = _toDouble(
+                                            day['min_temp'],
+                                          ).toStringAsFixed(0);
+                                          final date = '${day['date'] ?? ''}';
+                                          final label = date.length >= 10
+                                              ? _weekdayShort(date)
+                                              : date;
+                                          return Container(
+                                            width: 82,
+                                            margin: const EdgeInsets.only(
+                                              right: 8,
+                                            ),
+                                            padding: const EdgeInsets.all(8),
+                                            decoration: BoxDecoration(
+                                              border: Border.all(
+                                                color: const Color(0xFFE2E8F0),
+                                              ),
+                                              borderRadius:
+                                                  BorderRadius.circular(12),
+                                            ),
+                                            child: Column(
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment.center,
+                                              children: [
+                                                Text(
+                                                  label,
+                                                  style: const TextStyle(
+                                                    fontWeight: FontWeight.w700,
+                                                  ),
+                                                ),
+                                                Text(
+                                                  _weatherEmoji(
+                                                    _toInt(day['weather_code']),
+                                                  ),
+                                                  style: const TextStyle(
+                                                    fontSize: 24,
+                                                  ),
+                                                ),
+                                                Text(
+                                                  '$max°  $min°',
+                                                  style: const TextStyle(
+                                                    fontSize: 12,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          );
+                                        })
+                                        .toList(),
                               ),
                             ),
                           ],
@@ -6082,7 +7815,10 @@ class _DashboardPageState extends State<DashboardPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Family Members', style: TextStyle(fontWeight: FontWeight.w700)),
+                      const Text(
+                        'Family Members',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
                       const SizedBox(height: 8),
                       if (members.isEmpty)
                         const Text('No family members yet.')
@@ -6095,8 +7831,16 @@ class _DashboardPageState extends State<DashboardPage> {
                             final avatar = '${row['avatar'] ?? ''}';
                             return Chip(
                               avatar: avatar.isNotEmpty
-                                  ? CircleAvatar(backgroundImage: NetworkImage(avatar))
-                                  : CircleAvatar(child: Text(name.isNotEmpty ? name[0].toUpperCase() : '?')),
+                                  ? CircleAvatar(
+                                      backgroundImage: NetworkImage(avatar),
+                                    )
+                                  : CircleAvatar(
+                                      child: Text(
+                                        name.isNotEmpty
+                                            ? name[0].toUpperCase()
+                                            : '?',
+                                      ),
+                                    ),
                               label: Text(name),
                             );
                           }).toList(),
@@ -6112,7 +7856,10 @@ class _DashboardPageState extends State<DashboardPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Bath Time & Bedtime', style: TextStyle(fontWeight: FontWeight.w700)),
+                      const Text(
+                        'Bath Time & Bedtime',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
                       const SizedBox(height: 8),
                       ListTile(
                         dense: true,
@@ -6126,19 +7873,28 @@ class _DashboardPageState extends State<DashboardPage> {
                         contentPadding: EdgeInsets.zero,
                         leading: const Icon(Icons.bathtub_outlined),
                         title: const Text('Bath Time Pairings'),
-                        subtitle: Text('Avery: ${bath['avery'] ?? 'Avery & Mommy'}\nHarley: ${bath['harley'] ?? 'Harley & Daddy'}'),
+                        subtitle: Text(
+                          'Avery: ${bath['avery'] ?? 'Avery & Mommy'}\nHarley: ${bath['harley'] ?? 'Harley & Daddy'}',
+                        ),
                         isThreeLine: true,
                       ),
                       Text(
                         _bathCompletedMetaLabel(bath),
-                        style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF64748B),
+                        ),
                       ),
                       const SizedBox(height: 8),
                       Align(
                         alignment: Alignment.centerLeft,
                         child: FilledButton(
-                          onPressed: _bathCompleteBusy ? null : _completeBathRoutine,
-                          child: Text(_bathCompleteBusy ? 'Updating...' : 'Completed'),
+                          onPressed: _bathCompleteBusy
+                              ? null
+                              : _completeBathRoutine,
+                          child: Text(
+                            _bathCompleteBusy ? 'Updating...' : 'Completed',
+                          ),
                         ),
                       ),
                     ],
@@ -6146,42 +7902,102 @@ class _DashboardPageState extends State<DashboardPage> {
                 ),
               ),
               const SizedBox(height: 12),
+              if (data.miniSlideshowEnabled && timelineMedia.isNotEmpty) ...[
+                _MiniMediaSlideshowCard(
+                  items: timelineMedia.take(24).toList(),
+                  title: 'Mini Slideshow',
+                  onOpen: (item) => _showMediaPreviewDialog(
+                    context: context,
+                    title: item.originalFilename,
+                    mediaUrl: _absoluteUrl(
+                      item.isVideo
+                          ? (item.streamUrl.trim().isNotEmpty
+                                ? item.streamUrl
+                                : item.previewUrl)
+                          : item.previewUrl,
+                    ),
+                    isVideo: item.isVideo,
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+              if (timelineMedia.isNotEmpty) ...[
+                _FamilyMediaTimelineCard(
+                  items: timelineMedia.take(20).toList(),
+                  absoluteUrlBuilder: _absoluteUrl,
+                  onOpen: (item) => _showMediaPreviewDialog(
+                    context: context,
+                    title: item.originalFilename,
+                    mediaUrl: _absoluteUrl(
+                      item.isVideo
+                          ? (item.streamUrl.trim().isNotEmpty
+                                ? item.streamUrl
+                                : item.previewUrl)
+                          : item.previewUrl,
+                    ),
+                    isVideo: item.isVideo,
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
               _TimelineFeedWrapper(
                 title: 'Timeline',
                 badgeLabel: 'Preview',
                 posts: timeline,
                 compact: true,
                 imageUrlBuilder: (post) => post.imageUrl,
-                onLikeBuilder: (post) => () => _timelineLike(post),
-                onCommentBuilder: (post) => () => _timelineComment(post),
-                onShareBuilder: (post) => () => _timelineShare(post),
+                onLikeBuilder: (post) =>
+                    () => _timelineLike(post),
+                onCommentBuilder: (post) =>
+                    () => _timelineComment(post),
+                onShareBuilder: (post) =>
+                    () => _timelineShare(post),
               ),
               const SizedBox(height: 12),
-              Text('Family Notice Acknowledgements', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+              Text(
+                'Family Notice Acknowledgements',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              ),
               const SizedBox(height: 8),
               if (pendingNotices.isEmpty)
-                const Card(child: ListTile(title: Text('No pending acknowledgements.')))
+                const Card(
+                  child: ListTile(title: Text('No pending acknowledgements.')),
+                )
               else
-                ...pendingNotices.map((notice) => Card(
-                      child: ListTile(
-                        title: Text('${notice['title'] ?? 'Family Notice'}'),
-                        subtitle: Text('${notice['message'] ?? ''}\nFrom ${notice['sender'] ?? ''}'),
-                        isThreeLine: true,
-                        trailing: FilledButton(
-                          onPressed: () => _acknowledgeNotice(_toInt(notice['id'])),
-                          child: const Text('Acknowledge'),
-                        ),
+                ...pendingNotices.map(
+                  (notice) => Card(
+                    child: ListTile(
+                      title: Text('${notice['title'] ?? 'Family Notice'}'),
+                      subtitle: Text(
+                        '${notice['message'] ?? ''}\nFrom ${notice['sender'] ?? ''}',
                       ),
-                    )),
+                      isThreeLine: true,
+                      trailing: FilledButton(
+                        onPressed: () =>
+                            _acknowledgeNotice(_toInt(notice['id'])),
+                        child: const Text('Acknowledge'),
+                      ),
+                    ),
+                  ),
+                ),
               const SizedBox(height: 12),
-              Text('Upcoming reminders', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+              Text(
+                'Upcoming reminders',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              ),
               const SizedBox(height: 8),
               ...reminders.take(5).map((raw) {
                 final item = raw as Map<String, dynamic>;
                 return Card(
                   child: ListTile(
                     title: Text('${item['title'] ?? 'Reminder'}'),
-                    subtitle: Text('${item['date'] ?? ''}${item['time'] != null ? ' • ${item['time']}' : ''}'),
+                    subtitle: Text(
+                      '${item['date'] ?? ''}${item['time'] != null ? ' • ${item['time']}' : ''}',
+                    ),
                     trailing: Text('${item['creator'] ?? ''}'),
                   ),
                 );
@@ -6206,6 +8022,8 @@ class _DashboardData {
     required this.weatherLocation,
     required this.pendingNotices,
     required this.unreadNotifications,
+    required this.timelineMedia,
+    required this.miniSlideshowEnabled,
   });
 
   final String hubName;
@@ -6218,6 +8036,318 @@ class _DashboardData {
   final Map<String, dynamic> weatherLocation;
   final List<Map<String, dynamic>> pendingNotices;
   final int unreadNotifications;
+  final List<PhotoAssetItem> timelineMedia;
+  final bool miniSlideshowEnabled;
+}
+
+class _MiniMediaSlideshowCard extends StatefulWidget {
+  const _MiniMediaSlideshowCard({
+    required this.items,
+    required this.title,
+    required this.onOpen,
+  });
+
+  final List<PhotoAssetItem> items;
+  final String title;
+  final void Function(PhotoAssetItem item) onOpen;
+
+  @override
+  State<_MiniMediaSlideshowCard> createState() =>
+      _MiniMediaSlideshowCardState();
+}
+
+class _MiniMediaSlideshowCardState extends State<_MiniMediaSlideshowCard> {
+  int _index = 0;
+  bool _playing = true;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _schedule();
+  }
+
+  @override
+  void didUpdateWidget(covariant _MiniMediaSlideshowCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.items != widget.items) {
+      _index = 0;
+      _schedule();
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _schedule() {
+    _timer?.cancel();
+    if (!_playing || widget.items.isEmpty) return;
+    final item = widget.items[_index % widget.items.length];
+    if (item.isVideo) return;
+    _timer = Timer(const Duration(seconds: 4), () {
+      if (!mounted) return;
+      setState(() {
+        _index = (_index + 1) % widget.items.length;
+      });
+      _schedule();
+    });
+  }
+
+  void _next() {
+    if (widget.items.isEmpty) return;
+    setState(() {
+      _index = (_index + 1) % widget.items.length;
+    });
+    _schedule();
+  }
+
+  void _prev() {
+    if (widget.items.isEmpty) return;
+    setState(() {
+      _index = (_index - 1 + widget.items.length) % widget.items.length;
+    });
+    _schedule();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.items.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final item = widget.items[_index % widget.items.length];
+    final mediaUrl = item.isVideo
+        ? (item.streamUrl.trim().isNotEmpty ? item.streamUrl : item.previewUrl)
+        : item.previewUrl;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  widget.title,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  '${_index + 1} / ${widget.items.length}',
+                  style: const TextStyle(
+                    color: Color(0xFF64748B),
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            AspectRatio(
+              aspectRatio: 1,
+              child: InkWell(
+                onTap: () => widget.onOpen(item),
+                borderRadius: BorderRadius.circular(12),
+                child: item.isVideo
+                    ? _InlineMutedVideo(
+                        url: mediaUrl,
+                        startMuted: true,
+                        autoplay: _playing,
+                        borderRadius: 12,
+                        onEnded: _playing ? _next : null,
+                      )
+                    : ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Container(
+                          color: Colors.black,
+                          child: Image.network(
+                            mediaUrl,
+                            fit: BoxFit.contain,
+                            errorBuilder: (_, __, ___) => const Icon(
+                              Icons.broken_image_outlined,
+                              color: Colors.white70,
+                            ),
+                          ),
+                        ),
+                      ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final compact = constraints.maxWidth < 340;
+                final controls = <Widget>[
+                  IconButton(
+                    onPressed: _prev,
+                    tooltip: 'Previous',
+                    icon: const Icon(Icons.skip_previous),
+                  ),
+                  IconButton(
+                    onPressed: () {
+                      setState(() => _playing = !_playing);
+                      _schedule();
+                    },
+                    tooltip: _playing ? 'Pause' : 'Play',
+                    icon: Icon(_playing ? Icons.pause : Icons.play_arrow),
+                  ),
+                  IconButton(
+                    onPressed: _next,
+                    tooltip: 'Next',
+                    icon: const Icon(Icons.skip_next),
+                  ),
+                ];
+                if (compact) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: controls,
+                      ),
+                      Text(
+                        item.originalFilename,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF64748B),
+                        ),
+                      ),
+                    ],
+                  );
+                }
+                return Row(
+                  children: [
+                    ...controls,
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        item.originalFilename,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF64748B),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _FamilyMediaTimelineCard extends StatelessWidget {
+  const _FamilyMediaTimelineCard({
+    required this.items,
+    required this.absoluteUrlBuilder,
+    required this.onOpen,
+  });
+
+  final List<PhotoAssetItem> items;
+  final String Function(String path) absoluteUrlBuilder;
+  final void Function(PhotoAssetItem item) onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    if (items.isEmpty) return const SizedBox.shrink();
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Family Media',
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 220,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: items.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 10),
+                itemBuilder: (context, index) {
+                  final item = items[index];
+                  final mediaUrl = item.isVideo
+                      ? (item.streamUrl.trim().isNotEmpty
+                            ? item.streamUrl
+                            : item.previewUrl)
+                      : item.previewUrl;
+                  return SizedBox(
+                    width: 156,
+                    child: InkWell(
+                      onTap: () => onOpen(item),
+                      borderRadius: BorderRadius.circular(12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          AspectRatio(
+                            aspectRatio: 1,
+                            child: item.isVideo
+                                ? _InlineMutedVideo(
+                                    url: absoluteUrlBuilder(mediaUrl),
+                                    startMuted: true,
+                                    autoplay: true,
+                                    borderRadius: 12,
+                                  )
+                                : ClipRRect(
+                                    borderRadius: BorderRadius.circular(12),
+                                    child: Container(
+                                      color: Colors.black,
+                                      child: Image.network(
+                                        absoluteUrlBuilder(mediaUrl),
+                                        fit: BoxFit.contain,
+                                        errorBuilder: (_, __, ___) =>
+                                            const Icon(
+                                              Icons.broken_image_outlined,
+                                              color: Colors.white70,
+                                            ),
+                                      ),
+                                    ),
+                                  ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            item.originalFilename,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          Text(
+                            '${item.uploader}${item.visibility.isEmpty ? '' : ' • ${item.visibility}'}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Color(0xFF64748B),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class RemindersPage extends StatefulWidget {
@@ -6257,12 +8387,17 @@ class _RemindersPageState extends State<RemindersPage> {
             return const Center(child: CircularProgressIndicator());
           }
           if (snapshot.hasError) {
-            return ErrorPanel(error: snapshot.error.toString(), onRetry: () => setState(() => _future = _load()));
+            return ErrorPanel(
+              error: snapshot.error.toString(),
+              onRetry: () => setState(() => _future = _load()),
+            );
           }
 
           final rows = snapshot.data ?? [];
           if (rows.isEmpty) {
-            return const Center(child: Text('No reminders found for this month.'));
+            return const Center(
+              child: Text('No reminders found for this month.'),
+            );
           }
 
           return ListView.builder(
@@ -6273,7 +8408,9 @@ class _RemindersPageState extends State<RemindersPage> {
               return Card(
                 child: ListTile(
                   title: Text('${item['title'] ?? 'Reminder'}'),
-                  subtitle: Text('${item['date'] ?? ''}${item['time'] != null ? ' • ${item['time']}' : ''}'),
+                  subtitle: Text(
+                    '${item['date'] ?? ''}${item['time'] != null ? ' • ${item['time']}' : ''}',
+                  ),
                   trailing: Text('${item['creator'] ?? ''}'),
                 ),
               );
@@ -6296,6 +8433,7 @@ class TimelinePage extends StatefulWidget {
 
 class _TimelinePageState extends State<TimelinePage> {
   late Future<List<TimelinePost>> _future;
+  List<PhotoAssetItem> _timelineMedia = const <PhotoAssetItem>[];
   final TextEditingController _composerCtrl = TextEditingController();
   final TextEditingController _composerImageCtrl = TextEditingController();
   bool _posting = false;
@@ -6305,21 +8443,26 @@ class _TimelinePageState extends State<TimelinePage> {
   Timer? _sseReconnectTimer;
   final Map<int, bool> _optimisticLiked = <int, bool>{};
   final Map<int, int> _optimisticLikesCount = <int, int>{};
-  final Map<int, List<TimelineComment>> _optimisticComments = <int, List<TimelineComment>>{};
+  final Map<int, List<TimelineComment>> _optimisticComments =
+      <int, List<TimelineComment>>{};
 
   static const Map<String, String> _imagePresets = {
     'Food': 'https://dummyimage.com/1080x1080/fed7aa/9a3412.png&text=Food',
     'Money': 'https://dummyimage.com/1080x1080/bbf7d0/166534.png&text=Money',
     'Event': 'https://dummyimage.com/1080x1080/bfdbfe/1d4ed8.png&text=Event',
-    'Generic': 'https://dummyimage.com/1080x1080/e5e7eb/374151.png&text=Timeline',
+    'Generic':
+        'https://dummyimage.com/1080x1080/e5e7eb/374151.png&text=Timeline',
   };
 
   @override
   void initState() {
     super.initState();
-    _future = widget.api.fetchTimeline(limit: 60);
+    _future = _loadTimelineAndMedia();
     _loadRecipes();
-    _liveTimer = Timer.periodic(const Duration(seconds: 8), (_) => _refreshLive());
+    _liveTimer = Timer.periodic(
+      const Duration(seconds: 8),
+      (_) => _refreshLive(),
+    );
     _startSse();
   }
 
@@ -6421,13 +8564,26 @@ class _TimelinePageState extends State<TimelinePage> {
   }
 
   Future<void> _refresh() async {
-    setState(() => _future = widget.api.fetchTimeline(limit: 60));
+    setState(() => _future = _loadTimelineAndMedia());
     await Future.wait([_future, _loadRecipes()]);
+  }
+
+  Future<List<TimelinePost>> _loadTimelineAndMedia() async {
+    final timeline = await widget.api.fetchTimeline(limit: 60);
+    try {
+      final media = await widget.api.fetchPhotoAssets(scope: 'family');
+      if (mounted) {
+        setState(() {
+          _timelineMedia = media.take(24).toList();
+        });
+      }
+    } catch (_) {}
+    return timeline;
   }
 
   Future<void> _refreshLive() async {
     try {
-      final rows = await widget.api.fetchTimeline(limit: 60);
+      final rows = await _loadTimelineAndMedia();
       if (!mounted) return;
       setState(() => _future = Future<List<TimelinePost>>.value(rows));
     } catch (_) {}
@@ -6465,7 +8621,9 @@ class _TimelinePageState extends State<TimelinePage> {
       _composerCtrl.clear();
       _composerImageCtrl.clear();
       if (!mounted) return;
-      messenger.showSnackBar(const SnackBar(content: Text('Posted to timeline')));
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Posted to timeline')),
+      );
       await _refresh();
     } catch (err) {
       if (!mounted) return;
@@ -6480,7 +8638,9 @@ class _TimelinePageState extends State<TimelinePage> {
     try {
       await widget.api.deleteTimelinePost(post.id);
       if (!mounted) return;
-      messenger.showSnackBar(const SnackBar(content: Text('Timeline post deleted')));
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Timeline post deleted')),
+      );
       await _refresh();
     } catch (err) {
       if (!mounted) return;
@@ -6499,7 +8659,9 @@ class _TimelinePageState extends State<TimelinePage> {
     });
     try {
       final payload = await widget.api.toggleTimelineLike(post.id);
-      final interactions = payload['interactions'] as Map<String, dynamic>? ?? const <String, dynamic>{};
+      final interactions =
+          payload['interactions'] as Map<String, dynamic>? ??
+          const <String, dynamic>{};
       if (!mounted) return;
       setState(() {
         _optimisticLiked[post.id] = interactions['liked_by_me'] == true;
@@ -6530,11 +8692,18 @@ class _TimelinePageState extends State<TimelinePage> {
     });
     try {
       final payload = await widget.api.commentTimelinePost(post.id, value);
-      final interactions = payload['interactions'] as Map<String, dynamic>? ?? const <String, dynamic>{};
-      final rows = (interactions['comments'] as List<dynamic>? ?? const <dynamic>[]).whereType<Map<String, dynamic>>().toList();
+      final interactions =
+          payload['interactions'] as Map<String, dynamic>? ??
+          const <String, dynamic>{};
+      final rows =
+          (interactions['comments'] as List<dynamic>? ?? const <dynamic>[])
+              .whereType<Map<String, dynamic>>()
+              .toList();
       if (mounted && rows.isNotEmpty) {
         setState(() {
-          _optimisticComments[post.id] = rows.map(TimelineComment.fromJson).toList();
+          _optimisticComments[post.id] = rows
+              .map(TimelineComment.fromJson)
+              .toList();
         });
       }
       if (!mounted) return;
@@ -6548,7 +8717,9 @@ class _TimelinePageState extends State<TimelinePage> {
     }
   }
 
-  Future<String?> _openTimelineImagePickerSheet({String initialUrl = ''}) async {
+  Future<String?> _openTimelineImagePickerSheet({
+    String initialUrl = '',
+  }) async {
     final customCtrl = TextEditingController(text: initialUrl);
     bool uploading = false;
     String? picked = await showModalBottomSheet<String>(
@@ -6561,7 +8732,10 @@ class _TimelinePageState extends State<TimelinePage> {
             if (uploading) return;
             setSheetState(() => uploading = true);
             try {
-              final result = await FilePicker.platform.pickFiles(type: FileType.image, allowMultiple: false);
+              final result = await FilePicker.platform.pickFiles(
+                type: FileType.image,
+                allowMultiple: false,
+              );
               final path = result?.files.first.path ?? '';
               if (path.isEmpty) {
                 setSheetState(() => uploading = false);
@@ -6572,19 +8746,29 @@ class _TimelinePageState extends State<TimelinePage> {
               Navigator.pop(context, _absoluteUrl(url));
             } catch (_) {
               if (!context.mounted) return;
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Image upload failed')));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Image upload failed')),
+              );
               setSheetState(() => uploading = false);
             }
           }
 
           return Padding(
-            padding: EdgeInsets.only(left: 16, right: 16, top: 12, bottom: MediaQuery.of(context).viewInsets.bottom + 16),
+            padding: EdgeInsets.only(
+              left: 16,
+              right: 16,
+              top: 12,
+              bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+            ),
             child: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Choose image', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+                  const Text(
+                    'Choose image',
+                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
+                  ),
                   const SizedBox(height: 10),
                   Wrap(
                     spacing: 10,
@@ -6593,18 +8777,31 @@ class _TimelinePageState extends State<TimelinePage> {
                       final color = entry.key == 'Food'
                           ? const Color(0xFFFED7AA)
                           : entry.key == 'Money'
-                              ? const Color(0xFFBBF7D0)
-                              : entry.key == 'Event'
-                                  ? const Color(0xFFBFDBFE)
-                                  : const Color(0xFFE5E7EB);
+                          ? const Color(0xFFBBF7D0)
+                          : entry.key == 'Event'
+                          ? const Color(0xFFBFDBFE)
+                          : const Color(0xFFE5E7EB);
                       return InkWell(
                         onTap: () => Navigator.pop(context, entry.value),
                         borderRadius: BorderRadius.circular(12),
                         child: Ink(
                           width: 80,
                           height: 80,
-                          decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFD1D5DB))),
-                          child: Center(child: Text(entry.key, textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12))),
+                          decoration: BoxDecoration(
+                            color: color,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFFD1D5DB)),
+                          ),
+                          child: Center(
+                            child: Text(
+                              entry.key,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
                         ),
                       );
                     }).toList(),
@@ -6614,7 +8811,10 @@ class _TimelinePageState extends State<TimelinePage> {
                     controller: customCtrl,
                     minLines: 1,
                     maxLines: 2,
-                    decoration: const InputDecoration(labelText: 'Custom image URL', hintText: 'https://example.com/image.jpg'),
+                    decoration: const InputDecoration(
+                      labelText: 'Custom image URL',
+                      hintText: 'https://example.com/image.jpg',
+                    ),
                   ),
                   const SizedBox(height: 10),
                   Row(
@@ -6623,20 +8823,26 @@ class _TimelinePageState extends State<TimelinePage> {
                         child: OutlinedButton.icon(
                           onPressed: uploading ? null : pickFromDevice,
                           icon: const Icon(Icons.photo_library_outlined),
-                          label: Text(uploading ? 'Uploading...' : 'From Device'),
+                          label: Text(
+                            uploading ? 'Uploading...' : 'From Device',
+                          ),
                         ),
                       ),
                       const SizedBox(width: 10),
                       Expanded(
                         child: FilledButton(
-                          onPressed: () => Navigator.pop(context, customCtrl.text.trim()),
+                          onPressed: () =>
+                              Navigator.pop(context, customCtrl.text.trim()),
                           child: const Text('Use URL'),
                         ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 8),
-                  TextButton(onPressed: () => Navigator.pop(context, ''), child: const Text('Use auto/fallback image')),
+                  TextButton(
+                    onPressed: () => Navigator.pop(context, ''),
+                    child: const Text('Use auto/fallback image'),
+                  ),
                 ],
               ),
             ),
@@ -6649,7 +8855,9 @@ class _TimelinePageState extends State<TimelinePage> {
   }
 
   Future<void> _editPostImage(TimelinePost post) async {
-    final picked = await _openTimelineImagePickerSheet(initialUrl: post.imageUrl);
+    final picked = await _openTimelineImagePickerSheet(
+      initialUrl: post.imageUrl,
+    );
     if (picked == null) return;
 
     final messenger = ScaffoldMessenger.of(context);
@@ -6658,10 +8866,14 @@ class _TimelinePageState extends State<TimelinePage> {
       await widget.api.updateTimelinePostImage(post.id, nextImageUrl);
       await _refresh();
       if (!mounted) return;
-      messenger.showSnackBar(const SnackBar(content: Text('Post image updated')));
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Post image updated')),
+      );
     } catch (err) {
       if (!mounted) return;
-      messenger.showSnackBar(SnackBar(content: Text('Image update failed: $err')));
+      messenger.showSnackBar(
+        SnackBar(content: Text('Image update failed: $err')),
+      );
     }
   }
 
@@ -6669,10 +8881,15 @@ class _TimelinePageState extends State<TimelinePage> {
     final messenger = ScaffoldMessenger.of(context);
     try {
       await widget.api.shareTimelinePost(post.id);
-      final link = '${widget.api.settings.baseUrl.replaceAll(RegExp(r'/$'), '')}/timeline';
+      final link =
+          '${widget.api.settings.baseUrl.replaceAll(RegExp(r'/$'), '')}/timeline';
       await Clipboard.setData(ClipboardData(text: link));
       if (!mounted) return;
-      messenger.showSnackBar(const SnackBar(content: Text('Timeline link copied and share recorded')));
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Timeline link copied and share recorded'),
+        ),
+      );
       await _refresh();
     } catch (err) {
       if (!mounted) return;
@@ -6691,11 +8908,14 @@ class _TimelinePageState extends State<TimelinePage> {
             return const Center(child: CircularProgressIndicator());
           }
           if (snapshot.hasError) {
-            return ErrorPanel(error: snapshot.error.toString(), onRetry: _refresh);
+            return ErrorPanel(
+              error: snapshot.error.toString(),
+              onRetry: _refresh,
+            );
           }
 
           final posts = snapshot.data ?? [];
-            final feedPosts = posts.map(_withOptimistic).toList();
+          final feedPosts = posts.map(_withOptimistic).toList();
           return ListView(
             padding: const EdgeInsets.all(12),
             children: [
@@ -6707,9 +8927,16 @@ class _TimelinePageState extends State<TimelinePage> {
                     children: [
                       Row(
                         children: [
-                          Text('Create post', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+                          Text(
+                            'Create post',
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(fontWeight: FontWeight.w700),
+                          ),
                           const Spacer(),
-                          IconButton(onPressed: _refresh, icon: const Icon(Icons.refresh_rounded)),
+                          IconButton(
+                            onPressed: _refresh,
+                            icon: const Icon(Icons.refresh_rounded),
+                          ),
                         ],
                       ),
                       if (_composerImageCtrl.text.trim().isNotEmpty)
@@ -6722,20 +8949,35 @@ class _TimelinePageState extends State<TimelinePage> {
                                 ClipRRect(
                                   borderRadius: BorderRadius.circular(10),
                                   child: Image.network(
-                                    _absoluteUrl(_composerImageCtrl.text.trim()),
+                                    _absoluteUrl(
+                                      _composerImageCtrl.text.trim(),
+                                    ),
                                     width: 70,
                                     height: 70,
                                     fit: BoxFit.cover,
-                                    errorBuilder: (context, error, stackTrace) => Container(
-                                      width: 70,
-                                      height: 70,
-                                      color: const Color(0xFFE5E7EB),
-                                      child: const Icon(Icons.image_not_supported_outlined),
-                                    ),
+                                    errorBuilder:
+                                        (
+                                          context,
+                                          error,
+                                          stackTrace,
+                                        ) => Container(
+                                          width: 70,
+                                          height: 70,
+                                          color: const Color(0xFFE5E7EB),
+                                          child: const Icon(
+                                            Icons.image_not_supported_outlined,
+                                          ),
+                                        ),
                                   ),
                                 ),
                                 const SizedBox(width: 8),
-                                Expanded(child: Text(_composerImageCtrl.text.trim(), maxLines: 2, overflow: TextOverflow.ellipsis)),
+                                Expanded(
+                                  child: Text(
+                                    _composerImageCtrl.text.trim(),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
                               ],
                             ),
                           ),
@@ -6758,9 +9000,14 @@ class _TimelinePageState extends State<TimelinePage> {
                         children: [
                           OutlinedButton.icon(
                             onPressed: () async {
-                              final picked = await _openTimelineImagePickerSheet(initialUrl: _composerImageCtrl.text.trim());
+                              final picked =
+                                  await _openTimelineImagePickerSheet(
+                                    initialUrl: _composerImageCtrl.text.trim(),
+                                  );
                               if (picked == null || !mounted) return;
-                              setState(() => _composerImageCtrl.text = picked.trim());
+                              setState(
+                                () => _composerImageCtrl.text = picked.trim(),
+                              );
                             },
                             icon: const Icon(Icons.image_outlined),
                             label: const Text('Pick image'),
@@ -6777,18 +9024,43 @@ class _TimelinePageState extends State<TimelinePage> {
                 ),
               ),
               const SizedBox(height: 12),
+              if (_timelineMedia.isNotEmpty) ...[
+                _FamilyMediaTimelineCard(
+                  items: _timelineMedia,
+                  absoluteUrlBuilder: _absoluteUrl,
+                  onOpen: (item) => _showMediaPreviewDialog(
+                    context: context,
+                    title: item.originalFilename,
+                    mediaUrl: _absoluteUrl(
+                      item.isVideo
+                          ? (item.streamUrl.trim().isNotEmpty
+                                ? item.streamUrl
+                                : item.previewUrl)
+                          : item.previewUrl,
+                    ),
+                    isVideo: item.isVideo,
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
               _TimelineFeedWrapper(
                 title: 'Timeline',
                 badgeLabel: 'Live',
                 posts: feedPosts,
                 emptyText: 'No timeline posts yet.',
                 imageUrlBuilder: _resolvedPostImage,
-                onLikeBuilder: (post) => () => _toggleLike(post),
-                onCommentSubmitBuilder: (post, text) => _commentPost(post, text),
-                onShareBuilder: (post) => () => _sharePost(post),
+                onLikeBuilder: (post) =>
+                    () => _toggleLike(post),
+                onCommentSubmitBuilder: (post, text) =>
+                    _commentPost(post, text),
+                onShareBuilder: (post) =>
+                    () => _sharePost(post),
                 canEditImageBuilder: _canEditPostImage,
-                onEditImageBuilder: (post) => _canEditPostImage(post) ? () => _editPostImage(post) : null,
-                onDeleteBuilder: (post) => post.actor == widget.api.member ? () => _deletePost(post) : null,
+                onEditImageBuilder: (post) =>
+                    _canEditPostImage(post) ? () => _editPostImage(post) : null,
+                onDeleteBuilder: (post) => post.actor == widget.api.member
+                    ? () => _deletePost(post)
+                    : null,
                 showInlineCommentComposer: true,
               ),
             ],
@@ -6830,7 +9102,9 @@ class _CalendarPageState extends State<CalendarPage> {
       }
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Share link failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Share link failed: $err')));
       return;
     }
     if (!mounted) return;
@@ -6859,15 +9133,25 @@ class _CalendarPageState extends State<CalendarPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(entry.key, style: const TextStyle(fontWeight: FontWeight.w700)),
+                      Text(
+                        entry.key,
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
                       const SizedBox(height: 4),
-                      SelectableText(entry.value, style: const TextStyle(fontSize: 12)),
+                      SelectableText(
+                        entry.value,
+                        style: const TextStyle(fontSize: 12),
+                      ),
                       const SizedBox(height: 6),
                       OutlinedButton.icon(
                         onPressed: () async {
-                          await Clipboard.setData(ClipboardData(text: entry.value));
+                          await Clipboard.setData(
+                            ClipboardData(text: entry.value),
+                          );
                           if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${entry.key} copied')));
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('${entry.key} copied')),
+                            );
                           }
                         },
                         icon: const Icon(Icons.copy, size: 16),
@@ -6881,7 +9165,10 @@ class _CalendarPageState extends State<CalendarPage> {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close')),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
         ],
       ),
     );
@@ -6930,11 +9217,17 @@ class _CalendarPageState extends State<CalendarPage> {
   DateTimeRange _rangeForView(DateTime anchor, String viewMode) {
     if (viewMode == 'week') {
       final start = _startOfWeek(anchor);
-      return DateTimeRange(start: start, end: start.add(const Duration(days: 6)));
+      return DateTimeRange(
+        start: start,
+        end: start.add(const Duration(days: 6)),
+      );
     }
     if (viewMode == 'two-week') {
       final start = _startOfWeek(anchor);
-      return DateTimeRange(start: start, end: start.add(const Duration(days: 13)));
+      return DateTimeRange(
+        start: start,
+        end: start.add(const Duration(days: 13)),
+      );
     }
     if (viewMode == 'three-month') {
       final start = DateTime(anchor.year, anchor.month, 1);
@@ -6946,7 +9239,10 @@ class _CalendarPageState extends State<CalendarPage> {
     return DateTimeRange(start: _startOfWeek(first), end: _endOfWeek(last));
   }
 
-  Future<List<MealPlannerEntry>> _fetchMealEntriesForRange(DateTime start, DateTime end) async {
+  Future<List<MealPlannerEntry>> _fetchMealEntriesForRange(
+    DateTime start,
+    DateTime end,
+  ) async {
     final monthStarts = <DateTime>[];
     var cursor = DateTime(start.year, start.month, 1);
     final last = DateTime(end.year, end.month, 1);
@@ -6955,7 +9251,9 @@ class _CalendarPageState extends State<CalendarPage> {
       cursor = DateTime(cursor.year, cursor.month + 1, 1);
     }
 
-    final fetched = await Future.wait(monthStarts.map(widget.api.fetchMealEntries));
+    final fetched = await Future.wait(
+      monthStarts.map(widget.api.fetchMealEntries),
+    );
     final merged = fetched.expand((rows) => rows).where((row) {
       final day = DateTime(row.date.year, row.date.month, row.date.day);
       final isFamily = row.visibility.toLowerCase() == 'family';
@@ -6980,39 +9278,41 @@ class _CalendarPageState extends State<CalendarPage> {
   List<CalendarEvent> _eventsForDay(DateTime day) {
     final date = DateTime(day.year, day.month, day.day);
     return _events.where((ev) {
-      final start = DateTime(ev.startDate.year, ev.startDate.month, ev.startDate.day);
+      final start = DateTime(
+        ev.startDate.year,
+        ev.startDate.month,
+        ev.startDate.day,
+      );
       final end = DateTime(ev.endDate.year, ev.endDate.month, ev.endDate.day);
       return !date.isBefore(start) && !date.isAfter(end);
-    }).toList()
-      ..sort((a, b) {
-        final aa = a.startTime ?? '';
-        final bb = b.startTime ?? '';
-        return aa.compareTo(bb);
-      });
+    }).toList()..sort((a, b) {
+      final aa = a.startTime ?? '';
+      final bb = b.startTime ?? '';
+      return aa.compareTo(bb);
+    });
   }
 
-    List<MealPlannerEntry> _mealsForDay(DateTime day) {
-      final date = DateTime(day.year, day.month, day.day);
-      return _mealEntries.where((entry) {
-        final d = DateTime(entry.date.year, entry.date.month, entry.date.day);
-        return d == date;
-      }).toList()
-        ..sort((a, b) => a.mealType.compareTo(b.mealType));
-    }
+  List<MealPlannerEntry> _mealsForDay(DateTime day) {
+    final date = DateTime(day.year, day.month, day.day);
+    return _mealEntries.where((entry) {
+      final d = DateTime(entry.date.year, entry.date.month, entry.date.day);
+      return d == date;
+    }).toList()..sort((a, b) => a.mealType.compareTo(b.mealType));
+  }
 
-    String _mealTypeLabel(String mealType) {
-      return mealType.replaceAll('_', ' ');
-    }
+  String _mealTypeLabel(String mealType) {
+    return mealType.replaceAll('_', ' ');
+  }
 
-    String _eventTimeLabel(CalendarEvent ev) {
-      final start = (ev.startTime ?? '').trim();
-      final end = (ev.endTime ?? '').trim();
-      if (ev.isAllDay) return 'All day';
-      if (start.isNotEmpty && end.isNotEmpty) return '$start-$end';
-      if (start.isNotEmpty) return start;
-      if (end.isNotEmpty) return end;
-      return 'All day';
-    }
+  String _eventTimeLabel(CalendarEvent ev) {
+    final start = (ev.startTime ?? '').trim();
+    final end = (ev.endTime ?? '').trim();
+    if (ev.isAllDay) return 'All day';
+    if (start.isNotEmpty && end.isNotEmpty) return '$start-$end';
+    if (start.isNotEmpty) return start;
+    if (end.isNotEmpty) return end;
+    return 'All day';
+  }
 
   Future<void> _openDay(DateTime day) async {
     _lastInteractionDay = DateTime(day.year, day.month, day.day);
@@ -7034,7 +9334,10 @@ class _CalendarPageState extends State<CalendarPage> {
     }
   }
 
-  Future<void> _openPresetEditor(CalendarEventDraft draft, DateTime initialDay) async {
+  Future<void> _openPresetEditor(
+    CalendarEventDraft draft,
+    DateTime initialDay,
+  ) async {
     final changed = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
         builder: (_) => CalendarEventEditorPage(
@@ -7102,13 +9405,25 @@ class _CalendarPageState extends State<CalendarPage> {
                         onPressed: () {
                           setState(() {
                             if (_viewMode == 'week') {
-                              _anchor = _anchor.subtract(const Duration(days: 7));
+                              _anchor = _anchor.subtract(
+                                const Duration(days: 7),
+                              );
                             } else if (_viewMode == 'two-week') {
-                              _anchor = _anchor.subtract(const Duration(days: 14));
+                              _anchor = _anchor.subtract(
+                                const Duration(days: 14),
+                              );
                             } else if (_viewMode == 'three-month') {
-                              _anchor = DateTime(_anchor.year, _anchor.month - 3, 1);
+                              _anchor = DateTime(
+                                _anchor.year,
+                                _anchor.month - 3,
+                                1,
+                              );
                             } else {
-                              _anchor = DateTime(_anchor.year, _anchor.month - 1, 1);
+                              _anchor = DateTime(
+                                _anchor.year,
+                                _anchor.month - 1,
+                                1,
+                              );
                             }
                           });
                           _load();
@@ -7118,8 +9433,15 @@ class _CalendarPageState extends State<CalendarPage> {
                       Expanded(
                         child: Center(
                           child: Text(
-                            _viewMode == 'month' ? _monthLabel(_anchor) : _dateRangeLabel(_rangeForView(_anchor, _viewMode)),
-                            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                            _viewMode == 'month'
+                                ? _monthLabel(_anchor)
+                                : _dateRangeLabel(
+                                    _rangeForView(_anchor, _viewMode),
+                                  ),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 16,
+                            ),
                             textAlign: TextAlign.center,
                           ),
                         ),
@@ -7132,9 +9454,17 @@ class _CalendarPageState extends State<CalendarPage> {
                             } else if (_viewMode == 'two-week') {
                               _anchor = _anchor.add(const Duration(days: 14));
                             } else if (_viewMode == 'three-month') {
-                              _anchor = DateTime(_anchor.year, _anchor.month + 3, 1);
+                              _anchor = DateTime(
+                                _anchor.year,
+                                _anchor.month + 3,
+                                1,
+                              );
                             } else {
-                              _anchor = DateTime(_anchor.year, _anchor.month + 1, 1);
+                              _anchor = DateTime(
+                                _anchor.year,
+                                _anchor.month + 1,
+                                1,
+                              );
                             }
                           });
                           _load();
@@ -7163,7 +9493,9 @@ class _CalendarPageState extends State<CalendarPage> {
                       OutlinedButton.icon(
                         onPressed: _toggleWeekMonthQuick,
                         icon: const Icon(Icons.table_view_outlined, size: 16),
-                        label: Text(_viewMode == 'month' ? 'Week View' : 'Month View'),
+                        label: Text(
+                          _viewMode == 'month' ? 'Week View' : 'Month View',
+                        ),
                       ),
                       OutlinedButton.icon(
                         onPressed: _openShareDialog,
@@ -7174,9 +9506,18 @@ class _CalendarPageState extends State<CalendarPage> {
                         value: _viewMode,
                         items: const [
                           DropdownMenuItem(value: 'week', child: Text('Week')),
-                          DropdownMenuItem(value: 'two-week', child: Text('2 Weeks')),
-                          DropdownMenuItem(value: 'month', child: Text('Month')),
-                          DropdownMenuItem(value: 'three-month', child: Text('3 Months')),
+                          DropdownMenuItem(
+                            value: 'two-week',
+                            child: Text('2 Weeks'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'month',
+                            child: Text('Month'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'three-month',
+                            child: Text('3 Months'),
+                          ),
                         ],
                         onChanged: (value) {
                           if (value == null) return;
@@ -7185,13 +9526,28 @@ class _CalendarPageState extends State<CalendarPage> {
                         },
                       ),
                       DropdownButton<String>(
-                        value: _memberFilter.isEmpty ? '__all__' : _memberFilter,
+                        value: _memberFilter.isEmpty
+                            ? '__all__'
+                            : _memberFilter,
                         items: [
-                          const DropdownMenuItem(value: '__all__', child: Text('All members')),
-                          ..._members.map((m) => DropdownMenuItem(value: m.name, child: Text(m.name))),
+                          const DropdownMenuItem(
+                            value: '__all__',
+                            child: Text('All members'),
+                          ),
+                          ..._members.map(
+                            (m) => DropdownMenuItem(
+                              value: m.name,
+                              child: Text(m.name),
+                            ),
+                          ),
                         ],
                         onChanged: (value) {
-                          setState(() => _memberFilter = (value == null || value == '__all__') ? '' : value);
+                          setState(
+                            () => _memberFilter =
+                                (value == null || value == '__all__')
+                                ? ''
+                                : value,
+                          );
                           _load();
                         },
                       ),
@@ -7222,7 +9578,9 @@ class _CalendarPageState extends State<CalendarPage> {
   }
 
   String _dateRangeLabel(DateTimeRange range) {
-    final sameMonth = range.start.year == range.end.year && range.start.month == range.end.month;
+    final sameMonth =
+        range.start.year == range.end.year &&
+        range.start.month == range.end.month;
     if (sameMonth) {
       return '${range.start.month}/${range.start.day} - ${range.end.day}/${range.end.year}';
     }
@@ -7248,17 +9606,23 @@ class _CalendarPageState extends State<CalendarPage> {
       children: [
         Row(
           children: const ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-              .map((w) => Expanded(
-                    child: Center(
-                      child: Padding(
-                        padding: EdgeInsets.symmetric(vertical: 6),
-                        child: Text(
-                          w,
-                          style: TextStyle(fontSize: 12, color: Color(0xFF64748B), fontWeight: FontWeight.w600),
+              .map(
+                (w) => Expanded(
+                  child: Center(
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(vertical: 6),
+                      child: Text(
+                        w,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF64748B),
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     ),
-                  ))
+                  ),
+                ),
+              )
               .toList(),
         ),
         GridView.builder(
@@ -7287,7 +9651,10 @@ class _CalendarPageState extends State<CalendarPage> {
 
   Widget _buildSpanView(BuildContext context, {required int days}) {
     final start = _startOfWeek(_anchor);
-    final list = List<DateTime>.generate(days, (i) => start.add(Duration(days: i)));
+    final list = List<DateTime>.generate(
+      days,
+      (i) => start.add(Duration(days: i)),
+    );
     final width = MediaQuery.of(context).size.width;
     final crossAxis = width >= 1000 ? 7 : (width >= 700 ? 4 : 2);
     final today = DateTime.now();
@@ -7335,7 +9702,11 @@ class _CalendarPageState extends State<CalendarPage> {
         final monthStart = _startOfWeek(month);
         final monthEnd = _endOfWeek(DateTime(month.year, month.month + 1, 0));
         final days = <DateTime>[];
-        for (var d = monthStart; !d.isAfter(monthEnd); d = d.add(const Duration(days: 1))) {
+        for (
+          var d = monthStart;
+          !d.isAfter(monthEnd);
+          d = d.add(const Duration(days: 1))
+        ) {
           days.add(d);
         }
         return Card(
@@ -7344,21 +9715,27 @@ class _CalendarPageState extends State<CalendarPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(_monthLabel(month), style: const TextStyle(fontWeight: FontWeight.w700)),
+                Text(
+                  _monthLabel(month),
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
                 const SizedBox(height: 6),
                 Expanded(
                   child: GridView.builder(
                     physics: const NeverScrollableScrollPhysics(),
                     itemCount: days.length,
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 7,
-                      mainAxisSpacing: 2,
-                      crossAxisSpacing: 2,
-                    ),
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 7,
+                          mainAxisSpacing: 2,
+                          crossAxisSpacing: 2,
+                        ),
                     itemBuilder: (context, i) {
                       final day = days[i];
                       final eventCount = _eventsForDay(day).length;
-                      final mealCount = _showFamilyMeals ? _mealsForDay(day).length : 0;
+                      final mealCount = _showFamilyMeals
+                          ? _mealsForDay(day).length
+                          : 0;
                       final count = eventCount + mealCount;
                       return InkWell(
                         onTap: () => _openDay(day),
@@ -7368,16 +9745,28 @@ class _CalendarPageState extends State<CalendarPage> {
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(6),
                             border: Border.all(color: const Color(0xFFE2E8F0)),
-                            color: day.month == month.month ? Colors.white : const Color(0xFFF8FAFC),
+                            color: day.month == month.month
+                                ? Colors.white
+                                : const Color(0xFFF8FAFC),
                           ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text('${day.day}', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600)),
+                              Text(
+                                '${day.day}',
+                                style: const TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
                               if (count > 0)
                                 Text(
                                   '$count',
-                                  style: const TextStyle(fontSize: 9, color: Color(0xFF4F46E5), fontWeight: FontWeight.w700),
+                                  style: const TextStyle(
+                                    fontSize: 9,
+                                    color: Color(0xFF4F46E5),
+                                    fontWeight: FontWeight.w700,
+                                  ),
                                 ),
                             ],
                           ),
@@ -7401,7 +9790,9 @@ class _CalendarPageState extends State<CalendarPage> {
     required int maxItems,
   }) {
     final events = _eventsForDay(day);
-    final meals = _showFamilyMeals ? _mealsForDay(day) : const <MealPlannerEntry>[];
+    final meals = _showFamilyMeals
+        ? _mealsForDay(day)
+        : const <MealPlannerEntry>[];
     final items = <Widget>[];
 
     for (final meal in meals.take(2)) {
@@ -7417,7 +9808,11 @@ class _CalendarPageState extends State<CalendarPage> {
             '${_mealTypeLabel(meal.mealType)}: ${meal.title}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 10, color: Color(0xFF4338CA), fontWeight: FontWeight.w600),
+            style: const TextStyle(
+              fontSize: 10,
+              color: Color(0xFF4338CA),
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ),
       );
@@ -7438,7 +9833,11 @@ class _CalendarPageState extends State<CalendarPage> {
             '${showTime ? '$time ' : ''}${ev.title}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 10, color: _colorFromHex(ev.color), fontWeight: FontWeight.w600),
+            style: TextStyle(
+              fontSize: 10,
+              color: _colorFromHex(ev.color),
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ),
       );
@@ -7462,7 +9861,9 @@ class _CalendarPageState extends State<CalendarPage> {
             Text(
               '${day.day}',
               style: TextStyle(
-                color: inMonth ? const Color(0xFF0F172A) : const Color(0xFF94A3B8),
+                color: inMonth
+                    ? const Color(0xFF0F172A)
+                    : const Color(0xFF94A3B8),
                 fontWeight: FontWeight.w700,
               ),
             ),
@@ -7473,7 +9874,11 @@ class _CalendarPageState extends State<CalendarPage> {
                 '+$hidden more',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 10, color: Color(0xFF6366F1), fontWeight: FontWeight.w700),
+                style: const TextStyle(
+                  fontSize: 10,
+                  color: Color(0xFF6366F1),
+                  fontWeight: FontWeight.w700,
+                ),
               ),
           ],
         ),
@@ -7505,7 +9910,9 @@ class CalendarDaySheet extends StatelessWidget {
       builder: (ctx) {
         return AlertDialog(
           title: const Text('Update recurring event'),
-          content: const Text('Apply this change to just this occurrence or the whole series?'),
+          content: const Text(
+            'Apply this change to just this occurrence or the whole series?',
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),
@@ -7532,7 +9939,9 @@ class CalendarDaySheet extends StatelessWidget {
     final configured = api.settings.baseUrl.trim();
     final base = configured.isEmpty ? _cloudBaseUrl : configured;
     final root = Uri.parse(_normalizeBaseUrl(base));
-    final rootPath = root.path.endsWith('/') ? root.path.substring(0, root.path.length - 1) : root.path;
+    final rootPath = root.path.endsWith('/')
+        ? root.path.substring(0, root.path.length - 1)
+        : root.path;
     final assetPath = raw.startsWith('/') ? raw : '/$raw';
     return root.replace(path: '$rootPath$assetPath').toString();
   }
@@ -7577,7 +9986,8 @@ class CalendarDaySheet extends StatelessWidget {
     if (ev.isRecurring) {
       final pickedScope = await _pickRecurringUpdateScope(context);
       if (!context.mounted) return;
-      if (_calendarSupportsOccurrenceScopedUpdates && pickedScope == null) return;
+      if (_calendarSupportsOccurrenceScopedUpdates && pickedScope == null)
+        return;
       updateScope = pickedScope;
     }
 
@@ -7592,12 +10002,16 @@ class CalendarDaySheet extends StatelessWidget {
       final desiredOccurrenceStart = _dateOnly(targetStart);
       if (ev.isRecurring) {
         final occurrenceAnchor = _dateOnly(ev.occurrenceStart ?? ev.startDate);
-        final shiftDays = desiredOccurrenceStart.difference(occurrenceAnchor).inDays;
+        final shiftDays = desiredOccurrenceStart
+            .difference(occurrenceAnchor)
+            .inDays;
         nextStart = baseStart.add(Duration(days: shiftDays));
       } else {
         nextStart = desiredOccurrenceStart;
       }
-      nextEnd = nextStart.add(Duration(days: originalSpanDays < 0 ? 0 : originalSpanDays));
+      nextEnd = nextStart.add(
+        Duration(days: originalSpanDays < 0 ? 0 : originalSpanDays),
+      );
     }
 
     if (targetEnd != null) {
@@ -7606,7 +10020,11 @@ class CalendarDaySheet extends StatelessWidget {
     }
 
     try {
-      final draft = _draftWithNewDates(ev, newStart: nextStart, newEnd: nextEnd);
+      final draft = _draftWithNewDates(
+        ev,
+        newStart: nextStart,
+        newEnd: nextEnd,
+      );
       await api.updateCalendarEvent(ev.id, draft, updateScope: updateScope);
       if (!context.mounted) return;
       messenger.showSnackBar(const SnackBar(content: Text('Event updated')));
@@ -7617,12 +10035,19 @@ class CalendarDaySheet extends StatelessWidget {
     }
   }
 
-  Future<void> _shiftEventByDays(BuildContext context, CalendarEvent ev, int days) async {
+  Future<void> _shiftEventByDays(
+    BuildContext context,
+    CalendarEvent ev,
+    int days,
+  ) async {
     final start = _dateOnly(ev.startDate).add(Duration(days: days));
     await _updateEventDates(context, ev, targetStart: start);
   }
 
-  Future<void> _pickAndShiftEvent(BuildContext context, CalendarEvent ev) async {
+  Future<void> _pickAndShiftEvent(
+    BuildContext context,
+    CalendarEvent ev,
+  ) async {
     final picked = await showDatePicker(
       context: context,
       initialDate: _dateOnly(ev.startDate),
@@ -7634,7 +10059,10 @@ class CalendarDaySheet extends StatelessWidget {
     await _updateEventDates(context, ev, targetStart: picked);
   }
 
-  Future<void> _pickAndResizeEventEnd(BuildContext context, CalendarEvent ev) async {
+  Future<void> _pickAndResizeEventEnd(
+    BuildContext context,
+    CalendarEvent ev,
+  ) async {
     final picked = await showDatePicker(
       context: context,
       initialDate: _dateOnly(ev.endDate),
@@ -7646,11 +10074,19 @@ class CalendarDaySheet extends StatelessWidget {
     await _updateEventDates(context, ev, targetEnd: picked);
   }
 
-  Future<void> _resizeEventEndByDays(BuildContext context, CalendarEvent ev, int days) async {
+  Future<void> _resizeEventEndByDays(
+    BuildContext context,
+    CalendarEvent ev,
+    int days,
+  ) async {
     final currentEnd = _dateOnly(ev.baseEndDate ?? ev.endDate);
     final currentStart = _dateOnly(ev.baseStartDate ?? ev.startDate);
     final nextEnd = currentEnd.add(Duration(days: days));
-    await _updateEventDates(context, ev, targetEnd: nextEnd.isBefore(currentStart) ? currentStart : nextEnd);
+    await _updateEventDates(
+      context,
+      ev,
+      targetEnd: nextEnd.isBefore(currentStart) ? currentStart : nextEnd,
+    );
   }
 
   @override
@@ -7672,13 +10108,16 @@ class CalendarDaySheet extends StatelessWidget {
                   Expanded(
                     child: Text(
                       'Events • ${_fmtDate(day)}',
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                   IconButton(
                     onPressed: () => Navigator.of(context).pop(false),
                     icon: const Icon(Icons.close),
-                  )
+                  ),
                 ],
               ),
               Flexible(
@@ -7693,18 +10132,30 @@ class CalendarDaySheet extends StatelessWidget {
                       ...meals.map((meal) {
                         return Card(
                           child: ListTile(
-                            leading: const Icon(Icons.restaurant_menu, color: Color(0xFF7C3AED)),
+                            leading: const Icon(
+                              Icons.restaurant_menu,
+                              color: Color(0xFF7C3AED),
+                            ),
                             title: Text(meal.title),
-                            subtitle: Text('${meal.mealType.replaceAll('_', ' ')} • ${meal.creator}'),
+                            subtitle: Text(
+                              '${meal.mealType.replaceAll('_', ' ')} • ${meal.creator}',
+                            ),
                           ),
                         );
                       }),
                       ...events.map((ev) {
                         final timeText = ev.isAllDay
-                          ? 'All day'
-                          : [ev.startTime, ev.endTime].whereType<String>().where((e) => e.isNotEmpty).join(' - ');
-                        final desc = _stripHtml(ev.descriptionHtml ?? '').trim();
-                        final reminder = ev.reminderAt == null ? '' : _fmtDateTime(ev.reminderAt!.toLocal());
+                            ? 'All day'
+                            : [ev.startTime, ev.endTime]
+                                  .whereType<String>()
+                                  .where((e) => e.isNotEmpty)
+                                  .join(' - ');
+                        final desc = _stripHtml(
+                          ev.descriptionHtml ?? '',
+                        ).trim();
+                        final reminder = ev.reminderAt == null
+                            ? ''
+                            : _fmtDateTime(ev.reminderAt!.toLocal());
                         final recurrence = ev.isRecurring
                             ? '${ev.recurrenceFrequency ?? 'weekly'} every ${ev.recurrenceInterval ?? 1}'
                             : 'No recurrence';
@@ -7713,17 +10164,19 @@ class CalendarDaySheet extends StatelessWidget {
                           child: InkWell(
                             borderRadius: BorderRadius.circular(12),
                             onTap: () async {
-                              final changed = await Navigator.of(context).push<bool>(
-                                MaterialPageRoute(
-                                  builder: (_) => CalendarEventEditorPage(
-                                    api: api,
-                                    members: members,
-                                    initialDay: day,
-                                    sourceEvent: ev,
-                                  ),
-                                ),
-                              );
-                              if (context.mounted) Navigator.of(context).pop(changed == true);
+                              final changed = await Navigator.of(context)
+                                  .push<bool>(
+                                    MaterialPageRoute(
+                                      builder: (_) => CalendarEventEditorPage(
+                                        api: api,
+                                        members: members,
+                                        initialDay: day,
+                                        sourceEvent: ev,
+                                      ),
+                                    ),
+                                  );
+                              if (context.mounted)
+                                Navigator.of(context).pop(changed == true);
                             },
                             child: Padding(
                               padding: const EdgeInsets.all(12),
@@ -7735,14 +10188,24 @@ class CalendarDaySheet extends StatelessWidget {
                                       Expanded(
                                         child: Text(
                                           ev.title,
-                                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 15,
+                                          ),
                                         ),
                                       ),
                                       Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                          vertical: 4,
+                                        ),
                                         decoration: BoxDecoration(
-                                          borderRadius: BorderRadius.circular(999),
-                                          color: _colorFromHex(ev.color).withValues(alpha: 0.15),
+                                          borderRadius: BorderRadius.circular(
+                                            999,
+                                          ),
+                                          color: _colorFromHex(
+                                            ev.color,
+                                          ).withValues(alpha: 0.15),
                                         ),
                                         child: Text(
                                           ev.eventType.toUpperCase(),
@@ -7756,15 +10219,32 @@ class CalendarDaySheet extends StatelessWidget {
                                     ],
                                   ),
                                   const SizedBox(height: 6),
-                                  Text('$timeText • ${ev.createdBy} • ${ev.visibility}', style: const TextStyle(color: Color(0xFF475569))),
+                                  Text(
+                                    '$timeText • ${ev.createdBy} • ${ev.visibility}',
+                                    style: const TextStyle(
+                                      color: Color(0xFF475569),
+                                    ),
+                                  ),
                                   if (reminder.isNotEmpty)
                                     Padding(
                                       padding: const EdgeInsets.only(top: 4),
-                                      child: Text('Reminder: $reminder', style: const TextStyle(color: Color(0xFF0F766E), fontSize: 12)),
+                                      child: Text(
+                                        'Reminder: $reminder',
+                                        style: const TextStyle(
+                                          color: Color(0xFF0F766E),
+                                          fontSize: 12,
+                                        ),
+                                      ),
                                     ),
                                   Padding(
                                     padding: const EdgeInsets.only(top: 4),
-                                    child: Text('Recurrence: $recurrence', style: const TextStyle(color: Color(0xFF64748B), fontSize: 12)),
+                                    child: Text(
+                                      'Recurrence: $recurrence',
+                                      style: const TextStyle(
+                                        color: Color(0xFF64748B),
+                                        fontSize: 12,
+                                      ),
+                                    ),
                                   ),
                                   const SizedBox(height: 8),
                                   Wrap(
@@ -7772,39 +10252,78 @@ class CalendarDaySheet extends StatelessWidget {
                                     runSpacing: 6,
                                     children: [
                                       ActionChip(
-                                        label: const Text('-1d', style: TextStyle(fontSize: 11)),
-                                        onPressed: () => _shiftEventByDays(context, ev, -1),
+                                        label: const Text(
+                                          '-1d',
+                                          style: TextStyle(fontSize: 11),
+                                        ),
+                                        onPressed: () =>
+                                            _shiftEventByDays(context, ev, -1),
                                       ),
                                       ActionChip(
-                                        label: const Text('+1d', style: TextStyle(fontSize: 11)),
-                                        onPressed: () => _shiftEventByDays(context, ev, 1),
+                                        label: const Text(
+                                          '+1d',
+                                          style: TextStyle(fontSize: 11),
+                                        ),
+                                        onPressed: () =>
+                                            _shiftEventByDays(context, ev, 1),
                                       ),
                                       ActionChip(
-                                        label: const Text('+1w', style: TextStyle(fontSize: 11)),
-                                        onPressed: () => _shiftEventByDays(context, ev, 7),
+                                        label: const Text(
+                                          '+1w',
+                                          style: TextStyle(fontSize: 11),
+                                        ),
+                                        onPressed: () =>
+                                            _shiftEventByDays(context, ev, 7),
                                       ),
                                       ActionChip(
-                                        label: const Text('Move...', style: TextStyle(fontSize: 11)),
-                                        onPressed: () => _pickAndShiftEvent(context, ev),
+                                        label: const Text(
+                                          'Move...',
+                                          style: TextStyle(fontSize: 11),
+                                        ),
+                                        onPressed: () =>
+                                            _pickAndShiftEvent(context, ev),
                                       ),
                                       ActionChip(
-                                        label: const Text('End -1d', style: TextStyle(fontSize: 11)),
-                                        onPressed: () => _resizeEventEndByDays(context, ev, -1),
+                                        label: const Text(
+                                          'End -1d',
+                                          style: TextStyle(fontSize: 11),
+                                        ),
+                                        onPressed: () => _resizeEventEndByDays(
+                                          context,
+                                          ev,
+                                          -1,
+                                        ),
                                       ),
                                       ActionChip(
-                                        label: const Text('End +1d', style: TextStyle(fontSize: 11)),
-                                        onPressed: () => _resizeEventEndByDays(context, ev, 1),
+                                        label: const Text(
+                                          'End +1d',
+                                          style: TextStyle(fontSize: 11),
+                                        ),
+                                        onPressed: () => _resizeEventEndByDays(
+                                          context,
+                                          ev,
+                                          1,
+                                        ),
                                       ),
                                       ActionChip(
-                                        label: const Text('Resize...', style: TextStyle(fontSize: 11)),
-                                        onPressed: () => _pickAndResizeEventEnd(context, ev),
+                                        label: const Text(
+                                          'Resize...',
+                                          style: TextStyle(fontSize: 11),
+                                        ),
+                                        onPressed: () =>
+                                            _pickAndResizeEventEnd(context, ev),
                                       ),
                                     ],
                                   ),
                                   if (desc.isNotEmpty)
                                     Padding(
                                       padding: const EdgeInsets.only(top: 8),
-                                      child: Text(desc, style: const TextStyle(fontSize: 13), maxLines: 4, overflow: TextOverflow.ellipsis),
+                                      child: Text(
+                                        desc,
+                                        style: const TextStyle(fontSize: 13),
+                                        maxLines: 4,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
                                     ),
                                   if (photo.isNotEmpty)
                                     Padding(
@@ -7816,12 +10335,15 @@ class CalendarDaySheet extends StatelessWidget {
                                           height: 140,
                                           width: double.infinity,
                                           fit: BoxFit.cover,
-                                          errorBuilder: (_, __, ___) => Container(
-                                            height: 110,
-                                            color: const Color(0xFFF1F5F9),
-                                            alignment: Alignment.center,
-                                            child: const Text('Photo unavailable'),
-                                          ),
+                                          errorBuilder: (_, __, ___) =>
+                                              Container(
+                                                height: 110,
+                                                color: const Color(0xFFF1F5F9),
+                                                alignment: Alignment.center,
+                                                child: const Text(
+                                                  'Photo unavailable',
+                                                ),
+                                              ),
                                         ),
                                       ),
                                     ),
@@ -7864,7 +10386,8 @@ class CalendarDaySheet extends StatelessWidget {
                             ),
                           ),
                         );
-                        if (context.mounted) Navigator.of(context).pop(changed == true);
+                        if (context.mounted)
+                          Navigator.of(context).pop(changed == true);
                       },
                       icon: const Icon(Icons.house_outlined),
                       label: const Text('Lake House'),
@@ -7883,7 +10406,8 @@ class CalendarDaySheet extends StatelessWidget {
                             ),
                           ),
                         );
-                        if (context.mounted) Navigator.of(context).pop(changed == true);
+                        if (context.mounted)
+                          Navigator.of(context).pop(changed == true);
                       },
                       icon: const Icon(Icons.add),
                       label: const Text('Add Event'),
@@ -7916,7 +10440,8 @@ class CalendarEventEditorPage extends StatefulWidget {
   final CalendarEventDraft? initialDraft;
 
   @override
-  State<CalendarEventEditorPage> createState() => _CalendarEventEditorPageState();
+  State<CalendarEventEditorPage> createState() =>
+      _CalendarEventEditorPageState();
 }
 
 class _CalendarEventEditorPageState extends State<CalendarEventEditorPage> {
@@ -7953,7 +10478,9 @@ class _CalendarEventEditorPageState extends State<CalendarEventEditorPage> {
     _startDate = src?.startDate ?? preset?.startDate ?? widget.initialDay;
     _endDate = src?.endDate ?? preset?.endDate ?? widget.initialDay;
     _titleCtrl.text = src?.title ?? preset?.title ?? '';
-    _descriptionCtrl.text = _stripHtml(src?.descriptionHtml ?? preset?.descriptionHtml ?? '');
+    _descriptionCtrl.text = _stripHtml(
+      src?.descriptionHtml ?? preset?.descriptionHtml ?? '',
+    );
     _eventType = src?.eventType ?? preset?.eventType ?? 'event';
     _color = src?.color ?? preset?.color ?? '#6366f1';
     _visibility = src?.visibility ?? preset?.visibility ?? 'family';
@@ -7961,10 +10488,13 @@ class _CalendarEventEditorPageState extends State<CalendarEventEditorPage> {
     _isRecurring = src?.isRecurring ?? preset?.isRecurring ?? false;
     _startTimeCtrl.text = src?.startTime ?? preset?.startTime ?? '';
     _endTimeCtrl.text = src?.endTime ?? preset?.endTime ?? '';
-    _recurrenceFrequency = src?.recurrenceFrequency ?? preset?.recurrenceFrequency ?? 'weekly';
-    _recurrenceIntervalCtrl.text = '${src?.recurrenceInterval ?? preset?.recurrenceInterval ?? 1}';
+    _recurrenceFrequency =
+        src?.recurrenceFrequency ?? preset?.recurrenceFrequency ?? 'weekly';
+    _recurrenceIntervalCtrl.text =
+        '${src?.recurrenceInterval ?? preset?.recurrenceInterval ?? 1}';
     _recurrenceUntil = src?.recurrenceUntil ?? preset?.recurrenceUntil;
-    _recurrenceCountCtrl.text = (src?.recurrenceCount ?? preset?.recurrenceCount)?.toString() ?? '';
+    _recurrenceCountCtrl.text =
+        (src?.recurrenceCount ?? preset?.recurrenceCount)?.toString() ?? '';
     final reminder = src?.reminderAt ?? preset?.reminderAt;
     _reminderAtCtrl.text = reminder == null ? '' : _fmtDateTime(reminder);
     _existingPhotoUrl = (src?.photoUrl ?? '').trim();
@@ -7997,18 +10527,27 @@ class _CalendarEventEditorPageState extends State<CalendarEventEditorPage> {
     final configured = widget.api.settings.baseUrl.trim();
     final base = configured.isEmpty ? _cloudBaseUrl : configured;
     final root = Uri.parse(_normalizeBaseUrl(base));
-    final rootPath = root.path.endsWith('/') ? root.path.substring(0, root.path.length - 1) : root.path;
+    final rootPath = root.path.endsWith('/')
+        ? root.path.substring(0, root.path.length - 1)
+        : root.path;
     final assetPath = raw.startsWith('/') ? raw : '/$raw';
     return root.replace(path: '$rootPath$assetPath').toString();
   }
 
   Future<void> _pickPhoto() async {
-    final picked = await FilePicker.platform.pickFiles(type: FileType.image, allowMultiple: false);
+    final picked = await FilePicker.platform.pickFiles(
+      type: FileType.image,
+      allowMultiple: false,
+    );
     if (picked == null || picked.files.isEmpty) return;
     final file = picked.files.first;
     if ((file.path ?? '').trim().isEmpty) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Unable to access selected image file path.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Unable to access selected image file path.'),
+        ),
+      );
       return;
     }
     setState(() => _photoPath = file.path!.trim());
@@ -8051,20 +10590,34 @@ class _CalendarEventEditorPageState extends State<CalendarEventEditorPage> {
         startTime: _isAllDay ? null : _normalizeTimeInput(_startTimeCtrl.text),
         endTime: _isAllDay ? null : _normalizeTimeInput(_endTimeCtrl.text),
         recurrenceFrequency: _isRecurring ? _recurrenceFrequency : null,
-        recurrenceInterval: _isRecurring ? (_toInt(_recurrenceIntervalCtrl.text) <= 0 ? 1 : _toInt(_recurrenceIntervalCtrl.text)) : null,
+        recurrenceInterval: _isRecurring
+            ? (_toInt(_recurrenceIntervalCtrl.text) <= 0
+                  ? 1
+                  : _toInt(_recurrenceIntervalCtrl.text))
+            : null,
         recurrenceUntil: _isRecurring ? _recurrenceUntil : null,
-        recurrenceCount: _isRecurring ? (_toInt(_recurrenceCountCtrl.text) <= 0 ? null : _toInt(_recurrenceCountCtrl.text)) : null,
+        recurrenceCount: _isRecurring
+            ? (_toInt(_recurrenceCountCtrl.text) <= 0
+                  ? null
+                  : _toInt(_recurrenceCountCtrl.text))
+            : null,
         reminderAt: _parseReminderInput(_reminderAtCtrl.text),
       );
 
       if (_editing) {
-        await widget.api.updateCalendarEvent(widget.sourceEvent!.id, draft, photoPath: _photoPath);
+        await widget.api.updateCalendarEvent(
+          widget.sourceEvent!.id,
+          draft,
+          photoPath: _photoPath,
+        );
       } else {
         await widget.api.createCalendarEvent(draft, photoPath: _photoPath);
       }
 
       if (!mounted) return;
-      messenger.showSnackBar(SnackBar(content: Text(_editing ? 'Event updated' : 'Event created')));
+      messenger.showSnackBar(
+        SnackBar(content: Text(_editing ? 'Event updated' : 'Event created')),
+      );
       Navigator.pop(context, true);
     } catch (err) {
       if (!mounted) return;
@@ -8084,8 +10637,14 @@ class _CalendarEventEditorPageState extends State<CalendarEventEditorPage> {
         title: const Text('Delete event?'),
         content: const Text('This cannot be undone.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
         ],
       ),
     );
@@ -8128,7 +10687,9 @@ class _CalendarEventEditorPageState extends State<CalendarEventEditorPage> {
                 TextFormField(
                   controller: _titleCtrl,
                   decoration: const InputDecoration(labelText: 'Title'),
-                  validator: (v) => (v == null || v.trim().isEmpty) ? 'Title is required' : null,
+                  validator: (v) => (v == null || v.trim().isEmpty)
+                      ? 'Title is required'
+                      : null,
                 ),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<String>(
@@ -8136,8 +10697,14 @@ class _CalendarEventEditorPageState extends State<CalendarEventEditorPage> {
                   decoration: const InputDecoration(labelText: 'Event type'),
                   items: const [
                     DropdownMenuItem(value: 'event', child: Text('Event')),
-                    DropdownMenuItem(value: 'reminder', child: Text('Reminder')),
-                    DropdownMenuItem(value: 'birthday', child: Text('Birthday')),
+                    DropdownMenuItem(
+                      value: 'reminder',
+                      child: Text('Reminder'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'birthday',
+                      child: Text('Birthday'),
+                    ),
                   ],
                   onChanged: (v) => setState(() => _eventType = v ?? 'event'),
                 ),
@@ -8187,14 +10754,18 @@ class _CalendarEventEditorPageState extends State<CalendarEventEditorPage> {
                       Expanded(
                         child: TextFormField(
                           controller: _startTimeCtrl,
-                          decoration: const InputDecoration(labelText: 'Start time (HH:MM)'),
+                          decoration: const InputDecoration(
+                            labelText: 'Start time (HH:MM)',
+                          ),
                         ),
                       ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: TextFormField(
                           controller: _endTimeCtrl,
-                          decoration: const InputDecoration(labelText: 'End time (HH:MM)'),
+                          decoration: const InputDecoration(
+                            labelText: 'End time (HH:MM)',
+                          ),
                         ),
                       ),
                     ],
@@ -8217,7 +10788,9 @@ class _CalendarEventEditorPageState extends State<CalendarEventEditorPage> {
                       OutlinedButton.icon(
                         onPressed: _pickPhoto,
                         icon: const Icon(Icons.photo_library_outlined),
-                        label: Text(_photoPath.isEmpty ? 'Attach photo' : 'Change photo'),
+                        label: Text(
+                          _photoPath.isEmpty ? 'Attach photo' : 'Change photo',
+                        ),
                       ),
                       if (_photoPath.isNotEmpty)
                         TextButton(
@@ -8261,7 +10834,9 @@ class _CalendarEventEditorPageState extends State<CalendarEventEditorPage> {
                 const SizedBox(height: 8),
                 TextFormField(
                   controller: _reminderAtCtrl,
-                  decoration: const InputDecoration(labelText: 'Reminder (YYYY-MM-DD HH:MM)'),
+                  decoration: const InputDecoration(
+                    labelText: 'Reminder (YYYY-MM-DD HH:MM)',
+                  ),
                 ),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<String>(
@@ -8269,7 +10844,10 @@ class _CalendarEventEditorPageState extends State<CalendarEventEditorPage> {
                   decoration: const InputDecoration(labelText: 'Visibility'),
                   items: const [
                     DropdownMenuItem(value: 'family', child: Text('Family')),
-                    DropdownMenuItem(value: 'restricted', child: Text('Restricted (invited only)')),
+                    DropdownMenuItem(
+                      value: 'restricted',
+                      child: Text('Restricted (invited only)'),
+                    ),
                     DropdownMenuItem(value: 'private', child: Text('Private')),
                   ],
                   onChanged: (v) => setState(() => _visibility = v ?? 'family'),
@@ -8311,22 +10889,30 @@ class _CalendarEventEditorPageState extends State<CalendarEventEditorPage> {
                     items: const [
                       DropdownMenuItem(value: 'daily', child: Text('Daily')),
                       DropdownMenuItem(value: 'weekly', child: Text('Weekly')),
-                      DropdownMenuItem(value: 'monthly', child: Text('Monthly')),
+                      DropdownMenuItem(
+                        value: 'monthly',
+                        child: Text('Monthly'),
+                      ),
                       DropdownMenuItem(value: 'yearly', child: Text('Yearly')),
                     ],
-                    onChanged: (v) => setState(() => _recurrenceFrequency = v ?? 'weekly'),
+                    onChanged: (v) =>
+                        setState(() => _recurrenceFrequency = v ?? 'weekly'),
                   ),
                   const SizedBox(height: 8),
                   TextFormField(
                     controller: _recurrenceIntervalCtrl,
                     keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'Repeat every (interval)'),
+                    decoration: const InputDecoration(
+                      labelText: 'Repeat every (interval)',
+                    ),
                   ),
                   const SizedBox(height: 8),
                   TextFormField(
                     controller: _recurrenceCountCtrl,
                     keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'Occurrence count (optional)'),
+                    decoration: const InputDecoration(
+                      labelText: 'Occurrence count (optional)',
+                    ),
                   ),
                   const SizedBox(height: 8),
                   OutlinedButton.icon(
@@ -8342,14 +10928,20 @@ class _CalendarEventEditorPageState extends State<CalendarEventEditorPage> {
                       }
                     },
                     icon: const Icon(Icons.repeat),
-                    label: Text('Repeat until ${_recurrenceUntil == null ? 'not set' : _fmtDate(_recurrenceUntil!)}'),
+                    label: Text(
+                      'Repeat until ${_recurrenceUntil == null ? 'not set' : _fmtDate(_recurrenceUntil!)}',
+                    ),
                   ),
                 ],
                 const SizedBox(height: 16),
                 FilledButton.icon(
                   onPressed: _saving ? null : _save,
                   icon: const Icon(Icons.save),
-                  label: Text(_saving ? 'Saving...' : (_editing ? 'Update Event' : 'Create Event')),
+                  label: Text(
+                    _saving
+                        ? 'Saving...'
+                        : (_editing ? 'Update Event' : 'Create Event'),
+                  ),
                 ),
               ],
             ),
@@ -8369,7 +10961,8 @@ class ExpensesPage extends StatefulWidget {
   State<ExpensesPage> createState() => _ExpensesPageState();
 }
 
-class _ExpensesPageState extends State<ExpensesPage> with TickerProviderStateMixin {
+class _ExpensesPageState extends State<ExpensesPage>
+    with TickerProviderStateMixin {
   late TabController _tabController;
 
   @override
@@ -8431,15 +11024,49 @@ class _ExpensesLedgerTab extends StatefulWidget {
 class _ExpensesLedgerTabState extends State<_ExpensesLedgerTab> {
   DateTime _month = DateTime(DateTime.now().year, DateTime.now().month, 1);
   late Future<Map<String, dynamic>> _future;
+  bool _privacyMaskEnabled = false;
 
   @override
   void initState() {
     super.initState();
-    _future = widget.api.fetchExpensesMonth(_month);
+    _loadPrivacyMask();
+    _future = widget.api.fetchExpensesMonth(
+      _month,
+      privacyMode: _privacyMaskEnabled,
+    );
+  }
+
+  String get _privacyMaskKey {
+    final base = widget.api.settings.baseUrl.toLowerCase().replaceAll(
+      RegExp(r'[^a-z0-9]+'),
+      '_',
+    );
+    final member = widget.api.settings.member.toLowerCase().replaceAll(
+      RegExp(r'[^a-z0-9]+'),
+      '_',
+    );
+    return 'homehub_privacy_mask_${base}_$member';
+  }
+
+  Future<void> _loadPrivacyMask() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _privacyMaskEnabled = prefs.getBool(_privacyMaskKey) ?? false;
+      _future = widget.api.fetchExpensesMonth(
+        _month,
+        privacyMode: _privacyMaskEnabled,
+      );
+    });
   }
 
   Future<void> _refresh() async {
-    setState(() => _future = widget.api.fetchExpensesMonth(_month));
+    setState(() {
+      _future = widget.api.fetchExpensesMonth(
+        _month,
+        privacyMode: _privacyMaskEnabled,
+      );
+    });
     await _future;
   }
 
@@ -8454,11 +11081,16 @@ class _ExpensesLedgerTabState extends State<_ExpensesLedgerTab> {
             return const Center(child: CircularProgressIndicator());
           }
           if (snapshot.hasError) {
-            return ErrorPanel(error: snapshot.error.toString(), onRetry: _refresh);
+            return ErrorPanel(
+              error: snapshot.error.toString(),
+              onRetry: _refresh,
+            );
           }
 
-          final summary = snapshot.data!['summary'] as Map<String, dynamic>? ?? {};
-          final byDate = snapshot.data!['by_date'] as Map<String, dynamic>? ?? {};
+          final summary =
+              snapshot.data!['summary'] as Map<String, dynamic>? ?? {};
+          final byDate =
+              snapshot.data!['by_date'] as Map<String, dynamic>? ?? {};
           final days = byDate.keys.toList()..sort((a, b) => b.compareTo(a));
 
           return ListView(
@@ -8473,7 +11105,10 @@ class _ExpensesLedgerTabState extends State<_ExpensesLedgerTab> {
                         onPressed: () {
                           setState(() {
                             _month = DateTime(_month.year, _month.month - 1, 1);
-                            _future = widget.api.fetchExpensesMonth(_month);
+                            _future = widget.api.fetchExpensesMonth(
+                              _month,
+                              privacyMode: _privacyMaskEnabled,
+                            );
                           });
                         },
                         icon: const Icon(Icons.chevron_left),
@@ -8482,7 +11117,10 @@ class _ExpensesLedgerTabState extends State<_ExpensesLedgerTab> {
                         child: Center(
                           child: Text(
                             _monthLabel(_month),
-                            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 17),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 17,
+                            ),
                           ),
                         ),
                       ),
@@ -8490,7 +11128,10 @@ class _ExpensesLedgerTabState extends State<_ExpensesLedgerTab> {
                         onPressed: () {
                           setState(() {
                             _month = DateTime(_month.year, _month.month + 1, 1);
-                            _future = widget.api.fetchExpensesMonth(_month);
+                            _future = widget.api.fetchExpensesMonth(
+                              _month,
+                              privacyMode: _privacyMaskEnabled,
+                            );
                           });
                         },
                         icon: const Icon(Icons.chevron_right),
@@ -8503,12 +11144,18 @@ class _ExpensesLedgerTabState extends State<_ExpensesLedgerTab> {
               _MetricCard(
                 title: 'Month total',
                 value: _currency(_toDouble(summary['total_this_month'])),
-                subtitle: '${_toInt(summary['days_with_entries'])} days with entries',
+                subtitle:
+                    '${_toInt(summary['days_with_entries'])} days with entries',
                 icon: Icons.receipt_long,
               ),
               const SizedBox(height: 8),
               if (days.isEmpty)
-                const Card(child: Padding(padding: EdgeInsets.all(16), child: Text('No expenses found for this month.'))),
+                const Card(
+                  child: Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Text('No expenses found for this month.'),
+                  ),
+                ),
               ...days.map((day) {
                 final dayData = byDate[day] as Map<String, dynamic>? ?? {};
                 final entries = dayData['entries'] as List<dynamic>? ?? [];
@@ -8524,24 +11171,48 @@ class _ExpensesLedgerTabState extends State<_ExpensesLedgerTab> {
                       return ListTile(
                         dense: true,
                         title: Text('${item['title'] ?? 'Entry'}'),
-                        subtitle: Text('${item['category'] ?? 'General'}${item['payer'] != null ? ' • ${item['payer']}' : ''}${recurring ? ' • recurring' : ''}'),
+                        subtitle: Text(
+                          '${item['category'] ?? 'General'}${item['payer'] != null ? ' • ${item['payer']}' : ''}${recurring ? ' • recurring' : ''}',
+                        ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             if (recurring)
                               IconButton(
-                                icon: Icon(isPaid ? Icons.check_circle : Icons.radio_button_unchecked, color: isPaid ? Colors.green : null),
+                                icon: Icon(
+                                  isPaid
+                                      ? Icons.check_circle
+                                      : Icons.radio_button_unchecked,
+                                  color: isPaid ? Colors.green : null,
+                                ),
                                 tooltip: isPaid ? 'Mark unpaid' : 'Mark paid',
                                 onPressed: () async {
-                                  final messenger = ScaffoldMessenger.of(context);
+                                  final messenger = ScaffoldMessenger.of(
+                                    context,
+                                  );
                                   try {
-                                    await widget.api.markExpenseEntryPaid(entryId: _toInt(item['id']), paid: !isPaid);
+                                    await widget.api.markExpenseEntryPaid(
+                                      entryId: _toInt(item['id']),
+                                      paid: !isPaid,
+                                    );
                                     if (!mounted) return;
-                                    messenger.showSnackBar(SnackBar(content: Text(isPaid ? 'Marked unpaid' : 'Marked paid')));
+                                    messenger.showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          isPaid
+                                              ? 'Marked unpaid'
+                                              : 'Marked paid',
+                                        ),
+                                      ),
+                                    );
                                     await _refresh();
                                   } catch (err) {
                                     if (!mounted) return;
-                                    messenger.showSnackBar(SnackBar(content: Text('Update failed: $err')));
+                                    messenger.showSnackBar(
+                                      SnackBar(
+                                        content: Text('Update failed: $err'),
+                                      ),
+                                    );
                                   }
                                 },
                               ),
@@ -8550,21 +11221,42 @@ class _ExpensesLedgerTabState extends State<_ExpensesLedgerTab> {
                                 final messenger = ScaffoldMessenger.of(context);
                                 try {
                                   if (value == 'delete') {
-                                    await widget.api.deleteExpenseEntry(entryId: _toInt(item['id']), deleteMode: 'instance');
+                                    await widget.api.deleteExpenseEntry(
+                                      entryId: _toInt(item['id']),
+                                      deleteMode: 'instance',
+                                    );
                                   } else if (value == 'delete_all') {
-                                    await widget.api.deleteExpenseEntry(entryId: _toInt(item['id']), deleteMode: 'all');
+                                    await widget.api.deleteExpenseEntry(
+                                      entryId: _toInt(item['id']),
+                                      deleteMode: 'all',
+                                    );
                                   }
                                   if (!mounted) return;
-                                  messenger.showSnackBar(const SnackBar(content: Text('Entry removed')));
+                                  messenger.showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Entry removed'),
+                                    ),
+                                  );
                                   await _refresh();
                                 } catch (err) {
                                   if (!mounted) return;
-                                  messenger.showSnackBar(SnackBar(content: Text('Delete failed: $err')));
+                                  messenger.showSnackBar(
+                                    SnackBar(
+                                      content: Text('Delete failed: $err'),
+                                    ),
+                                  );
                                 }
                               },
                               itemBuilder: (context) => [
-                                const PopupMenuItem(value: 'delete', child: Text('Delete entry')),
-                                if (recurring) const PopupMenuItem(value: 'delete_all', child: Text('Delete recurring series')),
+                                const PopupMenuItem(
+                                  value: 'delete',
+                                  child: Text('Delete entry'),
+                                ),
+                                if (recurring)
+                                  const PopupMenuItem(
+                                    value: 'delete_all',
+                                    child: Text('Delete recurring series'),
+                                  ),
                               ],
                             ),
                             Text(_currency(_toDouble(item['amount']))),
@@ -8600,10 +11292,12 @@ class _MoneyInsightsTabState extends State<_MoneyInsightsTab> {
   int? _impactTargetId;
   Map<String, dynamic>? _impactResult;
   bool _impactLoading = false;
+  bool _privacyMaskEnabled = false;
 
   @override
   void initState() {
     super.initState();
+    _loadPrivacyMask();
     _future = _load();
   }
 
@@ -8613,18 +11307,41 @@ class _MoneyInsightsTabState extends State<_MoneyInsightsTab> {
     super.dispose();
   }
 
+  String get _privacyMaskKey {
+    final base = widget.api.settings.baseUrl.toLowerCase().replaceAll(
+      RegExp(r'[^a-z0-9]+'),
+      '_',
+    );
+    final member = widget.api.settings.member.toLowerCase().replaceAll(
+      RegExp(r'[^a-z0-9]+'),
+      '_',
+    );
+    return 'homehub_privacy_mask_${base}_$member';
+  }
+
+  Future<void> _loadPrivacyMask() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _privacyMaskEnabled = prefs.getBool(_privacyMaskKey) ?? false;
+      _future = _load();
+    });
+  }
+
   Future<_MoneyBundle> _load() async {
     final results = await Future.wait([
-      widget.api.fetchFinanceSummary(_month),
-      widget.api.fetchCollaboration(_month),
-      widget.api.fetchDebtWorkflow(_month),
+      widget.api.fetchFinanceSummary(_month, privacyMode: _privacyMaskEnabled),
+      widget.api.fetchCollaboration(_month, privacyMode: _privacyMaskEnabled),
+      widget.api.fetchDebtWorkflow(_month, privacyMode: _privacyMaskEnabled),
       widget.api.listBudgets(),
       widget.api.listDebts(),
       widget.api.listGoals(),
-      widget.api.fetchAnalyticsSummary(),
+      widget.api.fetchAnalyticsSummary(privacyMode: _privacyMaskEnabled),
       widget.api.listSharedExpenses(monthDate: _month),
-      widget.api.listPlaidAccounts(),
-      widget.api.fetchPendingIncomeConfirmations(),
+      widget.api.listPlaidAccounts(privacyMode: _privacyMaskEnabled),
+      widget.api.fetchPendingIncomeConfirmations(
+        privacyMode: _privacyMaskEnabled,
+      ),
     ]);
     return _MoneyBundle(
       finance: results[0] as Map<String, dynamic>,
@@ -8647,9 +11364,16 @@ class _MoneyInsightsTabState extends State<_MoneyInsightsTab> {
 
   Future<void> _previewImpact() async {
     final amount = double.tryParse(_impactAmountCtrl.text.trim());
-    if (_impactTargetType == null || _impactTargetId == null || amount == null || amount <= 0) {
+    if (_impactTargetType == null ||
+        _impactTargetId == null ||
+        amount == null ||
+        amount <= 0) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pick target and enter valid payment amount')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Pick target and enter valid payment amount'),
+        ),
+      );
       return;
     }
     setState(() => _impactLoading = true);
@@ -8664,10 +11388,32 @@ class _MoneyInsightsTabState extends State<_MoneyInsightsTab> {
       setState(() => _impactResult = result);
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Impact preview failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Impact preview failed: $err')));
     } finally {
       if (mounted) setState(() => _impactLoading = false);
     }
+  }
+
+  Future<void> _openPlaidLinkInWebView() async {
+    final params = <String, String>{'plaid': '1'};
+    if (_privacyMaskEnabled) params['privacy'] = '1';
+    final uri = Uri(path: '/expenses', queryParameters: params);
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => Scaffold(
+          appBar: AppBar(title: const Text('Connect Bank Account')),
+          body: ModuleWebPage(
+            settings: widget.api.settings,
+            title: 'Connect Bank Account',
+            path: uri.toString(),
+          ),
+        ),
+      ),
+    );
+    if (!mounted) return;
+    await _refresh();
   }
 
   @override
@@ -8681,19 +11427,26 @@ class _MoneyInsightsTabState extends State<_MoneyInsightsTab> {
             return const Center(child: CircularProgressIndicator());
           }
           if (snapshot.hasError) {
-            return ErrorPanel(error: snapshot.error.toString(), onRetry: _refresh);
+            return ErrorPanel(
+              error: snapshot.error.toString(),
+              onRetry: _refresh,
+            );
           }
 
           final data = snapshot.data!;
           final family = data.finance['family'] as Map<String, dynamic>? ?? {};
           final budget = family['budget'] as Map<String, dynamic>? ?? {};
           final member = data.finance['member'] as Map<String, dynamic>? ?? {};
-          final collaborationSummary = data.collaboration['summary'] as Map<String, dynamic>? ?? {};
-          final categories = data.collaboration['categories'] as List<dynamic>? ?? [];
+          final collaborationSummary =
+              data.collaboration['summary'] as Map<String, dynamic>? ?? {};
+          final categories =
+              data.collaboration['categories'] as List<dynamic>? ?? [];
           final members = data.collaboration['members'] as List<dynamic>? ?? [];
-          final debtSnapshot = data.debtWorkflow['snapshot'] as Map<String, dynamic>? ?? {};
+          final debtSnapshot =
+              data.debtWorkflow['snapshot'] as Map<String, dynamic>? ?? {};
           final debts = data.debtWorkflow['debts'] as List<dynamic>? ?? [];
-          final dueItems = data.debtWorkflow['due_items'] as List<dynamic>? ?? [];
+          final dueItems =
+              data.debtWorkflow['due_items'] as List<dynamic>? ?? [];
           final budgets = data.budgets;
           final debtAccounts = data.debtAccounts;
           final goals = data.goals;
@@ -8740,7 +11493,10 @@ class _MoneyInsightsTabState extends State<_MoneyInsightsTab> {
                         child: Center(
                           child: Text(
                             _monthLabel(_month),
-                            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 17),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 17,
+                            ),
                           ),
                         ),
                       ),
@@ -8761,7 +11517,8 @@ class _MoneyInsightsTabState extends State<_MoneyInsightsTab> {
               _MetricCard(
                 title: 'Family net',
                 value: _currency(_toDouble(family['net_total'])),
-                subtitle: 'Income ${_currency(_toDouble(family['income_total']))} • Expenses ${_currency(_toDouble(family['expenses_total']))}',
+                subtitle:
+                    'Income ${_currency(_toDouble(family['income_total']))} • Expenses ${_currency(_toDouble(family['expenses_total']))}',
                 icon: Icons.savings,
               ),
               const SizedBox(height: 8),
@@ -8771,7 +11528,9 @@ class _MoneyInsightsTabState extends State<_MoneyInsightsTab> {
                     child: _MetricCard(
                       title: 'Budget remaining',
                       value: _currency(_toDouble(budget['remaining'])),
-                      subtitle: budget['has_budget'] == true ? 'Total ${_currency(_toDouble(budget['total']))}' : 'No budget set',
+                      subtitle: budget['has_budget'] == true
+                          ? 'Total ${_currency(_toDouble(budget['total']))}'
+                          : 'No budget set',
                       icon: Icons.account_balance,
                     ),
                   ),
@@ -8790,7 +11549,8 @@ class _MoneyInsightsTabState extends State<_MoneyInsightsTab> {
               _MetricCard(
                 title: 'Debt due in 30 days',
                 value: _currency(_toDouble(debtSnapshot['due_in_30_days'])),
-                subtitle: 'Outstanding ${_currency(_toDouble(debtSnapshot['total_outstanding_debt']))}',
+                subtitle:
+                    'Outstanding ${_currency(_toDouble(debtSnapshot['total_outstanding_debt']))}',
                 icon: Icons.warning_amber,
               ),
               const SizedBox(height: 10),
@@ -8800,11 +11560,20 @@ class _MoneyInsightsTabState extends State<_MoneyInsightsTab> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Collaboration', style: TextStyle(fontWeight: FontWeight.w700)),
+                      const Text(
+                        'Collaboration',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
                       const SizedBox(height: 8),
-                      Text('Shared income ${_currency(_toDouble(collaborationSummary['shared_income_total']))}'),
-                      Text('Shared expenses ${_currency(_toDouble(collaborationSummary['shared_expenses_total']))}'),
-                      Text('Savings ${_currency(_toDouble(collaborationSummary['savings_total']))}'),
+                      Text(
+                        'Shared income ${_currency(_toDouble(collaborationSummary['shared_income_total']))}',
+                      ),
+                      Text(
+                        'Shared expenses ${_currency(_toDouble(collaborationSummary['shared_expenses_total']))}',
+                      ),
+                      Text(
+                        'Savings ${_currency(_toDouble(collaborationSummary['savings_total']))}',
+                      ),
                     ],
                   ),
                 ),
@@ -8816,7 +11585,10 @@ class _MoneyInsightsTabState extends State<_MoneyInsightsTab> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Top categories', style: TextStyle(fontWeight: FontWeight.w700)),
+                      const Text(
+                        'Top categories',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
                       const SizedBox(height: 8),
                       if (categories.isEmpty) const Text('No category data.'),
                       ...categories.take(8).map((raw) {
@@ -8839,7 +11611,10 @@ class _MoneyInsightsTabState extends State<_MoneyInsightsTab> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Member balances', style: TextStyle(fontWeight: FontWeight.w700)),
+                      const Text(
+                        'Member balances',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
                       const SizedBox(height: 8),
                       if (members.isEmpty) const Text('No member data.'),
                       ...members.map((raw) {
@@ -8848,8 +11623,12 @@ class _MoneyInsightsTabState extends State<_MoneyInsightsTab> {
                           dense: true,
                           contentPadding: EdgeInsets.zero,
                           title: Text('${row['name'] ?? ''}'),
-                          subtitle: Text('Income ${_currency(_toDouble(row['income_actual']))} • Expenses ${_currency(_toDouble(row['expenses']))}'),
-                          trailing: Text(_currency(_toDouble(row['net_projected']))),
+                          subtitle: Text(
+                            'Income ${_currency(_toDouble(row['income_actual']))} • Expenses ${_currency(_toDouble(row['expenses']))}',
+                          ),
+                          trailing: Text(
+                            _currency(_toDouble(row['net_projected'])),
+                          ),
                         );
                       }),
                     ],
@@ -8863,7 +11642,10 @@ class _MoneyInsightsTabState extends State<_MoneyInsightsTab> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Debt priorities', style: TextStyle(fontWeight: FontWeight.w700)),
+                      const Text(
+                        'Debt priorities',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
                       const SizedBox(height: 8),
                       if (debts.isEmpty) const Text('No active debts.'),
                       ...debts.map((raw) {
@@ -8872,8 +11654,12 @@ class _MoneyInsightsTabState extends State<_MoneyInsightsTab> {
                           dense: true,
                           contentPadding: EdgeInsets.zero,
                           title: Text('${debt['description'] ?? 'Debt'}'),
-                          subtitle: Text('APR ${_toDouble(debt['interest_rate']).toStringAsFixed(2)}% • Priority ${debt['priority_band'] ?? 'low'}'),
-                          trailing: Text(_currency(_toDouble(debt['current_balance']))),
+                          subtitle: Text(
+                            'APR ${_toDouble(debt['interest_rate']).toStringAsFixed(2)}% • Priority ${debt['priority_band'] ?? 'low'}',
+                          ),
+                          trailing: Text(
+                            _currency(_toDouble(debt['current_balance'])),
+                          ),
                         );
                       }),
                     ],
@@ -8887,10 +11673,17 @@ class _MoneyInsightsTabState extends State<_MoneyInsightsTab> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Payment impact preview', style: TextStyle(fontWeight: FontWeight.w700)),
+                      const Text(
+                        'Payment impact preview',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
                       const SizedBox(height: 8),
                       DropdownButtonFormField<String>(
-                        initialValue: (_impactTargetType != null && _impactTargetId != null) ? '$_impactTargetType:$_impactTargetId' : null,
+                        initialValue:
+                            (_impactTargetType != null &&
+                                _impactTargetId != null)
+                            ? '$_impactTargetType:$_impactTargetId'
+                            : null,
                         decoration: const InputDecoration(labelText: 'Target'),
                         items: impactTargets,
                         onChanged: (value) {
@@ -8906,14 +11699,20 @@ class _MoneyInsightsTabState extends State<_MoneyInsightsTab> {
                       const SizedBox(height: 8),
                       TextField(
                         controller: _impactAmountCtrl,
-                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                        decoration: const InputDecoration(labelText: 'Payment amount'),
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        decoration: const InputDecoration(
+                          labelText: 'Payment amount',
+                        ),
                       ),
                       const SizedBox(height: 10),
                       FilledButton.icon(
                         onPressed: _impactLoading ? null : _previewImpact,
                         icon: const Icon(Icons.auto_graph),
-                        label: Text(_impactLoading ? 'Calculating...' : 'Preview impact'),
+                        label: Text(
+                          _impactLoading ? 'Calculating...' : 'Preview impact',
+                        ),
                       ),
                       if (_impactResult != null) ...[
                         const SizedBox(height: 10),
@@ -8946,35 +11745,81 @@ class _MoneyInsightsTabState extends State<_MoneyInsightsTab> {
                     children: [
                       Row(
                         children: [
-                          const Expanded(child: Text('Family Budgets', style: TextStyle(fontWeight: FontWeight.w700))),
+                          const Expanded(
+                            child: Text(
+                              'Family Budgets',
+                              style: TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                          ),
                           TextButton(
                             onPressed: () async {
                               final nameCtrl = TextEditingController();
                               final amountCtrl = TextEditingController();
-                              final monthCtrl = TextEditingController(text: '${_month.month}');
-                              final yearCtrl = TextEditingController(text: '${_month.year}');
+                              final monthCtrl = TextEditingController(
+                                text: '${_month.month}',
+                              );
+                              final yearCtrl = TextEditingController(
+                                text: '${_month.year}',
+                              );
                               final should = await showDialog<bool>(
                                 context: context,
                                 builder: (context) => AlertDialog(
-                                  insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+                                  insetPadding: const EdgeInsets.symmetric(
+                                    horizontal: 24,
+                                    vertical: 24,
+                                  ),
                                   title: const Text('Create Budget'),
                                   content: SingleChildScrollView(
                                     child: Column(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Name')),
+                                        TextField(
+                                          controller: nameCtrl,
+                                          decoration: const InputDecoration(
+                                            labelText: 'Name',
+                                          ),
+                                        ),
                                         const SizedBox(height: 8),
-                                        TextField(controller: amountCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Total amount')),
+                                        TextField(
+                                          controller: amountCtrl,
+                                          keyboardType:
+                                              const TextInputType.numberWithOptions(
+                                                decimal: true,
+                                              ),
+                                          decoration: const InputDecoration(
+                                            labelText: 'Total amount',
+                                          ),
+                                        ),
                                         const SizedBox(height: 8),
-                                        TextField(controller: monthCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Month')),
+                                        TextField(
+                                          controller: monthCtrl,
+                                          keyboardType: TextInputType.number,
+                                          decoration: const InputDecoration(
+                                            labelText: 'Month',
+                                          ),
+                                        ),
                                         const SizedBox(height: 8),
-                                        TextField(controller: yearCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Year')),
+                                        TextField(
+                                          controller: yearCtrl,
+                                          keyboardType: TextInputType.number,
+                                          decoration: const InputDecoration(
+                                            labelText: 'Year',
+                                          ),
+                                        ),
                                       ],
                                     ),
                                   ),
                                   actions: [
-                                    TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-                                    FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Create')),
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.pop(context, false),
+                                      child: const Text('Cancel'),
+                                    ),
+                                    FilledButton(
+                                      onPressed: () =>
+                                          Navigator.pop(context, true),
+                                      child: const Text('Create'),
+                                    ),
                                   ],
                                 ),
                               );
@@ -8982,14 +11827,24 @@ class _MoneyInsightsTabState extends State<_MoneyInsightsTab> {
                               try {
                                 await widget.api.createBudget(
                                   name: nameCtrl.text.trim(),
-                                  month: int.tryParse(monthCtrl.text.trim()) ?? _month.month,
-                                  year: int.tryParse(yearCtrl.text.trim()) ?? _month.year,
-                                  totalAmount: double.tryParse(amountCtrl.text.trim()) ?? 0,
+                                  month:
+                                      int.tryParse(monthCtrl.text.trim()) ??
+                                      _month.month,
+                                  year:
+                                      int.tryParse(yearCtrl.text.trim()) ??
+                                      _month.year,
+                                  totalAmount:
+                                      double.tryParse(amountCtrl.text.trim()) ??
+                                      0,
                                 );
                                 await _refresh();
                               } catch (err) {
                                 if (!mounted) return;
-                                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Create budget failed: $err')));
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Create budget failed: $err'),
+                                  ),
+                                );
                               }
                             },
                             child: const Text('Add'),
@@ -8999,54 +11854,104 @@ class _MoneyInsightsTabState extends State<_MoneyInsightsTab> {
                       if (budgets.isEmpty)
                         const Text('No budgets yet.')
                       else
-                        ...budgets.take(6).map(
-                          (budgetRow) => ListTile(
-                            dense: true,
-                            contentPadding: EdgeInsets.zero,
-                            title: Text('${budgetRow['name'] ?? ''} (${budgetRow['month']}/${budgetRow['year']})'),
-                            subtitle: Text('Spent ${_currency(_toDouble(budgetRow['spent']))} / ${_currency(_toDouble(budgetRow['total']))}'),
-                            trailing: TextButton(
-                              onPressed: () async {
-                                final amountCtrl = TextEditingController();
-                                final categoryCtrl = TextEditingController();
-                                final should = await showDialog<bool>(
-                                  context: context,
-                                  builder: (context) => AlertDialog(
-                                    insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-                                    title: const Text('Add Budget Category'),
-                                    content: SingleChildScrollView(
-                                      child: Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          TextField(controller: categoryCtrl, decoration: const InputDecoration(labelText: 'Category')),
-                                          const SizedBox(height: 8),
-                                          TextField(controller: amountCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Allocated amount')),
+                        ...budgets
+                            .take(6)
+                            .map(
+                              (budgetRow) => ListTile(
+                                dense: true,
+                                contentPadding: EdgeInsets.zero,
+                                title: Text(
+                                  '${budgetRow['name'] ?? ''} (${budgetRow['month']}/${budgetRow['year']})',
+                                ),
+                                subtitle: Text(
+                                  'Spent ${_currency(_toDouble(budgetRow['spent']))} / ${_currency(_toDouble(budgetRow['total']))}',
+                                ),
+                                trailing: TextButton(
+                                  onPressed: () async {
+                                    final amountCtrl = TextEditingController();
+                                    final categoryCtrl =
+                                        TextEditingController();
+                                    final should = await showDialog<bool>(
+                                      context: context,
+                                      builder: (context) => AlertDialog(
+                                        insetPadding:
+                                            const EdgeInsets.symmetric(
+                                              horizontal: 24,
+                                              vertical: 24,
+                                            ),
+                                        title: const Text(
+                                          'Add Budget Category',
+                                        ),
+                                        content: SingleChildScrollView(
+                                          child: Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              TextField(
+                                                controller: categoryCtrl,
+                                                decoration:
+                                                    const InputDecoration(
+                                                      labelText: 'Category',
+                                                    ),
+                                              ),
+                                              const SizedBox(height: 8),
+                                              TextField(
+                                                controller: amountCtrl,
+                                                keyboardType:
+                                                    const TextInputType.numberWithOptions(
+                                                      decimal: true,
+                                                    ),
+                                                decoration:
+                                                    const InputDecoration(
+                                                      labelText:
+                                                          'Allocated amount',
+                                                    ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        actions: [
+                                          TextButton(
+                                            onPressed: () =>
+                                                Navigator.pop(context, false),
+                                            child: const Text('Cancel'),
+                                          ),
+                                          FilledButton(
+                                            onPressed: () =>
+                                                Navigator.pop(context, true),
+                                            child: const Text('Save'),
+                                          ),
                                         ],
                                       ),
-                                    ),
-                                    actions: [
-                                      TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-                                      FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
-                                    ],
-                                  ),
-                                );
-                                if (should != true) return;
-                                try {
-                                  await widget.api.addBudgetCategory(
-                                    budgetId: _toInt(budgetRow['id']),
-                                    categoryName: categoryCtrl.text.trim(),
-                                    allocatedAmount: double.tryParse(amountCtrl.text.trim()) ?? 0,
-                                  );
-                                  await _refresh();
-                                } catch (err) {
-                                  if (!mounted) return;
-                                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Add category failed: $err')));
-                                }
-                              },
-                              child: const Text('Category'),
+                                    );
+                                    if (should != true) return;
+                                    try {
+                                      await widget.api.addBudgetCategory(
+                                        budgetId: _toInt(budgetRow['id']),
+                                        categoryName: categoryCtrl.text.trim(),
+                                        allocatedAmount:
+                                            double.tryParse(
+                                              amountCtrl.text.trim(),
+                                            ) ??
+                                            0,
+                                      );
+                                      await _refresh();
+                                    } catch (err) {
+                                      if (!mounted) return;
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            'Add category failed: $err',
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                  },
+                                  child: const Text('Category'),
+                                ),
+                              ),
                             ),
-                          ),
-                        ),
                     ],
                   ),
                 ),
@@ -9060,7 +11965,12 @@ class _MoneyInsightsTabState extends State<_MoneyInsightsTab> {
                     children: [
                       Row(
                         children: [
-                          const Expanded(child: Text('Debt Accounts', style: TextStyle(fontWeight: FontWeight.w700))),
+                          const Expanded(
+                            child: Text(
+                              'Debt Accounts',
+                              style: TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                          ),
                           TextButton(
                             onPressed: () async {
                               final descriptionCtrl = TextEditingController();
@@ -9070,25 +11980,64 @@ class _MoneyInsightsTabState extends State<_MoneyInsightsTab> {
                               final should = await showDialog<bool>(
                                 context: context,
                                 builder: (context) => AlertDialog(
-                                  insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+                                  insetPadding: const EdgeInsets.symmetric(
+                                    horizontal: 24,
+                                    vertical: 24,
+                                  ),
                                   title: const Text('Create Debt'),
                                   content: SingleChildScrollView(
                                     child: Column(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        TextField(controller: descriptionCtrl, decoration: const InputDecoration(labelText: 'Description')),
+                                        TextField(
+                                          controller: descriptionCtrl,
+                                          decoration: const InputDecoration(
+                                            labelText: 'Description',
+                                          ),
+                                        ),
                                         const SizedBox(height: 8),
-                                        TextField(controller: creditorCtrl, decoration: const InputDecoration(labelText: 'Creditor')),
+                                        TextField(
+                                          controller: creditorCtrl,
+                                          decoration: const InputDecoration(
+                                            labelText: 'Creditor',
+                                          ),
+                                        ),
                                         const SizedBox(height: 8),
-                                        TextField(controller: amountCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Initial amount')),
+                                        TextField(
+                                          controller: amountCtrl,
+                                          keyboardType:
+                                              const TextInputType.numberWithOptions(
+                                                decimal: true,
+                                              ),
+                                          decoration: const InputDecoration(
+                                            labelText: 'Initial amount',
+                                          ),
+                                        ),
                                         const SizedBox(height: 8),
-                                        TextField(controller: rateCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'APR %')),
+                                        TextField(
+                                          controller: rateCtrl,
+                                          keyboardType:
+                                              const TextInputType.numberWithOptions(
+                                                decimal: true,
+                                              ),
+                                          decoration: const InputDecoration(
+                                            labelText: 'APR %',
+                                          ),
+                                        ),
                                       ],
                                     ),
                                   ),
                                   actions: [
-                                    TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-                                    FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Create')),
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.pop(context, false),
+                                      child: const Text('Cancel'),
+                                    ),
+                                    FilledButton(
+                                      onPressed: () =>
+                                          Navigator.pop(context, true),
+                                      child: const Text('Create'),
+                                    ),
                                   ],
                                 ),
                               );
@@ -9098,13 +12047,21 @@ class _MoneyInsightsTabState extends State<_MoneyInsightsTab> {
                                   description: descriptionCtrl.text.trim(),
                                   debtor: widget.api.member,
                                   creditor: creditorCtrl.text.trim(),
-                                  initialAmount: double.tryParse(amountCtrl.text.trim()) ?? 0,
-                                  interestRate: double.tryParse(rateCtrl.text.trim()) ?? 0,
+                                  initialAmount:
+                                      double.tryParse(amountCtrl.text.trim()) ??
+                                      0,
+                                  interestRate:
+                                      double.tryParse(rateCtrl.text.trim()) ??
+                                      0,
                                 );
                                 await _refresh();
                               } catch (err) {
                                 if (!mounted) return;
-                                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Create debt failed: $err')));
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Create debt failed: $err'),
+                                  ),
+                                );
                               }
                             },
                             child: const Text('Add'),
@@ -9114,64 +12071,112 @@ class _MoneyInsightsTabState extends State<_MoneyInsightsTab> {
                       if (debtAccounts.isEmpty)
                         const Text('No debt accounts yet.')
                       else
-                        ...debtAccounts.take(8).map(
-                          (debtRow) => ListTile(
-                            dense: true,
-                            contentPadding: EdgeInsets.zero,
-                            title: Text('${debtRow['description'] ?? ''}'),
-                            subtitle: Text('Balance ${_currency(_toDouble(debtRow['current_balance']))} • APR ${_toDouble(debtRow['interest_rate']).toStringAsFixed(2)}%'),
-                            trailing: Wrap(
-                              spacing: 2,
-                              children: [
-                                TextButton(
-                                  onPressed: () async {
-                                    final amountCtrl = TextEditingController();
-                                    final should = await showDialog<bool>(
-                                      context: context,
-                                      builder: (context) => AlertDialog(
-                                        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-                                        title: const Text('Record Payment'),
-                                        content: TextField(
-                                          controller: amountCtrl,
-                                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                          decoration: const InputDecoration(labelText: 'Amount paid'),
-                                        ),
-                                        actions: [
-                                          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-                                          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
-                                        ],
-                                      ),
-                                    );
-                                    if (should != true) return;
-                                    try {
-                                      await widget.api.recordDebtPayment(
-                                        debtId: _toInt(debtRow['id']),
-                                        amountPaid: double.tryParse(amountCtrl.text.trim()) ?? 0,
-                                      );
-                                      await _refresh();
-                                    } catch (err) {
-                                      if (!mounted) return;
-                                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Payment failed: $err')));
-                                    }
-                                  },
-                                  child: const Text('Pay'),
+                        ...debtAccounts
+                            .take(8)
+                            .map(
+                              (debtRow) => ListTile(
+                                dense: true,
+                                contentPadding: EdgeInsets.zero,
+                                title: Text('${debtRow['description'] ?? ''}'),
+                                subtitle: Text(
+                                  'Balance ${_currency(_toDouble(debtRow['current_balance']))} • APR ${_toDouble(debtRow['interest_rate']).toStringAsFixed(2)}%',
                                 ),
-                                IconButton(
-                                  onPressed: () async {
-                                    try {
-                                      await widget.api.deleteDebt(_toInt(debtRow['id']));
-                                      await _refresh();
-                                    } catch (err) {
-                                      if (!mounted) return;
-                                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Delete debt failed: $err')));
-                                    }
-                                  },
-                                  icon: const Icon(Icons.delete_outline),
+                                trailing: Wrap(
+                                  spacing: 2,
+                                  children: [
+                                    TextButton(
+                                      onPressed: () async {
+                                        final amountCtrl =
+                                            TextEditingController();
+                                        final should = await showDialog<bool>(
+                                          context: context,
+                                          builder: (context) => AlertDialog(
+                                            insetPadding:
+                                                const EdgeInsets.symmetric(
+                                                  horizontal: 24,
+                                                  vertical: 24,
+                                                ),
+                                            title: const Text('Record Payment'),
+                                            content: TextField(
+                                              controller: amountCtrl,
+                                              keyboardType:
+                                                  const TextInputType.numberWithOptions(
+                                                    decimal: true,
+                                                  ),
+                                              decoration: const InputDecoration(
+                                                labelText: 'Amount paid',
+                                              ),
+                                            ),
+                                            actions: [
+                                              TextButton(
+                                                onPressed: () => Navigator.pop(
+                                                  context,
+                                                  false,
+                                                ),
+                                                child: const Text('Cancel'),
+                                              ),
+                                              FilledButton(
+                                                onPressed: () => Navigator.pop(
+                                                  context,
+                                                  true,
+                                                ),
+                                                child: const Text('Save'),
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                        if (should != true) return;
+                                        try {
+                                          await widget.api.recordDebtPayment(
+                                            debtId: _toInt(debtRow['id']),
+                                            amountPaid:
+                                                double.tryParse(
+                                                  amountCtrl.text.trim(),
+                                                ) ??
+                                                0,
+                                          );
+                                          await _refresh();
+                                        } catch (err) {
+                                          if (!mounted) return;
+                                          ScaffoldMessenger.of(
+                                            context,
+                                          ).showSnackBar(
+                                            SnackBar(
+                                              content: Text(
+                                                'Payment failed: $err',
+                                              ),
+                                            ),
+                                          );
+                                        }
+                                      },
+                                      child: const Text('Pay'),
+                                    ),
+                                    IconButton(
+                                      onPressed: () async {
+                                        try {
+                                          await widget.api.deleteDebt(
+                                            _toInt(debtRow['id']),
+                                          );
+                                          await _refresh();
+                                        } catch (err) {
+                                          if (!mounted) return;
+                                          ScaffoldMessenger.of(
+                                            context,
+                                          ).showSnackBar(
+                                            SnackBar(
+                                              content: Text(
+                                                'Delete debt failed: $err',
+                                              ),
+                                            ),
+                                          );
+                                        }
+                                      },
+                                      icon: const Icon(Icons.delete_outline),
+                                    ),
+                                  ],
                                 ),
-                              ],
+                              ),
                             ),
-                          ),
-                        ),
                     ],
                   ),
                 ),
@@ -9185,7 +12190,12 @@ class _MoneyInsightsTabState extends State<_MoneyInsightsTab> {
                     children: [
                       Row(
                         children: [
-                          const Expanded(child: Text('Financial Goals', style: TextStyle(fontWeight: FontWeight.w700))),
+                          const Expanded(
+                            child: Text(
+                              'Financial Goals',
+                              style: TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                          ),
                           TextButton(
                             onPressed: () async {
                               final nameCtrl = TextEditingController();
@@ -9193,31 +12203,65 @@ class _MoneyInsightsTabState extends State<_MoneyInsightsTab> {
                               final should = await showDialog<bool>(
                                 context: context,
                                 builder: (context) => AlertDialog(
-                                  insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+                                  insetPadding: const EdgeInsets.symmetric(
+                                    horizontal: 24,
+                                    vertical: 24,
+                                  ),
                                   title: const Text('Create Goal'),
                                   content: SingleChildScrollView(
                                     child: Column(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Goal name')),
+                                        TextField(
+                                          controller: nameCtrl,
+                                          decoration: const InputDecoration(
+                                            labelText: 'Goal name',
+                                          ),
+                                        ),
                                         const SizedBox(height: 8),
-                                        TextField(controller: amountCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Target amount')),
+                                        TextField(
+                                          controller: amountCtrl,
+                                          keyboardType:
+                                              const TextInputType.numberWithOptions(
+                                                decimal: true,
+                                              ),
+                                          decoration: const InputDecoration(
+                                            labelText: 'Target amount',
+                                          ),
+                                        ),
                                       ],
                                     ),
                                   ),
                                   actions: [
-                                    TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-                                    FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Create')),
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.pop(context, false),
+                                      child: const Text('Cancel'),
+                                    ),
+                                    FilledButton(
+                                      onPressed: () =>
+                                          Navigator.pop(context, true),
+                                      child: const Text('Create'),
+                                    ),
                                   ],
                                 ),
                               );
                               if (should != true) return;
                               try {
-                                await widget.api.createGoal(name: nameCtrl.text.trim(), targetAmount: double.tryParse(amountCtrl.text.trim()) ?? 0);
+                                await widget.api.createGoal(
+                                  name: nameCtrl.text.trim(),
+                                  targetAmount:
+                                      double.tryParse(amountCtrl.text.trim()) ??
+                                      0,
+                                );
                                 await _refresh();
                               } catch (err) {
                                 if (!mounted) return;
-                                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Create goal failed: $err')));
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Create goal failed: $err'),
+                                  ),
+                                );
                               }
                             },
                             child: const Text('Add'),
@@ -9227,44 +12271,80 @@ class _MoneyInsightsTabState extends State<_MoneyInsightsTab> {
                       if (goals.isEmpty)
                         const Text('No goals yet.')
                       else
-                        ...goals.take(8).map(
-                          (goalRow) => ListTile(
-                            dense: true,
-                            contentPadding: EdgeInsets.zero,
-                            title: Text('${goalRow['name'] ?? ''}'),
-                            subtitle: Text('Progress ${_currency(_toDouble(goalRow['current_amount']))} / ${_currency(_toDouble(goalRow['target_amount']))}'),
-                            trailing: TextButton(
-                              onPressed: () async {
-                                final amountCtrl = TextEditingController();
-                                final should = await showDialog<bool>(
-                                  context: context,
-                                  builder: (context) => AlertDialog(
-                                    insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-                                    title: const Text('Contribute Goal'),
-                                    content: TextField(
-                                      controller: amountCtrl,
-                                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                      decoration: const InputDecoration(labelText: 'Amount'),
-                                    ),
-                                    actions: [
-                                      TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-                                      FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
-                                    ],
-                                  ),
-                                );
-                                if (should != true) return;
-                                try {
-                                  await widget.api.contributeGoal(goalId: _toInt(goalRow['id']), amount: double.tryParse(amountCtrl.text.trim()) ?? 0);
-                                  await _refresh();
-                                } catch (err) {
-                                  if (!mounted) return;
-                                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Contribution failed: $err')));
-                                }
-                              },
-                              child: const Text('Add'),
+                        ...goals
+                            .take(8)
+                            .map(
+                              (goalRow) => ListTile(
+                                dense: true,
+                                contentPadding: EdgeInsets.zero,
+                                title: Text('${goalRow['name'] ?? ''}'),
+                                subtitle: Text(
+                                  'Progress ${_currency(_toDouble(goalRow['current_amount']))} / ${_currency(_toDouble(goalRow['target_amount']))}',
+                                ),
+                                trailing: TextButton(
+                                  onPressed: () async {
+                                    final amountCtrl = TextEditingController();
+                                    final should = await showDialog<bool>(
+                                      context: context,
+                                      builder: (context) => AlertDialog(
+                                        insetPadding:
+                                            const EdgeInsets.symmetric(
+                                              horizontal: 24,
+                                              vertical: 24,
+                                            ),
+                                        title: const Text('Contribute Goal'),
+                                        content: TextField(
+                                          controller: amountCtrl,
+                                          keyboardType:
+                                              const TextInputType.numberWithOptions(
+                                                decimal: true,
+                                              ),
+                                          decoration: const InputDecoration(
+                                            labelText: 'Amount',
+                                          ),
+                                        ),
+                                        actions: [
+                                          TextButton(
+                                            onPressed: () =>
+                                                Navigator.pop(context, false),
+                                            child: const Text('Cancel'),
+                                          ),
+                                          FilledButton(
+                                            onPressed: () =>
+                                                Navigator.pop(context, true),
+                                            child: const Text('Save'),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                    if (should != true) return;
+                                    try {
+                                      await widget.api.contributeGoal(
+                                        goalId: _toInt(goalRow['id']),
+                                        amount:
+                                            double.tryParse(
+                                              amountCtrl.text.trim(),
+                                            ) ??
+                                            0,
+                                      );
+                                      await _refresh();
+                                    } catch (err) {
+                                      if (!mounted) return;
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            'Contribution failed: $err',
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                  },
+                                  child: const Text('Add'),
+                                ),
+                              ),
                             ),
-                          ),
-                        ),
                     ],
                   ),
                 ),
@@ -9278,37 +12358,75 @@ class _MoneyInsightsTabState extends State<_MoneyInsightsTab> {
                     children: [
                       Row(
                         children: [
-                          const Expanded(child: Text('Shared Expenses', style: TextStyle(fontWeight: FontWeight.w700))),
+                          const Expanded(
+                            child: Text(
+                              'Shared Expenses',
+                              style: TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                          ),
                           TextButton(
                             onPressed: () async {
                               final descCtrl = TextEditingController();
-                              final catCtrl = TextEditingController(text: 'Household');
+                              final catCtrl = TextEditingController(
+                                text: 'Household',
+                              );
                               final totalCtrl = TextEditingController();
                               final should = await showDialog<bool>(
                                 context: context,
                                 builder: (context) => AlertDialog(
-                                  insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+                                  insetPadding: const EdgeInsets.symmetric(
+                                    horizontal: 24,
+                                    vertical: 24,
+                                  ),
                                   title: const Text('Create Shared Expense'),
                                   content: SingleChildScrollView(
                                     child: Column(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        TextField(controller: descCtrl, decoration: const InputDecoration(labelText: 'Description')),
+                                        TextField(
+                                          controller: descCtrl,
+                                          decoration: const InputDecoration(
+                                            labelText: 'Description',
+                                          ),
+                                        ),
                                         const SizedBox(height: 8),
-                                        TextField(controller: catCtrl, decoration: const InputDecoration(labelText: 'Category')),
+                                        TextField(
+                                          controller: catCtrl,
+                                          decoration: const InputDecoration(
+                                            labelText: 'Category',
+                                          ),
+                                        ),
                                         const SizedBox(height: 8),
-                                        TextField(controller: totalCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Total amount')),
+                                        TextField(
+                                          controller: totalCtrl,
+                                          keyboardType:
+                                              const TextInputType.numberWithOptions(
+                                                decimal: true,
+                                              ),
+                                          decoration: const InputDecoration(
+                                            labelText: 'Total amount',
+                                          ),
+                                        ),
                                       ],
                                     ),
                                   ),
                                   actions: [
-                                    TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-                                    FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Create')),
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.pop(context, false),
+                                      child: const Text('Cancel'),
+                                    ),
+                                    FilledButton(
+                                      onPressed: () =>
+                                          Navigator.pop(context, true),
+                                      child: const Text('Create'),
+                                    ),
                                   ],
                                 ),
                               );
                               if (should != true) return;
-                              final total = double.tryParse(totalCtrl.text.trim()) ?? 0;
+                              final total =
+                                  double.tryParse(totalCtrl.text.trim()) ?? 0;
                               if (total <= 0) return;
                               try {
                                 await widget.api.createSharedExpense(
@@ -9318,13 +12436,22 @@ class _MoneyInsightsTabState extends State<_MoneyInsightsTab> {
                                   date: _month,
                                   category: catCtrl.text.trim(),
                                   participants: [
-                                    {'name': widget.api.member, 'amount': total},
+                                    {
+                                      'name': widget.api.member,
+                                      'amount': total,
+                                    },
                                   ],
                                 );
                                 await _refresh();
                               } catch (err) {
                                 if (!mounted) return;
-                                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Create shared expense failed: $err')));
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      'Create shared expense failed: $err',
+                                    ),
+                                  ),
+                                );
                               }
                             },
                             child: const Text('Add'),
@@ -9334,61 +12461,111 @@ class _MoneyInsightsTabState extends State<_MoneyInsightsTab> {
                       if (sharedExpenses.isEmpty)
                         const Text('No shared expenses this period.')
                       else
-                        ...sharedExpenses.take(8).map(
-                          (row) => ListTile(
-                            dense: true,
-                            contentPadding: EdgeInsets.zero,
-                            title: Text('${row['description'] ?? ''}'),
-                            subtitle: Text('${row['category'] ?? ''} • ${row['date'] ?? ''}'),
-                            trailing: Wrap(
-                              spacing: 2,
-                              children: [
-                                Text(_currency(_toDouble(row['total_amount']))),
-                                IconButton(
-                                  onPressed: () async {
-                                    final picked = await FilePicker.platform.pickFiles(withData: true, allowMultiple: false);
-                                    if (picked == null || picked.files.isEmpty) return;
-                                    try {
-                                      await widget.api.uploadSharedExpenseReceipt(_toInt(row['id']), picked.files.first);
-                                      await _refresh();
-                                    } catch (err) {
-                                      if (!mounted) return;
-                                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Upload receipt failed: $err')));
-                                    }
-                                  },
-                                  icon: const Icon(Icons.receipt_long),
-                                  tooltip: 'Attach receipt',
+                        ...sharedExpenses
+                            .take(8)
+                            .map(
+                              (row) => ListTile(
+                                dense: true,
+                                contentPadding: EdgeInsets.zero,
+                                title: Text('${row['description'] ?? ''}'),
+                                subtitle: Text(
+                                  '${row['category'] ?? ''} • ${row['date'] ?? ''}',
                                 ),
-                                IconButton(
-                                  onPressed: () async {
-                                    try {
-                                      await widget.api.setSharedExpenseSettled(_toInt(row['id']), !(row['settled'] == true));
-                                      await _refresh();
-                                    } catch (err) {
-                                      if (!mounted) return;
-                                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Settle failed: $err')));
-                                    }
-                                  },
-                                  icon: Icon(row['settled'] == true ? Icons.check_circle : Icons.pending_actions),
-                                  tooltip: 'Toggle settled',
+                                trailing: Wrap(
+                                  spacing: 2,
+                                  children: [
+                                    Text(
+                                      _currency(_toDouble(row['total_amount'])),
+                                    ),
+                                    IconButton(
+                                      onPressed: () async {
+                                        final picked = await FilePicker.platform
+                                            .pickFiles(
+                                              withData: true,
+                                              allowMultiple: false,
+                                            );
+                                        if (picked == null ||
+                                            picked.files.isEmpty)
+                                          return;
+                                        try {
+                                          await widget.api
+                                              .uploadSharedExpenseReceipt(
+                                                _toInt(row['id']),
+                                                picked.files.first,
+                                              );
+                                          await _refresh();
+                                        } catch (err) {
+                                          if (!mounted) return;
+                                          ScaffoldMessenger.of(
+                                            context,
+                                          ).showSnackBar(
+                                            SnackBar(
+                                              content: Text(
+                                                'Upload receipt failed: $err',
+                                              ),
+                                            ),
+                                          );
+                                        }
+                                      },
+                                      icon: const Icon(Icons.receipt_long),
+                                      tooltip: 'Attach receipt',
+                                    ),
+                                    IconButton(
+                                      onPressed: () async {
+                                        try {
+                                          await widget.api
+                                              .setSharedExpenseSettled(
+                                                _toInt(row['id']),
+                                                !(row['settled'] == true),
+                                              );
+                                          await _refresh();
+                                        } catch (err) {
+                                          if (!mounted) return;
+                                          ScaffoldMessenger.of(
+                                            context,
+                                          ).showSnackBar(
+                                            SnackBar(
+                                              content: Text(
+                                                'Settle failed: $err',
+                                              ),
+                                            ),
+                                          );
+                                        }
+                                      },
+                                      icon: Icon(
+                                        row['settled'] == true
+                                            ? Icons.check_circle
+                                            : Icons.pending_actions,
+                                      ),
+                                      tooltip: 'Toggle settled',
+                                    ),
+                                    IconButton(
+                                      onPressed: () async {
+                                        try {
+                                          await widget.api.deleteSharedExpense(
+                                            _toInt(row['id']),
+                                          );
+                                          await _refresh();
+                                        } catch (err) {
+                                          if (!mounted) return;
+                                          ScaffoldMessenger.of(
+                                            context,
+                                          ).showSnackBar(
+                                            SnackBar(
+                                              content: Text(
+                                                'Delete shared expense failed: $err',
+                                              ),
+                                            ),
+                                          );
+                                        }
+                                      },
+                                      icon: const Icon(Icons.delete_outline),
+                                      tooltip: 'Delete',
+                                    ),
+                                  ],
                                 ),
-                                IconButton(
-                                  onPressed: () async {
-                                    try {
-                                      await widget.api.deleteSharedExpense(_toInt(row['id']));
-                                      await _refresh();
-                                    } catch (err) {
-                                      if (!mounted) return;
-                                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Delete shared expense failed: $err')));
-                                    }
-                                  },
-                                  icon: const Icon(Icons.delete_outline),
-                                  tooltip: 'Delete',
-                                ),
-                              ],
+                              ),
                             ),
-                          ),
-                        ),
                     ],
                   ),
                 ),
@@ -9402,65 +12579,94 @@ class _MoneyInsightsTabState extends State<_MoneyInsightsTab> {
                     children: [
                       Row(
                         children: [
-                          const Expanded(child: Text('Plaid & Accounts', style: TextStyle(fontWeight: FontWeight.w700))),
+                          const Expanded(
+                            child: Text(
+                              'Plaid & Accounts',
+                              style: TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                          ),
                           TextButton(
                             onPressed: () async {
-                              try {
-                                final link = await widget.api.createPlaidLinkToken();
-                                if (!mounted) return;
-                                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Link token ready: ${(link['link_token'] ?? '').toString().substring(0, 12)}...')));
-                              } catch (err) {
-                                if (!mounted) return;
-                                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Plaid link token failed: $err')));
-                              }
+                              await _openPlaidLinkInWebView();
                             },
-                            child: const Text('Create Link Token'),
+                            child: const Text('Connect Bank'),
                           ),
                         ],
                       ),
                       if (plaidAccounts.isEmpty)
                         const Text('No connected Plaid accounts.')
                       else
-                        ...plaidAccounts.take(8).map(
-                          (accountRow) => ListTile(
-                            dense: true,
-                            contentPadding: EdgeInsets.zero,
-                            title: Text('${accountRow['account_name'] ?? ''}'),
-                            subtitle: Text('${accountRow['account_type'] ?? ''} • ${accountRow['user'] ?? ''}'),
-                            trailing: Wrap(
-                              spacing: 2,
-                              children: [
-                                Text(_currency(_toDouble(accountRow['balance']))),
-                                IconButton(
-                                  onPressed: () async {
-                                    try {
-                                      await widget.api.syncPlaidAccount(_toInt(accountRow['id']));
-                                      await _refresh();
-                                    } catch (err) {
-                                      if (!mounted) return;
-                                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Sync failed: $err')));
-                                    }
-                                  },
-                                  icon: const Icon(Icons.sync),
-                                  tooltip: 'Sync',
+                        ...plaidAccounts
+                            .take(8)
+                            .map(
+                              (accountRow) => ListTile(
+                                dense: true,
+                                contentPadding: EdgeInsets.zero,
+                                title: Text(
+                                  '${accountRow['account_name'] ?? ''}',
                                 ),
-                                IconButton(
-                                  onPressed: () async {
-                                    try {
-                                      await widget.api.disconnectPlaidAccount(_toInt(accountRow['id']));
-                                      await _refresh();
-                                    } catch (err) {
-                                      if (!mounted) return;
-                                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Disconnect failed: $err')));
-                                    }
-                                  },
-                                  icon: const Icon(Icons.link_off),
-                                  tooltip: 'Disconnect',
+                                subtitle: Text(
+                                  '${accountRow['account_type'] ?? ''} • ${accountRow['user'] ?? ''}',
                                 ),
-                              ],
+                                trailing: Wrap(
+                                  spacing: 2,
+                                  children: [
+                                    Text(
+                                      _currency(
+                                        _toDouble(accountRow['balance']),
+                                      ),
+                                    ),
+                                    IconButton(
+                                      onPressed: () async {
+                                        try {
+                                          await widget.api.syncPlaidAccount(
+                                            _toInt(accountRow['id']),
+                                          );
+                                          await _refresh();
+                                        } catch (err) {
+                                          if (!mounted) return;
+                                          ScaffoldMessenger.of(
+                                            context,
+                                          ).showSnackBar(
+                                            SnackBar(
+                                              content: Text(
+                                                'Sync failed: $err',
+                                              ),
+                                            ),
+                                          );
+                                        }
+                                      },
+                                      icon: const Icon(Icons.sync),
+                                      tooltip: 'Sync',
+                                    ),
+                                    IconButton(
+                                      onPressed: () async {
+                                        try {
+                                          await widget.api
+                                              .disconnectPlaidAccount(
+                                                _toInt(accountRow['id']),
+                                              );
+                                          await _refresh();
+                                        } catch (err) {
+                                          if (!mounted) return;
+                                          ScaffoldMessenger.of(
+                                            context,
+                                          ).showSnackBar(
+                                            SnackBar(
+                                              content: Text(
+                                                'Disconnect failed: $err',
+                                              ),
+                                            ),
+                                          );
+                                        }
+                                      },
+                                      icon: const Icon(Icons.link_off),
+                                      tooltip: 'Disconnect',
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ),
-                          ),
-                        ),
                     ],
                   ),
                 ),
@@ -9472,11 +12678,18 @@ class _MoneyInsightsTabState extends State<_MoneyInsightsTab> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Analytics & Income Confirmations', style: TextStyle(fontWeight: FontWeight.w700)),
+                      const Text(
+                        'Analytics & Income Confirmations',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
                       const SizedBox(height: 8),
                       Text('Period: ${analytics['period'] ?? ''}'),
-                      Text('Debts: ${_currency(_toDouble((analytics['debts'] as Map<String, dynamic>? ?? {})['total_balance']))}'),
-                      Text('Goals progress: ${_toDouble((analytics['goals'] as Map<String, dynamic>? ?? {})['progress']).toStringAsFixed(1)}%'),
+                      Text(
+                        'Debts: ${_currency(_toDouble((analytics['debts'] as Map<String, dynamic>? ?? {})['total_balance']))}',
+                      ),
+                      Text(
+                        'Goals progress: ${_toDouble((analytics['goals'] as Map<String, dynamic>? ?? {})['progress']).toStringAsFixed(1)}%',
+                      ),
                       const SizedBox(height: 8),
                       if (pendingIncomeConfirmations.isEmpty)
                         const Text('No pending income confirmations.')
@@ -9485,16 +12698,26 @@ class _MoneyInsightsTabState extends State<_MoneyInsightsTab> {
                           (incomeRow) => ListTile(
                             dense: true,
                             contentPadding: EdgeInsets.zero,
-                            title: Text('${incomeRow['title'] ?? ''} • ${_currency(_toDouble(incomeRow['amount']))}'),
-                            subtitle: Text('${incomeRow['date'] ?? ''} • ${incomeRow['recipient'] ?? ''}'),
+                            title: Text(
+                              '${incomeRow['title'] ?? ''} • ${_currency(_toDouble(incomeRow['amount']))}',
+                            ),
+                            subtitle: Text(
+                              '${incomeRow['date'] ?? ''} • ${incomeRow['recipient'] ?? ''}',
+                            ),
                             trailing: TextButton(
                               onPressed: () async {
                                 try {
-                                  await widget.api.confirmIncomeEntry(incomeId: _toInt(incomeRow['id']));
+                                  await widget.api.confirmIncomeEntry(
+                                    incomeId: _toInt(incomeRow['id']),
+                                  );
                                   await _refresh();
                                 } catch (err) {
                                   if (!mounted) return;
-                                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Confirm failed: $err')));
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text('Confirm failed: $err'),
+                                    ),
+                                  );
                                 }
                               },
                               child: const Text('Confirm'),
@@ -9550,7 +12773,9 @@ class MealPlannerPage extends StatefulWidget {
 
 class _MealPlannerPageState extends State<MealPlannerPage> {
   DateTime _month = DateTime(DateTime.now().year, DateTime.now().month, 1);
-  DateTime _weekStart = DateTime.now().subtract(Duration(days: DateTime.now().weekday - 1));
+  DateTime _weekStart = DateTime.now().subtract(
+    Duration(days: DateTime.now().weekday - 1),
+  );
   bool _weeklyView = true;
   final TextEditingController _searchCtrl = TextEditingController();
   String _searchQuery = '';
@@ -9582,7 +12807,9 @@ class _MealPlannerPageState extends State<MealPlannerPage> {
   }
 
   DateTime _rangeStart() {
-    return _weeklyView ? _dateOnly(_weekStart) : DateTime(_month.year, _month.month, 1);
+    return _weeklyView
+        ? _dateOnly(_weekStart)
+        : DateTime(_month.year, _month.month, 1);
   }
 
   DateTime _rangeEnd() {
@@ -9603,7 +12830,9 @@ class _MealPlannerPageState extends State<MealPlannerPage> {
     final end = _rangeEnd();
     final monthStarts = _monthStartsInRange(start, end);
 
-    final entryResponses = await Future.wait(monthStarts.map(widget.api.fetchMealEntries));
+    final entryResponses = await Future.wait(
+      monthStarts.map(widget.api.fetchMealEntries),
+    );
     final byId = <int, MealPlannerEntry>{};
     for (final rows in entryResponses) {
       for (final entry in rows) {
@@ -9620,10 +12849,7 @@ class _MealPlannerPageState extends State<MealPlannerPage> {
       });
 
     final library = await widget.api.fetchMealLibrary();
-    return _MealData(
-      entries: entries,
-      library: library,
-    );
+    return _MealData(entries: entries, library: library);
   }
 
   Future<void> _refresh() async {
@@ -9638,12 +12864,16 @@ class _MealPlannerPageState extends State<MealPlannerPage> {
   }) async {
     if (entry.isLocked) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Unlock this meal before moving it.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unlock this meal before moving it.')),
+      );
       return;
     }
     if (!entry.canEdit) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Only editable meals can be moved.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Only editable meals can be moved.')),
+      );
       return;
     }
     final sameDay = _fmtDate(entry.date) == _fmtDate(targetDay);
@@ -9662,12 +12892,18 @@ class _MealPlannerPageState extends State<MealPlannerPage> {
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Moved to ${_mealTypeLabel(targetMealType)} on ${_fmtDate(targetDay)}')),
+        SnackBar(
+          content: Text(
+            'Moved to ${_mealTypeLabel(targetMealType)} on ${_fmtDate(targetDay)}',
+          ),
+        ),
       );
       await _refresh();
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Move failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Move failed: $err')));
     }
   }
 
@@ -9689,12 +12925,18 @@ class _MealPlannerPageState extends State<MealPlannerPage> {
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Duplicated to ${_mealTypeLabel(targetMealType)} on ${_fmtDate(targetDay)}')),
+        SnackBar(
+          content: Text(
+            'Duplicated to ${_mealTypeLabel(targetMealType)} on ${_fmtDate(targetDay)}',
+          ),
+        ),
       );
       await _refresh();
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Duplicate failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Duplicate failed: $err')));
     }
   }
 
@@ -9712,7 +12954,11 @@ class _MealPlannerPageState extends State<MealPlannerPage> {
       ),
     );
     if (picked == null) return;
-    await _duplicateMealEntry(entry: entry, targetDay: picked.day, targetMealType: picked.mealType);
+    await _duplicateMealEntry(
+      entry: entry,
+      targetDay: picked.day,
+      targetMealType: picked.mealType,
+    );
   }
 
   String _libraryMealType(Map<String, dynamic> row) {
@@ -9754,12 +13000,18 @@ class _MealPlannerPageState extends State<MealPlannerPage> {
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Added "$title" to today (${_mealTypeLabel(mealType)})')),
+        SnackBar(
+          content: Text(
+            'Added "$title" to today (${_mealTypeLabel(mealType)})',
+          ),
+        ),
       );
       await _refresh();
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Quick add failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Quick add failed: $err')));
     }
   }
 
@@ -9789,12 +13041,18 @@ class _MealPlannerPageState extends State<MealPlannerPage> {
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Added "$title" to ${_mealTypeLabel(picked.mealType)} on ${_fmtDate(picked.day)}')),
+        SnackBar(
+          content: Text(
+            'Added "$title" to ${_mealTypeLabel(picked.mealType)} on ${_fmtDate(picked.day)}',
+          ),
+        ),
       );
       await _refresh();
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Add from library failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Add from library failed: $err')));
     }
   }
 
@@ -9841,8 +13099,14 @@ class _MealPlannerPageState extends State<MealPlannerPage> {
           decoration: const InputDecoration(labelText: 'PIN'),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, pinCtrl.text.trim()), child: const Text('Unlock')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, pinCtrl.text.trim()),
+            child: const Text('Unlock'),
+          ),
         ],
       ),
     );
@@ -9851,11 +13115,15 @@ class _MealPlannerPageState extends State<MealPlannerPage> {
     try {
       await widget.api.unlockMealEntry(entryId: entry.id, pin: pin);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Entry unlocked')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Entry unlocked')));
       await _refresh();
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Unlock failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Unlock failed: $err')));
     }
   }
 
@@ -9870,7 +13138,10 @@ class _MealPlannerPageState extends State<MealPlannerPage> {
             return const Center(child: CircularProgressIndicator());
           }
           if (snapshot.hasError) {
-            return ErrorPanel(error: snapshot.error.toString(), onRetry: _refresh);
+            return ErrorPanel(
+              error: snapshot.error.toString(),
+              onRetry: _refresh,
+            );
           }
 
           final data = snapshot.data!;
@@ -9896,7 +13167,10 @@ class _MealPlannerPageState extends State<MealPlannerPage> {
             grouped.putIfAbsent(key, () => []).add(entry);
           }
           final days = _weeklyView
-              ? List<DateTime>.generate(7, (index) => _dateOnly(_weekStart).add(Duration(days: index)))
+              ? List<DateTime>.generate(
+                  7,
+                  (index) => _dateOnly(_weekStart).add(Duration(days: index)),
+                )
               : _daysInMonth(_month);
 
           return ListView(
@@ -9911,10 +13185,20 @@ class _MealPlannerPageState extends State<MealPlannerPage> {
                         onPressed: () {
                           setState(() {
                             if (_weeklyView) {
-                              _weekStart = _dateOnly(_weekStart).subtract(const Duration(days: 7));
-                              _month = DateTime(_weekStart.year, _weekStart.month, 1);
+                              _weekStart = _dateOnly(
+                                _weekStart,
+                              ).subtract(const Duration(days: 7));
+                              _month = DateTime(
+                                _weekStart.year,
+                                _weekStart.month,
+                                1,
+                              );
                             } else {
-                              _month = DateTime(_month.year, _month.month - 1, 1);
+                              _month = DateTime(
+                                _month.year,
+                                _month.month - 1,
+                                1,
+                              );
                             }
                             _future = _load();
                           });
@@ -9924,8 +13208,13 @@ class _MealPlannerPageState extends State<MealPlannerPage> {
                       Expanded(
                         child: Center(
                           child: Text(
-                            _weeklyView ? _weeklyRangeLabel(_weekStart) : _monthLabel(_month),
-                            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 17),
+                            _weeklyView
+                                ? _weeklyRangeLabel(_weekStart)
+                                : _monthLabel(_month),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 17,
+                            ),
                           ),
                         ),
                       ),
@@ -9933,10 +13222,20 @@ class _MealPlannerPageState extends State<MealPlannerPage> {
                         onPressed: () {
                           setState(() {
                             if (_weeklyView) {
-                              _weekStart = _dateOnly(_weekStart).add(const Duration(days: 7));
-                              _month = DateTime(_weekStart.year, _weekStart.month, 1);
+                              _weekStart = _dateOnly(
+                                _weekStart,
+                              ).add(const Duration(days: 7));
+                              _month = DateTime(
+                                _weekStart.year,
+                                _weekStart.month,
+                                1,
+                              );
                             } else {
-                              _month = DateTime(_month.year, _month.month + 1, 1);
+                              _month = DateTime(
+                                _month.year,
+                                _month.month + 1,
+                                1,
+                              );
                             }
                             _future = _load();
                           });
@@ -10002,7 +13301,8 @@ class _MealPlannerPageState extends State<MealPlannerPage> {
                                   icon: const Icon(Icons.close),
                                 ),
                         ),
-                        onChanged: (value) => setState(() => _searchQuery = value),
+                        onChanged: (value) =>
+                            setState(() => _searchQuery = value),
                       ),
                     ],
                   ),
@@ -10027,7 +13327,11 @@ class _MealPlannerPageState extends State<MealPlannerPage> {
                   days: days,
                   grouped: grouped,
                   onAdd: (day, mealType) => _openAddToSlot(day, mealType),
-                  onAcceptMove: (entry, day, mealType) => _moveMealEntry(entry: entry, targetDay: day, targetMealType: mealType),
+                  onAcceptMove: (entry, day, mealType) => _moveMealEntry(
+                    entry: entry,
+                    targetDay: day,
+                    targetMealType: mealType,
+                  ),
                   onUnlock: _unlock,
                   onEdit: (entry) => _openEditor(source: entry),
                   onDuplicate: _openDuplicateSheet,
@@ -10035,19 +13339,27 @@ class _MealPlannerPageState extends State<MealPlannerPage> {
               else
                 ...days.map((day) {
                   final key = _fmtDate(day);
-                  final entries = (grouped[key] ?? <MealPlannerEntry>[])..sort((a, b) => a.mealType.compareTo(b.mealType));
+                  final entries = (grouped[key] ?? <MealPlannerEntry>[])
+                    ..sort((a, b) => a.mealType.compareTo(b.mealType));
                   final slotMap = <String, List<MealPlannerEntry>>{
-                    for (final type in _mealTypes) type: entries.where((entry) => entry.mealType == type).toList(),
+                    for (final type in _mealTypes)
+                      type: entries
+                          .where((entry) => entry.mealType == type)
+                          .toList(),
                   };
                   return Card(
                     margin: const EdgeInsets.only(bottom: 10),
                     child: ExpansionTile(
-                      initiallyExpanded: _fmtDate(day) == _fmtDate(DateTime.now()),
+                      initiallyExpanded:
+                          _fmtDate(day) == _fmtDate(DateTime.now()),
                       title: Text('${_weekdayLabel(day)} • ${_fmtDate(day)}'),
-                      subtitle: Text('${entries.length} meal${entries.length == 1 ? '' : 's'} planned'),
+                      subtitle: Text(
+                        '${entries.length} meal${entries.length == 1 ? '' : 's'} planned',
+                      ),
                       childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
                       children: _mealTypes.map((mealType) {
-                        final slotEntries = slotMap[mealType] ?? const <MealPlannerEntry>[];
+                        final slotEntries =
+                            slotMap[mealType] ?? const <MealPlannerEntry>[];
                         return Padding(
                           padding: const EdgeInsets.only(top: 8),
                           child: _MealSlotCard(
@@ -10055,7 +13367,11 @@ class _MealPlannerPageState extends State<MealPlannerPage> {
                             mealType: mealType,
                             entries: slotEntries,
                             onAdd: () => _openAddToSlot(day, mealType),
-                            onAcceptMove: (entry) => _moveMealEntry(entry: entry, targetDay: day, targetMealType: mealType),
+                            onAcceptMove: (entry) => _moveMealEntry(
+                              entry: entry,
+                              targetDay: day,
+                              targetMealType: mealType,
+                            ),
                             onUnlock: _unlock,
                             onEdit: (entry) => _openEditor(source: entry),
                             onDuplicate: _openDuplicateSheet,
@@ -10072,27 +13388,36 @@ class _MealPlannerPageState extends State<MealPlannerPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Meal library', style: TextStyle(fontWeight: FontWeight.w700)),
+                      const Text(
+                        'Meal library',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
                       const SizedBox(height: 8),
-                      if (data.library.isEmpty) const Text('No library items yet.'),
-                      ...data.library.map((row) => ListTile(
-                            dense: true,
-                            contentPadding: EdgeInsets.zero,
-                            title: Text('${row['title'] ?? ''}'),
-                            subtitle: Text('${row['meal_type'] ?? ''}${row['last_used_date'] != null ? ' • ${row['last_used_date']}' : ''}'),
-                            trailing: Wrap(
-                              spacing: 4,
-                              children: [
-                                IconButton(
-                                  tooltip: 'Add to today',
-                                  onPressed: () => _addFromMealLibraryToToday(row),
-                                  icon: const Icon(Icons.today_outlined),
-                                ),
-                                const Icon(Icons.add_circle_outline),
-                              ],
-                            ),
-                            onTap: () => _addFromMealLibrary(row),
-                          )),
+                      if (data.library.isEmpty)
+                        const Text('No library items yet.'),
+                      ...data.library.map(
+                        (row) => ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          title: Text('${row['title'] ?? ''}'),
+                          subtitle: Text(
+                            '${row['meal_type'] ?? ''}${row['last_used_date'] != null ? ' • ${row['last_used_date']}' : ''}',
+                          ),
+                          trailing: Wrap(
+                            spacing: 4,
+                            children: [
+                              IconButton(
+                                tooltip: 'Add to today',
+                                onPressed: () =>
+                                    _addFromMealLibraryToToday(row),
+                                icon: const Icon(Icons.today_outlined),
+                              ),
+                              const Icon(Icons.add_circle_outline),
+                            ],
+                          ),
+                          onTap: () => _addFromMealLibrary(row),
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -10155,7 +13480,13 @@ class _MealTargetSheetState extends State<_MealTargetSheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(widget.title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+              Text(
+                widget.title,
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
               const SizedBox(height: 12),
               OutlinedButton.icon(
                 onPressed: () async {
@@ -10175,13 +13506,21 @@ class _MealTargetSheetState extends State<_MealTargetSheet> {
                 initialValue: _mealType,
                 decoration: const InputDecoration(labelText: 'Meal slot'),
                 items: _mealTypes
-                    .map((type) => DropdownMenuItem(value: type, child: Text(_mealTypeLabel(type))))
+                    .map(
+                      (type) => DropdownMenuItem(
+                        value: type,
+                        child: Text(_mealTypeLabel(type)),
+                      ),
+                    )
                     .toList(),
-                onChanged: (value) => setState(() => _mealType = value ?? _mealType),
+                onChanged: (value) =>
+                    setState(() => _mealType = value ?? _mealType),
               ),
               const SizedBox(height: 14),
               FilledButton.icon(
-                onPressed: () => Navigator.of(context).pop(_MealTarget(day: _day, mealType: _mealType)),
+                onPressed: () => Navigator.of(
+                  context,
+                ).pop(_MealTarget(day: _day, mealType: _mealType)),
                 icon: const Icon(Icons.copy_all_outlined),
                 label: Text(widget.actionLabel),
               ),
@@ -10207,7 +13546,12 @@ class _MealWeeklyLaneTable extends StatelessWidget {
   final List<DateTime> days;
   final Map<String, List<MealPlannerEntry>> grouped;
   final Future<void> Function(DateTime day, String mealType) onAdd;
-  final Future<void> Function(MealPlannerEntry entry, DateTime day, String mealType) onAcceptMove;
+  final Future<void> Function(
+    MealPlannerEntry entry,
+    DateTime day,
+    String mealType,
+  )
+  onAcceptMove;
   final Future<void> Function(MealPlannerEntry entry) onUnlock;
   final Future<void> Function(MealPlannerEntry entry) onEdit;
   final Future<void> Function(MealPlannerEntry entry) onDuplicate;
@@ -10225,7 +13569,8 @@ class _MealWeeklyLaneTable extends StatelessWidget {
             defaultVerticalAlignment: TableCellVerticalAlignment.top,
             columnWidths: {
               0: const FixedColumnWidth(130),
-              for (var i = 0; i < days.length; i++) i + 1: const FixedColumnWidth(cellWidth),
+              for (var i = 0; i < days.length; i++)
+                i + 1: const FixedColumnWidth(cellWidth),
             },
             border: TableBorder.all(color: const Color(0xFFE2E8F0)),
             children: [
@@ -10234,18 +13579,32 @@ class _MealWeeklyLaneTable extends StatelessWidget {
                 children: [
                   const Padding(
                     padding: EdgeInsets.all(10),
-                    child: Text('Meal Slot', style: TextStyle(fontWeight: FontWeight.w700)),
+                    child: Text(
+                      'Meal Slot',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
                   ),
-                  ...days.map((day) => Padding(
-                        padding: const EdgeInsets.all(10),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(_weekdayLabel(day), style: const TextStyle(fontWeight: FontWeight.w700)),
-                            Text(_fmtDate(day), style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
-                          ],
-                        ),
-                      )),
+                  ...days.map(
+                    (day) => Padding(
+                      padding: const EdgeInsets.all(10),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _weekdayLabel(day),
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          Text(
+                            _fmtDate(day),
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Color(0xFF64748B),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 ],
               ),
               ..._mealTypes.map((mealType) {
@@ -10253,17 +13612,24 @@ class _MealWeeklyLaneTable extends StatelessWidget {
                   children: [
                     Padding(
                       padding: const EdgeInsets.all(10),
-                      child: Text(_mealTypeLabel(mealType), style: const TextStyle(fontWeight: FontWeight.w700)),
+                      child: Text(
+                        _mealTypeLabel(mealType),
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
                     ),
                     ...days.map((day) {
-                      final dayEntries = grouped[_fmtDate(day)] ?? const <MealPlannerEntry>[];
-                      final slotEntries = dayEntries.where((entry) => entry.mealType == mealType).toList();
+                      final dayEntries =
+                          grouped[_fmtDate(day)] ?? const <MealPlannerEntry>[];
+                      final slotEntries = dayEntries
+                          .where((entry) => entry.mealType == mealType)
+                          .toList();
                       return _MealLaneCell(
                         day: day,
                         mealType: mealType,
                         entries: slotEntries,
                         onAdd: () => onAdd(day, mealType),
-                        onAcceptMove: (entry) => onAcceptMove(entry, day, mealType),
+                        onAcceptMove: (entry) =>
+                            onAcceptMove(entry, day, mealType),
                         onUnlock: onUnlock,
                         onEdit: onEdit,
                         onDuplicate: onDuplicate,
@@ -10331,7 +13697,10 @@ class _MealLaneCell extends StatelessWidget {
               if (entries.isEmpty)
                 const Padding(
                   padding: EdgeInsets.only(bottom: 6),
-                  child: Text('Drop here', style: TextStyle(fontSize: 12, color: Color(0xFF94A3B8))),
+                  child: Text(
+                    'Drop here',
+                    style: TextStyle(fontSize: 12, color: Color(0xFF94A3B8)),
+                  ),
                 ),
               ...entries.map(
                 (entry) => Padding(
@@ -10389,7 +13758,12 @@ class _MealSlotCard extends StatelessWidget {
           decoration: BoxDecoration(
             color: isActive ? const Color(0xFFE0E7FF) : const Color(0xFFF8FAFC),
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: isActive ? const Color(0xFF6366F1) : const Color(0xFFE2E8F0), width: isActive ? 1.5 : 1),
+            border: Border.all(
+              color: isActive
+                  ? const Color(0xFF6366F1)
+                  : const Color(0xFFE2E8F0),
+              width: isActive ? 1.5 : 1,
+            ),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -10402,13 +13776,20 @@ class _MealSlotCard extends StatelessWidget {
                       style: const TextStyle(fontWeight: FontWeight.w700),
                     ),
                   ),
-                  TextButton.icon(onPressed: onAdd, icon: const Icon(Icons.add, size: 16), label: const Text('Add')),
+                  TextButton.icon(
+                    onPressed: onAdd,
+                    icon: const Icon(Icons.add, size: 16),
+                    label: const Text('Add'),
+                  ),
                 ],
               ),
               if (entries.isEmpty)
                 const Padding(
                   padding: EdgeInsets.only(top: 2),
-                  child: Text('Drop a meal here or add a new one.', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                  child: Text(
+                    'Drop a meal here or add a new one.',
+                    style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                  ),
                 ),
               ...entries.map(
                 (entry) => Padding(
@@ -10472,17 +13853,27 @@ class _MealEntryDragCard extends StatelessWidget {
           ),
           child: Row(
             children: [
-              const Icon(Icons.drag_indicator, size: 18, color: Color(0xFF94A3B8)),
+              const Icon(
+                Icons.drag_indicator,
+                size: 18,
+                color: Color(0xFF94A3B8),
+              ),
               const SizedBox(width: 8),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(entry.title, style: const TextStyle(fontWeight: FontWeight.w700)),
+                    Text(
+                      entry.title,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
                     const SizedBox(height: 2),
                     Text(
                       '${entry.audience} • ${entry.visibility}${entry.requirePin ? ' • PIN' : ''}',
-                      style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF64748B),
+                      ),
                     ),
                   ],
                 ),
@@ -10490,8 +13881,17 @@ class _MealEntryDragCard extends StatelessWidget {
               if (entry.isLocked)
                 TextButton(onPressed: onUnlock, child: const Text('Unlock'))
               else ...[
-                IconButton(onPressed: onDuplicate, icon: const Icon(Icons.copy_outlined), tooltip: 'Duplicate'),
-                if (onEdit != null) IconButton(onPressed: onEdit, icon: const Icon(Icons.edit_outlined), tooltip: 'Edit'),
+                IconButton(
+                  onPressed: onDuplicate,
+                  icon: const Icon(Icons.copy_outlined),
+                  tooltip: 'Duplicate',
+                ),
+                if (onEdit != null)
+                  IconButton(
+                    onPressed: onEdit,
+                    icon: const Icon(Icons.edit_outlined),
+                    tooltip: 'Edit',
+                  ),
               ],
             ],
           ),
@@ -10505,7 +13905,10 @@ class _MealEntryDragCard extends StatelessWidget {
 
     return LongPressDraggable<MealPlannerEntry>(
       data: entry,
-      feedback: SizedBox(width: 240, child: Opacity(opacity: 0.92, child: card)),
+      feedback: SizedBox(
+        width: 240,
+        child: Opacity(opacity: 0.92, child: card),
+      ),
       childWhenDragging: Opacity(opacity: 0.45, child: card),
       child: card,
     );
@@ -10536,16 +13939,36 @@ class _MealDetailsSheet extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  Expanded(child: Text(entry.title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 18))),
-                  IconButton(onPressed: () => Navigator.of(context).pop(), icon: const Icon(Icons.close)),
+                  Expanded(
+                    child: Text(
+                      entry.title,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 18,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close),
+                  ),
                 ],
               ),
-              Text('${entry.mealType.replaceAll('_', ' ')} • ${_fmtDate(entry.date)}'),
+              Text(
+                '${entry.mealType.replaceAll('_', ' ')} • ${_fmtDate(entry.date)}',
+              ),
               const SizedBox(height: 6),
-              Text('Audience: ${entry.audience} • Visibility: ${entry.visibility}'),
-              if (entry.allowedMembers.isNotEmpty) Text('Allowed: ${entry.allowedMembers.join(', ')}'),
+              Text(
+                'Audience: ${entry.audience} • Visibility: ${entry.visibility}',
+              ),
+              if (entry.allowedMembers.isNotEmpty)
+                Text('Allowed: ${entry.allowedMembers.join(', ')}'),
               const SizedBox(height: 8),
-              Text(entry.description.isEmpty ? 'No description.' : entry.description),
+              Text(
+                entry.description.isEmpty
+                    ? 'No description.'
+                    : entry.description,
+              ),
               const SizedBox(height: 12),
               FilledButton.icon(
                 onPressed: () {
@@ -10576,7 +13999,8 @@ class _MealDetailsSheet extends StatelessWidget {
                           label: const Text('Duplicate'),
                         ),
                       ),
-                    if (onDuplicate != null && onEdit != null) const SizedBox(width: 10),
+                    if (onDuplicate != null && onEdit != null)
+                      const SizedBox(width: 10),
                     if (onEdit != null)
                       Expanded(
                         child: FilledButton.icon(
@@ -10647,7 +14071,9 @@ class _MealCookModeSheetState extends State<_MealCookModeSheet> {
           _remainingSeconds = 0;
           _running = false;
         });
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cooking timer finished')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Cooking timer finished')));
         return;
       }
       setState(() => _remainingSeconds -= 1);
@@ -10695,33 +14121,57 @@ class _MealCookModeSheetState extends State<_MealCookModeSheet> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(widget.entry.title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 20)),
-                          Text('${widget.entry.mealType.replaceAll('_', ' ')} • ${_fmtDate(widget.entry.date)}', style: const TextStyle(color: Color(0xFF64748B))),
+                          Text(
+                            widget.entry.title,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 20,
+                            ),
+                          ),
+                          Text(
+                            '${widget.entry.mealType.replaceAll('_', ' ')} • ${_fmtDate(widget.entry.date)}',
+                            style: const TextStyle(color: Color(0xFF64748B)),
+                          ),
                         ],
                       ),
                     ),
-                    IconButton(onPressed: () => Navigator.of(context).pop(), icon: const Icon(Icons.close)),
+                    IconButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.close),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 10),
-                const Text('Prep Notes', style: TextStyle(fontWeight: FontWeight.w700)),
+                const Text(
+                  'Prep Notes',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
                 const SizedBox(height: 6),
                 Card(
                   child: Padding(
                     padding: const EdgeInsets.all(12),
                     child: notes.isEmpty
-                        ? const Text('No prep notes yet. Add details in meal editor.')
+                        ? const Text(
+                            'No prep notes yet. Add details in meal editor.',
+                          )
                         : Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
-                            children: notes.map((line) => Padding(
-                              padding: const EdgeInsets.only(bottom: 4),
-                              child: Text('• $line'),
-                            )).toList(),
+                            children: notes
+                                .map(
+                                  (line) => Padding(
+                                    padding: const EdgeInsets.only(bottom: 4),
+                                    child: Text('• $line'),
+                                  ),
+                                )
+                                .toList(),
                           ),
                   ),
                 ),
                 const SizedBox(height: 12),
-                const Text('Cooking Timer', style: TextStyle(fontWeight: FontWeight.w700)),
+                const Text(
+                  'Cooking Timer',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
                 const SizedBox(height: 6),
                 Card(
                   child: Padding(
@@ -10729,7 +14179,14 @@ class _MealCookModeSheetState extends State<_MealCookModeSheet> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(_fmtTimer(), style: const TextStyle(fontSize: 36, fontWeight: FontWeight.w800, letterSpacing: 1.2)),
+                        Text(
+                          _fmtTimer(),
+                          style: const TextStyle(
+                            fontSize: 36,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 1.2,
+                          ),
+                        ),
                         const SizedBox(height: 8),
                         Row(
                           children: [
@@ -10738,16 +14195,27 @@ class _MealCookModeSheetState extends State<_MealCookModeSheet> {
                               child: TextField(
                                 controller: _minutesCtrl,
                                 keyboardType: TextInputType.number,
-                                decoration: const InputDecoration(labelText: 'Minutes'),
+                                decoration: const InputDecoration(
+                                  labelText: 'Minutes',
+                                ),
                                 onSubmitted: (_) => _resetTimer(),
                               ),
                             ),
                             const SizedBox(width: 12),
-                            OutlinedButton(onPressed: _startTimer, child: const Text('Start')),
+                            OutlinedButton(
+                              onPressed: _startTimer,
+                              child: const Text('Start'),
+                            ),
                             const SizedBox(width: 8),
-                            OutlinedButton(onPressed: _pauseTimer, child: const Text('Pause')),
+                            OutlinedButton(
+                              onPressed: _pauseTimer,
+                              child: const Text('Pause'),
+                            ),
                             const SizedBox(width: 8),
-                            OutlinedButton(onPressed: _resetTimer, child: const Text('Reset')),
+                            OutlinedButton(
+                              onPressed: _resetTimer,
+                              child: const Text('Reset'),
+                            ),
                           ],
                         ),
                       ],
@@ -10755,7 +14223,10 @@ class _MealCookModeSheetState extends State<_MealCookModeSheet> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                const Text('Common Conversions', style: TextStyle(fontWeight: FontWeight.w700)),
+                const Text(
+                  'Common Conversions',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
                 const SizedBox(height: 6),
                 Card(
                   child: Padding(
@@ -10792,7 +14263,12 @@ class _ConversionRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
-          Expanded(child: Text(left, style: const TextStyle(fontWeight: FontWeight.w600))),
+          Expanded(
+            child: Text(
+              left,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
           const SizedBox(width: 10),
           Expanded(child: Text(right)),
         ],
@@ -10864,12 +14340,13 @@ class _MealEntryEditorPageState extends State<MealEntryEditorPage> {
     try {
       final members = await widget.api.fetchCalendarMembers();
       if (!mounted) return;
-      final names = members
-          .map((member) => member.name.trim())
-          .where((name) => name.isNotEmpty)
-          .toSet()
-          .toList()
-        ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+      final names =
+          members
+              .map((member) => member.name.trim())
+              .where((name) => name.isNotEmpty)
+              .toSet()
+              .toList()
+            ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
       setState(() {
         _memberChoices = names;
         _loadingMembers = false;
@@ -10881,13 +14358,20 @@ class _MealEntryEditorPageState extends State<MealEntryEditorPage> {
   }
 
   List<String> _parseAllowedMembers() {
-    return _allowedMembers.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return _allowedMembers.toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
   }
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     if (_visibility == 'restricted' && _allowedMembers.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Select at least one allowed member for restricted visibility.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Select at least one allowed member for restricted visibility.',
+          ),
+        ),
+      );
       return;
     }
     final messenger = ScaffoldMessenger.of(context);
@@ -10906,7 +14390,9 @@ class _MealEntryEditorPageState extends State<MealEntryEditorPage> {
         allowedMembers: _parseAllowedMembers(),
       );
       if (!mounted) return;
-      messenger.showSnackBar(SnackBar(content: Text('${result['message'] ?? 'Meal saved'}')));
+      messenger.showSnackBar(
+        SnackBar(content: Text('${result['message'] ?? 'Meal saved'}')),
+      );
       navigator.pop(true);
     } catch (err) {
       if (!mounted) return;
@@ -10924,8 +14410,14 @@ class _MealEntryEditorPageState extends State<MealEntryEditorPage> {
         title: const Text('Delete meal plan?'),
         content: const Text('This cannot be undone.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
         ],
       ),
     );
@@ -10937,7 +14429,9 @@ class _MealEntryEditorPageState extends State<MealEntryEditorPage> {
     try {
       final result = await widget.api.deleteMealEntry(widget.source!.id);
       if (!mounted) return;
-      messenger.showSnackBar(SnackBar(content: Text('${result['message'] ?? 'Meal removed'}')));
+      messenger.showSnackBar(
+        SnackBar(content: Text('${result['message'] ?? 'Meal removed'}')),
+      );
       navigator.pop(true);
     } catch (err) {
       if (!mounted) return;
@@ -10988,19 +14482,31 @@ class _MealEntryEditorPageState extends State<MealEntryEditorPage> {
                   initialValue: _mealType,
                   decoration: const InputDecoration(labelText: 'Meal type'),
                   items: const [
-                    DropdownMenuItem(value: 'breakfast', child: Text('Breakfast')),
-                    DropdownMenuItem(value: 'morning_snack', child: Text('Morning Snack')),
+                    DropdownMenuItem(
+                      value: 'breakfast',
+                      child: Text('Breakfast'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'morning_snack',
+                      child: Text('Morning Snack'),
+                    ),
                     DropdownMenuItem(value: 'lunch', child: Text('Lunch')),
-                    DropdownMenuItem(value: 'afternoon_snack', child: Text('Afternoon Snack')),
+                    DropdownMenuItem(
+                      value: 'afternoon_snack',
+                      child: Text('Afternoon Snack'),
+                    ),
                     DropdownMenuItem(value: 'dinner', child: Text('Dinner')),
                   ],
-                  onChanged: (value) => setState(() => _mealType = value ?? 'dinner'),
+                  onChanged: (value) =>
+                      setState(() => _mealType = value ?? 'dinner'),
                 ),
                 const SizedBox(height: 10),
                 TextFormField(
                   controller: _titleCtrl,
                   decoration: const InputDecoration(labelText: 'Title'),
-                  validator: (value) => (value == null || value.trim().isEmpty) ? 'Title is required' : null,
+                  validator: (value) => (value == null || value.trim().isEmpty)
+                      ? 'Title is required'
+                      : null,
                 ),
                 const SizedBox(height: 10),
                 TextFormField(
@@ -11015,7 +14521,10 @@ class _MealEntryEditorPageState extends State<MealEntryEditorPage> {
                   decoration: const InputDecoration(labelText: 'Visibility'),
                   items: const [
                     DropdownMenuItem(value: 'family', child: Text('Family')),
-                    DropdownMenuItem(value: 'restricted', child: Text('Restricted')),
+                    DropdownMenuItem(
+                      value: 'restricted',
+                      child: Text('Restricted'),
+                    ),
                     DropdownMenuItem(value: 'private', child: Text('Private')),
                   ],
                   onChanged: (value) {
@@ -11037,7 +14546,8 @@ class _MealEntryEditorPageState extends State<MealEntryEditorPage> {
                     DropdownMenuItem(value: 'kids', child: Text('Kids')),
                     DropdownMenuItem(value: 'custom', child: Text('Custom')),
                   ],
-                  onChanged: (value) => setState(() => _audience = value ?? 'family'),
+                  onChanged: (value) =>
+                      setState(() => _audience = value ?? 'family'),
                 ),
                 if (_visibility == 'restricted') ...[
                   const SizedBox(height: 10),
@@ -11045,7 +14555,10 @@ class _MealEntryEditorPageState extends State<MealEntryEditorPage> {
                     alignment: Alignment.centerLeft,
                     child: Text(
                       'Allowed members',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w700, color: const Color(0xFF475569)),
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: const Color(0xFF475569),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 6),
@@ -11055,7 +14568,10 @@ class _MealEntryEditorPageState extends State<MealEntryEditorPage> {
                       child: LinearProgressIndicator(minHeight: 3),
                     )
                   else if (_memberChoices.isEmpty)
-                    const Text('No member list available right now.', style: TextStyle(color: Color(0xFF64748B), fontSize: 12))
+                    const Text(
+                      'No member list available right now.',
+                      style: TextStyle(color: Color(0xFF64748B), fontSize: 12),
+                    )
                   else
                     Wrap(
                       spacing: 8,
@@ -11080,7 +14596,13 @@ class _MealEntryEditorPageState extends State<MealEntryEditorPage> {
                   if (_allowedMembers.isEmpty)
                     const Padding(
                       padding: EdgeInsets.only(top: 6),
-                      child: Text('Select one or more members for restricted visibility.', style: TextStyle(color: Color(0xFF64748B), fontSize: 12)),
+                      child: Text(
+                        'Select one or more members for restricted visibility.',
+                        style: TextStyle(
+                          color: Color(0xFF64748B),
+                          fontSize: 12,
+                        ),
+                      ),
                     ),
                 ],
                 SwitchListTile.adaptive(
@@ -11093,7 +14615,11 @@ class _MealEntryEditorPageState extends State<MealEntryEditorPage> {
                 FilledButton.icon(
                   onPressed: _saving ? null : _save,
                   icon: const Icon(Icons.save),
-                  label: Text(_saving ? 'Saving...' : (_editing ? 'Update meal plan' : 'Create meal plan')),
+                  label: Text(
+                    _saving
+                        ? 'Saving...'
+                        : (_editing ? 'Update meal plan' : 'Create meal plan'),
+                  ),
                 ),
               ],
             ),
@@ -11126,7 +14652,10 @@ class _ChatThreadsPageState extends State<ChatThreadsPage> {
   void initState() {
     super.initState();
     _load();
-    _liveTimer = Timer.periodic(const Duration(seconds: 6), (_) => _refreshLive());
+    _liveTimer = Timer.periodic(
+      const Duration(seconds: 6),
+      (_) => _refreshLive(),
+    );
     _startSse();
   }
 
@@ -11138,7 +14667,10 @@ class _ChatThreadsPageState extends State<ChatThreadsPage> {
     super.dispose();
   }
 
-  Future<void> _load({bool showSpinner = true}) async {
+  Future<void> _load({
+    bool showSpinner = true,
+    bool includeSyncDetails = true,
+  }) async {
     if (_refreshing) return;
     _refreshing = true;
     if (showSpinner && mounted) {
@@ -11176,7 +14708,9 @@ class _ChatThreadsPageState extends State<ChatThreadsPage> {
     _sseSub = _sseConnect(widget.api.eventsStreamUri()).listen(
       (event) {
         if (!mounted) return;
-        if (event.event == 'notifications' || event.event == 'sync' || event.event == 'messages') {
+        if (event.event == 'notifications' ||
+            event.event == 'sync' ||
+            event.event == 'messages') {
           _refreshLive();
         }
       },
@@ -11201,87 +14735,131 @@ class _ChatThreadsPageState extends State<ChatThreadsPage> {
       child: _loading
           ? const Center(child: CircularProgressIndicator())
           : (_error != null)
-              ? ErrorPanel(error: _error!, onRetry: _load)
-              : (_threads.isEmpty)
-                  ? const Center(child: Text('No family members available for chat.'))
-                  : ListView.builder(
-                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
-                      itemCount: _threads.length,
-                      itemBuilder: (context, index) {
-                        final thread = _threads[index];
-                        final lastAt = thread.lastAt == null ? '' : _fmtDateTime(thread.lastAt!);
-                        return Card(
-                          margin: const EdgeInsets.only(bottom: 8),
-                          child: InkWell(
-                            borderRadius: BorderRadius.circular(16),
-                            onTap: () async {
-                              await Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) => ChatConversationPage(api: widget.api, otherMember: thread.member),
-                                ),
-                              );
-                              if (!mounted) return;
-                              await _load(showSpinner: false);
-                            },
-                            child: Padding(
-                              padding: const EdgeInsets.all(12),
-                              child: Row(
-                                children: [
-                                  CircleAvatar(
-                                    radius: 22,
-                                    backgroundColor: const Color(0xFFE0E7FF),
-                                    foregroundColor: const Color(0xFF4338CA),
-                                    child: Text(thread.member.isNotEmpty ? thread.member[0].toUpperCase() : '?', style: const TextStyle(fontWeight: FontWeight.w700)),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(thread.member, style: const TextStyle(fontWeight: FontWeight.w700)),
-                                        const SizedBox(height: 2),
-                                        Text(
-                                          thread.lastMessage.isEmpty ? 'No messages yet' : thread.lastMessage,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: const TextStyle(color: Color(0xFF64748B)),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Column(
-                                    crossAxisAlignment: CrossAxisAlignment.end,
-                                    children: [
-                                      if (lastAt.isNotEmpty)
-                                        Text(lastAt, style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
-                                      const SizedBox(height: 4),
-                                      if (thread.unread > 0)
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                          decoration: BoxDecoration(
-                                            color: const Color(0xFF4F46E5),
-                                            borderRadius: BorderRadius.circular(999),
-                                          ),
-                                          child: Text('${thread.unread}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 11)),
-                                        )
-                                      else
-                                        const Icon(Icons.chevron_right, color: Color(0xFF94A3B8)),
-                                    ],
-                                  )
-                                ],
+          ? ErrorPanel(error: _error!, onRetry: _load)
+          : (_threads.isEmpty)
+          ? const Center(child: Text('No family members available for chat.'))
+          : ListView.builder(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
+              itemCount: _threads.length,
+              itemBuilder: (context, index) {
+                final thread = _threads[index];
+                final lastAt = thread.lastAt == null
+                    ? ''
+                    : _fmtDateTime(thread.lastAt!);
+                return Card(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(16),
+                    onTap: () async {
+                      await Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => ChatConversationPage(
+                            api: widget.api,
+                            otherMember: thread.member,
+                          ),
+                        ),
+                      );
+                      if (!mounted) return;
+                      await _load(showSpinner: false);
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Row(
+                        children: [
+                          CircleAvatar(
+                            radius: 22,
+                            backgroundColor: const Color(0xFFE0E7FF),
+                            foregroundColor: const Color(0xFF4338CA),
+                            child: Text(
+                              thread.member.isNotEmpty
+                                  ? thread.member[0].toUpperCase()
+                                  : '?',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
                               ),
                             ),
                           ),
-                        );
-                      },
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  thread.member,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  thread.lastMessage.isEmpty
+                                      ? 'No messages yet'
+                                      : thread.lastMessage,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: Color(0xFF64748B),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              if (lastAt.isNotEmpty)
+                                Text(
+                                  lastAt,
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: Color(0xFF94A3B8),
+                                  ),
+                                ),
+                              const SizedBox(height: 4),
+                              if (thread.unread > 0)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 3,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF4F46E5),
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Text(
+                                    '${thread.unread}',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                )
+                              else
+                                const Icon(
+                                  Icons.chevron_right,
+                                  color: Color(0xFF94A3B8),
+                                ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
+                  ),
+                );
+              },
+            ),
     );
   }
 }
 
 class ChatConversationPage extends StatefulWidget {
-  const ChatConversationPage({super.key, required this.api, required this.otherMember});
+  const ChatConversationPage({
+    super.key,
+    required this.api,
+    required this.otherMember,
+  });
 
   final HomeHubApi api;
   final String otherMember;
@@ -11319,12 +14897,18 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
     super.initState();
     _loadBubblePrefs();
     _load(showSpinner: true);
-    _liveTimer = Timer.periodic(const Duration(seconds: 4), (_) => _refreshLive());
+    _liveTimer = Timer.periodic(
+      const Duration(seconds: 4),
+      (_) => _refreshLive(),
+    );
     _startSse();
   }
 
   String _chatColorKey(String side) {
-    final base = widget.api.settings.baseUrl.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
+    final base = widget.api.settings.baseUrl.replaceAll(
+      RegExp(r'[^a-zA-Z0-9]'),
+      '_',
+    );
     final member = widget.api.member.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
     final peer = widget.otherMember.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
     return 'homehub_chat_color_${base}_${member}_${peer}_$side';
@@ -11355,11 +14939,18 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setSheetState) {
-            Widget colorGrid({required String title, required Color current, required ValueChanged<Color> onSelect}) {
+            Widget colorGrid({
+              required String title,
+              required Color current,
+              required ValueChanged<Color> onSelect,
+            }) {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+                  Text(
+                    title,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 8,
@@ -11375,10 +14966,19 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
                           decoration: BoxDecoration(
                             color: color,
                             shape: BoxShape.circle,
-                            border: Border.all(color: selected ? const Color(0xFF111827) : Colors.transparent, width: 2),
+                            border: Border.all(
+                              color: selected
+                                  ? const Color(0xFF111827)
+                                  : Colors.transparent,
+                              width: 2,
+                            ),
                           ),
                           child: selected
-                              ? const Icon(Icons.check, size: 18, color: Colors.white)
+                              ? const Icon(
+                                  Icons.check,
+                                  size: 18,
+                                  color: Colors.white,
+                                )
                               : null,
                         ),
                       );
@@ -11396,9 +14996,18 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
                 children: [
                   Row(
                     children: [
-                      const Text('Chat Bubble Colors', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+                      const Text(
+                        'Chat Bubble Colors',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
                       const Spacer(),
-                      IconButton(onPressed: () => Navigator.of(context).pop(), icon: const Icon(Icons.close)),
+                      IconButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: const Icon(Icons.close),
+                      ),
                     ],
                   ),
                   colorGrid(
@@ -11476,7 +15085,9 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
     _sseSub = _sseConnect(widget.api.eventsStreamUri()).listen(
       (event) {
         if (!mounted) return;
-        if (event.event == 'notifications' || event.event == 'sync' || event.event == 'messages') {
+        if (event.event == 'notifications' ||
+            event.event == 'sync' ||
+            event.event == 'messages') {
           _refreshLive();
         }
       },
@@ -11512,15 +15123,32 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
               radius: 16,
               backgroundColor: const Color(0xFFE0E7FF),
               foregroundColor: const Color(0xFF4338CA),
-              child: Text(widget.otherMember.isNotEmpty ? widget.otherMember[0].toUpperCase() : '?', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
+              child: Text(
+                widget.otherMember.isNotEmpty
+                    ? widget.otherMember[0].toUpperCase()
+                    : '?',
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12,
+                ),
+              ),
             ),
             const SizedBox(width: 8),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(widget.otherMember, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-                  const Text('End-to-end encrypted', style: TextStyle(fontSize: 11, color: Color(0xFF16A34A))),
+                  Text(
+                    widget.otherMember,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const Text(
+                    'End-to-end encrypted',
+                    style: TextStyle(fontSize: 11, color: Color(0xFF16A34A)),
+                  ),
                 ],
               ),
             ),
@@ -11544,57 +15172,101 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
                   : (_error != null)
-                      ? ErrorPanel(error: _error!, onRetry: () => _load(showSpinner: true))
-                      : (_messages.isEmpty)
-                          ? const Center(child: Text('No messages yet. Start the conversation.'))
-                          : ListView.builder(
-                              reverse: true,
-                              padding: const EdgeInsets.fromLTRB(12, 12, 12, 6),
-                              itemCount: _messages.length,
-                              itemBuilder: (context, index) {
-                                final msg = _messages[_messages.length - 1 - index];
-                                final mine = msg.sender == widget.api.member;
-                                final timeText = msg.createdAt == null ? '' : _fmtDateTime(msg.createdAt!);
-                                final bubbleColor = mine ? _myBubbleColor : _theirBubbleColor;
-                                final bubbleTextColor = ThemeData.estimateBrightnessForColor(bubbleColor) == Brightness.dark ? Colors.white : const Color(0xFF0F172A);
-                                return Align(
-                                  alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(vertical: 3),
-                                    child: Column(
-                                      crossAxisAlignment: mine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                                      children: [
-                                        Container(
-                                          margin: EdgeInsets.only(left: mine ? 44 : 0, right: mine ? 0 : 44),
-                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-                                          decoration: BoxDecoration(
-                                            color: bubbleColor,
-                                            borderRadius: BorderRadius.only(
-                                              topLeft: const Radius.circular(18),
-                                              topRight: const Radius.circular(18),
-                                              bottomLeft: Radius.circular(mine ? 18 : 6),
-                                              bottomRight: Radius.circular(mine ? 6 : 18),
-                                            ),
-                                            boxShadow: const [
-                                              BoxShadow(color: Color(0x14000000), blurRadius: 6, offset: Offset(0, 2)),
-                                            ],
-                                          ),
-                                          child: Text(
-                                            msg.message,
-                                            style: TextStyle(color: bubbleTextColor, height: 1.35),
-                                          ),
-                                        ),
-                                        if (timeText.isNotEmpty)
-                                          Padding(
-                                            padding: EdgeInsets.only(top: 2, left: mine ? 0 : 6, right: mine ? 6 : 0),
-                                            child: Text(timeText, style: const TextStyle(fontSize: 10, color: Color(0xFF94A3B8))),
-                                          ),
-                                      ],
+                  ? ErrorPanel(
+                      error: _error!,
+                      onRetry: () => _load(showSpinner: true),
+                    )
+                  : (_messages.isEmpty)
+                  ? const Center(
+                      child: Text('No messages yet. Start the conversation.'),
+                    )
+                  : ListView.builder(
+                      reverse: true,
+                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 6),
+                      itemCount: _messages.length,
+                      itemBuilder: (context, index) {
+                        final msg = _messages[_messages.length - 1 - index];
+                        final mine = msg.sender == widget.api.member;
+                        final timeText = msg.createdAt == null
+                            ? ''
+                            : _fmtDateTime(msg.createdAt!);
+                        final bubbleColor = mine
+                            ? _myBubbleColor
+                            : _theirBubbleColor;
+                        final bubbleTextColor =
+                            ThemeData.estimateBrightnessForColor(bubbleColor) ==
+                                Brightness.dark
+                            ? Colors.white
+                            : const Color(0xFF0F172A);
+                        return Align(
+                          alignment: mine
+                              ? Alignment.centerRight
+                              : Alignment.centerLeft,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 3),
+                            child: Column(
+                              crossAxisAlignment: mine
+                                  ? CrossAxisAlignment.end
+                                  : CrossAxisAlignment.start,
+                              children: [
+                                Container(
+                                  margin: EdgeInsets.only(
+                                    left: mine ? 44 : 0,
+                                    right: mine ? 0 : 44,
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 9,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: bubbleColor,
+                                    borderRadius: BorderRadius.only(
+                                      topLeft: const Radius.circular(18),
+                                      topRight: const Radius.circular(18),
+                                      bottomLeft: Radius.circular(
+                                        mine ? 18 : 6,
+                                      ),
+                                      bottomRight: Radius.circular(
+                                        mine ? 6 : 18,
+                                      ),
+                                    ),
+                                    boxShadow: const [
+                                      BoxShadow(
+                                        color: Color(0x14000000),
+                                        blurRadius: 6,
+                                        offset: Offset(0, 2),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Text(
+                                    msg.message,
+                                    style: TextStyle(
+                                      color: bubbleTextColor,
+                                      height: 1.35,
                                     ),
                                   ),
-                                );
-                              },
+                                ),
+                                if (timeText.isNotEmpty)
+                                  Padding(
+                                    padding: EdgeInsets.only(
+                                      top: 2,
+                                      left: mine ? 0 : 6,
+                                      right: mine ? 6 : 0,
+                                    ),
+                                    child: Text(
+                                      timeText,
+                                      style: const TextStyle(
+                                        fontSize: 10,
+                                        color: Color(0xFF94A3B8),
+                                      ),
+                                    ),
+                                  ),
+                              ],
                             ),
+                          ),
+                        );
+                      },
+                    ),
             ),
           ),
           SafeArea(
@@ -11605,7 +15277,10 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
                 children: [
                   Expanded(
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 2,
+                      ),
                       decoration: BoxDecoration(
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(24),
@@ -11636,24 +15311,29 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
                     child: IconButton(
                       color: Colors.white,
                       onPressed: _sending
-                        ? null
-                        : () async {
-                            final text = _messageCtrl.text.trim();
-                            if (text.isEmpty) return;
-                            final messenger = ScaffoldMessenger.of(context);
-                            setState(() => _sending = true);
-                            try {
-                              await widget.api.sendMessage(recipient: widget.otherMember, message: text);
-                              _messageCtrl.clear();
-                              if (!mounted) return;
-                              await _load(showSpinner: false);
-                            } catch (err) {
-                              if (!mounted) return;
-                              messenger.showSnackBar(SnackBar(content: Text('Send failed: $err')));
-                            } finally {
-                              if (mounted) setState(() => _sending = false);
-                            }
-                          },
+                          ? null
+                          : () async {
+                              final text = _messageCtrl.text.trim();
+                              if (text.isEmpty) return;
+                              final messenger = ScaffoldMessenger.of(context);
+                              setState(() => _sending = true);
+                              try {
+                                await widget.api.sendMessage(
+                                  recipient: widget.otherMember,
+                                  message: text,
+                                );
+                                _messageCtrl.clear();
+                                if (!mounted) return;
+                                await _load(showSpinner: false);
+                              } catch (err) {
+                                if (!mounted) return;
+                                messenger.showSnackBar(
+                                  SnackBar(content: Text('Send failed: $err')),
+                                );
+                              } finally {
+                                if (mounted) setState(() => _sending = false);
+                              }
+                            },
                       icon: const Icon(Icons.send_rounded),
                     ),
                   ),
@@ -11695,7 +15375,10 @@ class _PollsPageState extends State<PollsPage> {
     super.initState();
     _optionsCtrl.text = 'Yes, No';
     _load();
-    _liveTimer = Timer.periodic(const Duration(seconds: 8), (_) => _refreshLive());
+    _liveTimer = Timer.periodic(
+      const Duration(seconds: 8),
+      (_) => _refreshLive(),
+    );
     _startSse();
   }
 
@@ -11709,7 +15392,10 @@ class _PollsPageState extends State<PollsPage> {
     super.dispose();
   }
 
-  Future<void> _load({bool showSpinner = true}) async {
+  Future<void> _load({
+    bool showSpinner = true,
+    bool includeSyncDetails = true,
+  }) async {
     if (_refreshing) return;
     _refreshing = true;
     if (showSpinner && mounted) {
@@ -11748,7 +15434,9 @@ class _PollsPageState extends State<PollsPage> {
     _sseSub = _sseConnect(widget.api.eventsStreamUri()).listen(
       (event) {
         if (!mounted) return;
-        if (event.event == 'notifications' || event.event == 'sync' || event.event == 'polls') {
+        if (event.event == 'notifications' ||
+            event.event == 'sync' ||
+            event.event == 'polls') {
           _refreshLive();
         }
       },
@@ -11772,7 +15460,13 @@ class _PollsPageState extends State<PollsPage> {
         .where((value) => value.isNotEmpty)
         .toList();
     if (question.isEmpty || options.length < 2) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter a question and at least 2 comma-separated options.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Enter a question and at least 2 comma-separated options.',
+          ),
+        ),
+      );
       return;
     }
     setState(() => _creating = true);
@@ -11780,11 +15474,15 @@ class _PollsPageState extends State<PollsPage> {
       await widget.api.createPoll(question: question, options: options);
       if (!mounted) return;
       _questionCtrl.clear();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Poll created.')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Poll created.')));
       await _load(showSpinner: false);
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Create failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Create failed: $err')));
     } finally {
       if (mounted) setState(() => _creating = false);
     }
@@ -11795,11 +15493,15 @@ class _PollsPageState extends State<PollsPage> {
     try {
       await widget.api.votePoll(pollId: pollId, selectedOption: option);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Vote submitted.')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Vote submitted.')));
       await _load(showSpinner: false);
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Vote failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Vote failed: $err')));
     } finally {
       if (mounted) {
         setState(() => _votingIds.remove(pollId));
@@ -11827,11 +15529,22 @@ class _PollsPageState extends State<PollsPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Create Poll', style: TextStyle(fontWeight: FontWeight.w700)),
+                  const Text(
+                    'Create Poll',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
                   const SizedBox(height: 10),
-                  TextField(controller: _questionCtrl, decoration: const InputDecoration(labelText: 'Question')),
+                  TextField(
+                    controller: _questionCtrl,
+                    decoration: const InputDecoration(labelText: 'Question'),
+                  ),
                   const SizedBox(height: 10),
-                  TextField(controller: _optionsCtrl, decoration: const InputDecoration(labelText: 'Options (comma-separated)')),
+                  TextField(
+                    controller: _optionsCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Options (comma-separated)',
+                    ),
+                  ),
                   const SizedBox(height: 12),
                   Align(
                     alignment: Alignment.centerRight,
@@ -11846,14 +15559,23 @@ class _PollsPageState extends State<PollsPage> {
             ),
           ),
           const SizedBox(height: 12),
-          Text('Pending Votes (${_pending.length})', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+          Text(
+            'Pending Votes (${_pending.length})',
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+          ),
           const SizedBox(height: 8),
           if (_pending.isEmpty)
             const Card(child: ListTile(title: Text('No pending polls.')))
           else
             ..._pending.map((item) {
               final pollId = _toInt(item['id']);
-              final options = (item['options'] as List<dynamic>? ?? const <dynamic>[]).map((e) => '$e').where((e) => e.trim().isNotEmpty).toList();
+              final options =
+                  (item['options'] as List<dynamic>? ?? const <dynamic>[])
+                      .map((e) => '$e')
+                      .where((e) => e.trim().isNotEmpty)
+                      .toList();
               final voting = _votingIds.contains(pollId);
               return Card(
                 child: Padding(
@@ -11861,9 +15583,15 @@ class _PollsPageState extends State<PollsPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('${item['question'] ?? ''}', style: const TextStyle(fontWeight: FontWeight.w700)),
+                      Text(
+                        '${item['question'] ?? ''}',
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
                       const SizedBox(height: 4),
-                      Text('From ${item['creator'] ?? ''}', style: const TextStyle(color: Color(0xFF64748B))),
+                      Text(
+                        'From ${item['creator'] ?? ''}',
+                        style: const TextStyle(color: Color(0xFF64748B)),
+                      ),
                       const SizedBox(height: 10),
                       Wrap(
                         spacing: 8,
@@ -11871,7 +15599,9 @@ class _PollsPageState extends State<PollsPage> {
                         children: options
                             .map(
                               (option) => OutlinedButton(
-                                onPressed: voting ? null : () => _vote(pollId, option),
+                                onPressed: voting
+                                    ? null
+                                    : () => _vote(pollId, option),
                                 child: Text(option),
                               ),
                             )
@@ -11883,7 +15613,12 @@ class _PollsPageState extends State<PollsPage> {
               );
             }),
           const SizedBox(height: 12),
-          Text('My Polls (${_mine.length})', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+          Text(
+            'My Polls (${_mine.length})',
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+          ),
           const SizedBox(height: 8),
           if (_mine.isEmpty)
             const Card(child: ListTile(title: Text('No polls created yet.')))
@@ -11891,25 +15626,38 @@ class _PollsPageState extends State<PollsPage> {
             ..._mine.map((item) {
               final responseCount = _toInt(item['response_count']);
               final recipientCount = _toInt(item['recipient_count']);
-              final responses = item['responses'] as List<dynamic>? ?? const <dynamic>[];
+              final responses =
+                  item['responses'] as List<dynamic>? ?? const <dynamic>[];
               return Card(
                 child: Padding(
                   padding: const EdgeInsets.all(12),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('${item['question'] ?? ''}', style: const TextStyle(fontWeight: FontWeight.w700)),
+                      Text(
+                        '${item['question'] ?? ''}',
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
                       const SizedBox(height: 6),
                       Text('Responses: $responseCount / $recipientCount'),
                       const SizedBox(height: 8),
-                      LinearProgressIndicator(value: recipientCount > 0 ? responseCount / recipientCount : 0),
-                      if (responses.isNotEmpty) const SizedBox(height: 10),
-                      ...responses.take(4).whereType<Map<String, dynamic>>().map(
-                        (row) => Padding(
-                          padding: const EdgeInsets.only(bottom: 4),
-                          child: Text('• ${row['member_name'] ?? ''}: ${row['selected_option'] ?? row['response_text'] ?? ''}'),
-                        ),
+                      LinearProgressIndicator(
+                        value: recipientCount > 0
+                            ? responseCount / recipientCount
+                            : 0,
                       ),
+                      if (responses.isNotEmpty) const SizedBox(height: 10),
+                      ...responses
+                          .take(4)
+                          .whereType<Map<String, dynamic>>()
+                          .map(
+                            (row) => Padding(
+                              padding: const EdgeInsets.only(bottom: 4),
+                              child: Text(
+                                '• ${row['member_name'] ?? ''}: ${row['selected_option'] ?? row['response_text'] ?? ''}',
+                              ),
+                            ),
+                          ),
                     ],
                   ),
                 ),
@@ -11936,23 +15684,32 @@ class _SharedCloudPageState extends State<SharedCloudPage> {
   bool _uploading = false;
   bool _uploadingPhotos = false;
   bool _creatingAlbum = false;
-  bool _savingWatchFolder = false;
+  bool _savingSyncSource = false;
   final Set<int> _deletingIds = <int>{};
   final Set<int> _deletingPhotoIds = <int>{};
-  final Set<int> _updatingWatchIds = <int>{};
-  final Set<int> _deletingWatchIds = <int>{};
+  final Set<int> _selectedPhotoDownloadIds = <int>{};
+  final Set<int> _updatingSyncSourceIds = <int>{};
+  final Set<int> _runningSyncSourceIds = <int>{};
+  final Set<int> _retryingSyncItemIds = <int>{};
   String? _error;
   List<SharedCloudFile> _files = const [];
+  String _selectedFileCategoryFilter = 'all';
   List<PhotoAlbumSummary> _albums = const [];
   List<PhotoAssetItem> _photoAssets = const [];
-  List<PhotoWatchFolderItem> _watchFolders = const [];
+  List<PhotoSyncSourceItem> _syncSources = const [];
+  List<PhotoSyncJobSummary> _syncJobs = const [];
+  List<PhotoSyncJobItem> _failedSyncItems = const [];
   int? _selectedPhotoAlbumFilter;
   int? _selectedPhotoUploadAlbum;
-  int? _selectedWatchAlbum;
+  int? _selectedSyncAlbum;
   String _photoVisibility = 'private';
-  String _watchScope = 'private';
+  String _photoSortDir = 'desc';
+  DateTime? _photoDateFrom;
+  DateTime? _photoDateTo;
+  String _syncScope = 'private';
   final TextEditingController _albumNameCtrl = TextEditingController();
-  final TextEditingController _watchFolderCtrl = TextEditingController();
+  final TextEditingController _syncSourceUriCtrl = TextEditingController();
+  List<PlatformFile> _pendingSyncFiles = const [];
   Timer? _liveTimer;
   StreamSubscription<_SseEvent>? _sseSub;
   Timer? _sseReconnectTimer;
@@ -11961,7 +15718,10 @@ class _SharedCloudPageState extends State<SharedCloudPage> {
   void initState() {
     super.initState();
     _load();
-    _liveTimer = Timer.periodic(const Duration(seconds: 10), (_) => _load(showSpinner: false));
+    _liveTimer = Timer.periodic(
+      const Duration(seconds: 10),
+      (_) => _load(showSpinner: false),
+    );
     _startSse();
   }
 
@@ -11971,11 +15731,14 @@ class _SharedCloudPageState extends State<SharedCloudPage> {
     _sseReconnectTimer?.cancel();
     _sseSub?.cancel();
     _albumNameCtrl.dispose();
-    _watchFolderCtrl.dispose();
+    _syncSourceUriCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _load({bool showSpinner = true}) async {
+  Future<void> _load({
+    bool showSpinner = true,
+    bool includeSyncDetails = true,
+  }) async {
     if (_refreshing) return;
     _refreshing = true;
     if (showSpinner) {
@@ -11987,14 +15750,48 @@ class _SharedCloudPageState extends State<SharedCloudPage> {
     try {
       final files = await widget.api.fetchSharedCloudFiles();
       final albums = await widget.api.fetchPhotoAlbums();
-      final photoAssets = await widget.api.fetchPhotoAssets();
-      final watchFolders = await widget.api.fetchPhotoWatchFolders();
+      final photoAssets = await widget.api.fetchPhotoAssets(
+        sortBy: 'captured_at',
+        sortDir: _photoSortDir,
+        startDate: _photoDateFrom,
+        endDate: _photoDateTo,
+      );
+      List<PhotoSyncSourceItem> syncSources = _syncSources;
+      List<PhotoSyncJobSummary> syncJobs = _syncJobs;
+      List<PhotoSyncJobItem> failedItems = _failedSyncItems;
+      if (includeSyncDetails) {
+        final syncSummary = await widget.api.fetchPhotoSyncSummary();
+        final sourcesRows = syncSummary['sources'] as List<dynamic>? ?? [];
+        final jobsRows = syncSummary['jobs'] as List<dynamic>? ?? [];
+        syncSources = sourcesRows
+            .whereType<Map<String, dynamic>>()
+            .map(PhotoSyncSourceItem.fromJson)
+            .toList();
+        syncJobs = jobsRows
+            .whereType<Map<String, dynamic>>()
+            .map(PhotoSyncJobSummary.fromJson)
+            .toList();
+        failedItems = <PhotoSyncJobItem>[];
+        for (final job in syncJobs.take(5)) {
+          if (job.failedItems <= 0) continue;
+          final detail = await widget.api.fetchPhotoSyncJobDetail(job.id);
+          final itemRows = detail['items'] as List<dynamic>? ?? [];
+          failedItems.addAll(
+            itemRows
+                .whereType<Map<String, dynamic>>()
+                .map(PhotoSyncJobItem.fromJson)
+                .where((row) => row.state == 'failed'),
+          );
+        }
+      }
       if (!mounted) return;
       setState(() {
         _files = files;
         _albums = albums;
         _photoAssets = photoAssets;
-        _watchFolders = watchFolders;
+        _syncSources = syncSources;
+        _syncJobs = syncJobs;
+        _failedSyncItems = failedItems;
         _loading = false;
       });
     } catch (err) {
@@ -12014,7 +15811,13 @@ class _SharedCloudPageState extends State<SharedCloudPage> {
     _sseSub = _sseConnect(widget.api.eventsStreamUri()).listen(
       (event) {
         if (!mounted) return;
-        if (event.event == 'notifications' || event.event == 'sync' || event.event == 'timeline' || event.event == 'photos') {
+        if (event.event == 'notifications' ||
+            event.event == 'sync' ||
+            event.event == 'timeline' ||
+            event.event == 'photos' ||
+            event.event == 'media_sync_job' ||
+            event.event == 'media_sync_item' ||
+            event.event == 'media_sync_source') {
           _load(showSpinner: false);
         }
       },
@@ -12036,17 +15839,24 @@ class _SharedCloudPageState extends State<SharedCloudPage> {
   }
 
   Future<void> _uploadFiles() async {
-    final picked = await FilePicker.platform.pickFiles(allowMultiple: true, withData: true);
+    final picked = await FilePicker.platform.pickFiles(
+      allowMultiple: true,
+      withData: true,
+    );
     if (picked == null || picked.files.isEmpty) return;
     setState(() => _uploading = true);
     try {
       final count = await widget.api.uploadSharedCloudFiles(picked.files);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Uploaded $count file(s).')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Uploaded $count file(s).')));
       await _load(showSpinner: false);
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Upload failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Upload failed: $err')));
     } finally {
       if (mounted) setState(() => _uploading = false);
     }
@@ -12057,11 +15867,89 @@ class _SharedCloudPageState extends State<SharedCloudPage> {
     try {
       await widget.api.deleteSharedCloudFile(file.id);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('File deleted.')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('File deleted.')));
       await _load(showSpinner: false);
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Delete failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Delete failed: $err')));
+    } finally {
+      if (mounted) setState(() => _deletingIds.remove(file.id));
+    }
+  }
+
+  List<SharedCloudFile> _filteredFiles() {
+    if (_selectedFileCategoryFilter == 'all') return _files;
+    return _files
+        .where(
+          (f) => f.category.trim().toLowerCase() == _selectedFileCategoryFilter,
+        )
+        .toList();
+  }
+
+  Future<void> _moveFile(SharedCloudFile file) async {
+    final current = file.category.trim().toLowerCase();
+    final movedTo = await showModalBottomSheet<String>(
+      context: context,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (context) {
+        const categories = <String, String>{
+          'photos_videos': 'Photos & Videos',
+          'documents': 'Documents',
+          'audio': 'Audio',
+          'archives': 'Archives',
+          'other': 'Other',
+        };
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Move File',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+              ),
+              const SizedBox(height: 8),
+              Text(file.filename, maxLines: 1, overflow: TextOverflow.ellipsis),
+              const SizedBox(height: 12),
+              ...categories.entries.map(
+                (entry) => ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(
+                    current == entry.key
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_off,
+                    size: 20,
+                  ),
+                  title: Text(entry.value),
+                  onTap: () => Navigator.of(context).pop(entry.key),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (movedTo == null || movedTo == current) return;
+    setState(() => _deletingIds.add(file.id));
+    try {
+      await widget.api.moveSharedCloudFile(fileId: file.id, category: movedTo);
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('File moved.')));
+      await _load(showSpinner: false);
+    } catch (err) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Move failed: $err')));
     } finally {
       if (mounted) setState(() => _deletingIds.remove(file.id));
     }
@@ -12072,14 +15960,21 @@ class _SharedCloudPageState extends State<SharedCloudPage> {
     if (name.isEmpty) return;
     setState(() => _creatingAlbum = true);
     try {
-      await widget.api.createPhotoAlbum(name: name, visibility: _photoVisibility);
+      await widget.api.createPhotoAlbum(
+        name: name,
+        visibility: _photoVisibility,
+      );
       if (!mounted) return;
       _albumNameCtrl.clear();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Album created.')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Album created.')));
       await _load(showSpinner: false);
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Create album failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Create album failed: $err')));
     } finally {
       if (mounted) setState(() => _creatingAlbum = false);
     }
@@ -12090,7 +15985,22 @@ class _SharedCloudPageState extends State<SharedCloudPage> {
       allowMultiple: true,
       withData: true,
       type: FileType.custom,
-      allowedExtensions: const ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic', 'heif', 'mp4', 'mov', 'm4v', 'avi', 'mkv', 'webm'],
+      allowedExtensions: const [
+        'jpg',
+        'jpeg',
+        'png',
+        'gif',
+        'webp',
+        'bmp',
+        'heic',
+        'heif',
+        'mp4',
+        'mov',
+        'm4v',
+        'avi',
+        'mkv',
+        'webm',
+      ],
     );
     if (picked == null || picked.files.isEmpty) return;
     setState(() => _uploadingPhotos = true);
@@ -12101,11 +16011,15 @@ class _SharedCloudPageState extends State<SharedCloudPage> {
         albumId: _selectedPhotoUploadAlbum,
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Uploaded $count photo/video file(s).')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Uploaded $count photo/video file(s).')),
+      );
       await _load(showSpinner: false);
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Photo upload failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Photo upload failed: $err')));
     } finally {
       if (mounted) setState(() => _uploadingPhotos = false);
     }
@@ -12116,107 +16030,418 @@ class _SharedCloudPageState extends State<SharedCloudPage> {
     try {
       await widget.api.deletePhotoAsset(item.id);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Photo deleted.')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Photo deleted.')));
       await _load(showSpinner: false);
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Delete photo failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Delete photo failed: $err')));
     } finally {
       if (mounted) setState(() => _deletingPhotoIds.remove(item.id));
     }
   }
 
-  Future<void> _pickWatchFolderPath() async {
-    final path = await FilePicker.platform.getDirectoryPath(dialogTitle: 'Select watched photo folder');
-    if (path == null || path.trim().isEmpty) return;
+  Future<void> _showDownloadLinkSheet(String relativePath) async {
+    final fullUrl = _absoluteUrl(relativePath);
     if (!mounted) return;
-    setState(() => _watchFolderCtrl.text = path.trim());
+    await showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (context) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Download URL',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 8),
+            SelectableText(fullUrl),
+          ],
+        ),
+      ),
+    );
   }
 
-  Future<void> _addWatchFolder() async {
-    final folderUri = _watchFolderCtrl.text.trim();
-    if (folderUri.isEmpty) return;
-    setState(() => _savingWatchFolder = true);
+  Future<void> _downloadSelectedPhotos() async {
+    if (_selectedPhotoDownloadIds.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Select at least one photo/video first.')),
+      );
+      return;
+    }
     try {
-      await widget.api.createPhotoWatchFolder(
-        folderUri: folderUri,
-        scope: _watchScope,
-        targetAlbumId: _selectedWatchAlbum,
+      final job = await widget.api.createPhotoDownloadJobForAssets(
+        _selectedPhotoDownloadIds.toList(),
+      );
+      final state = '${job['state'] ?? ''}'.trim().toLowerCase();
+      final url = '${job['download_url'] ?? ''}'.trim();
+      if (state != 'ready' || url.isEmpty) {
+        throw Exception(
+          '${job['error_message'] ?? 'Download job is not ready yet.'}',
+        );
+      }
+      await _showDownloadLinkSheet(url);
+    } catch (err) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Bulk download failed: $err')));
+    }
+  }
+
+  Future<void> _downloadCurrentAlbum() async {
+    if (_selectedPhotoAlbumFilter == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Select an album chip first.')),
+      );
+      return;
+    }
+    try {
+      final job = await widget.api.createPhotoDownloadJobForAlbum(
+        _selectedPhotoAlbumFilter!,
+      );
+      final state = '${job['state'] ?? ''}'.trim().toLowerCase();
+      final url = '${job['download_url'] ?? ''}'.trim();
+      if (state != 'ready' || url.isEmpty) {
+        throw Exception(
+          '${job['error_message'] ?? 'Download job is not ready yet.'}',
+        );
+      }
+      await _showDownloadLinkSheet(url);
+    } catch (err) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Album download failed: $err')));
+    }
+  }
+
+  Future<void> _pickSyncFiles() async {
+    final picked = await FilePicker.platform.pickFiles(
+      allowMultiple: true,
+      withData: true,
+      type: FileType.custom,
+      allowedExtensions: const [
+        'jpg',
+        'jpeg',
+        'png',
+        'gif',
+        'webp',
+        'bmp',
+        'heic',
+        'heif',
+        'mp4',
+        'mov',
+        'm4v',
+        'avi',
+        'mkv',
+        'webm',
+      ],
+    );
+    if (picked == null || picked.files.isEmpty) return;
+    final label = picked.files.first.name;
+    if (!mounted) return;
+    setState(() {
+      _pendingSyncFiles = picked.files;
+      _syncSourceUriCtrl.text = 'browser://$label';
+    });
+  }
+
+  Future<void> _registerSyncSourceAndUpload() async {
+    final sourceUri = _syncSourceUriCtrl.text.trim();
+    if (sourceUri.isEmpty || _pendingSyncFiles.isEmpty) return;
+    setState(() => _savingSyncSource = true);
+    try {
+      final source = await widget.api.registerPhotoSyncSource(
+        sourceUri: sourceUri,
+        scope: _syncScope,
+        targetAlbumId: _selectedSyncAlbum,
+      );
+      final jobId = await widget.api.enqueuePhotoSyncScan(source.id);
+      final manifestItems = _pendingSyncFiles.map((file) {
+        final rel = (file.path?.split(RegExp(r'[\\/]')).last ?? file.name)
+            .trim();
+        return <String, dynamic>{
+          'client_item_id': rel,
+          'source_rel_path': rel,
+          'filename': file.name,
+          'size_bytes': file.size,
+          'mime_type': file.extension ?? '',
+          'mtime_utc': DateTime.now().toUtc().toIso8601String(),
+        };
+      }).toList();
+      await widget.api.addPhotoSyncJobItems(jobId, manifestItems);
+
+      final detail = await widget.api.fetchPhotoSyncJobDetail(jobId);
+      final rows = detail['items'] as List<dynamic>? ?? [];
+      final items = rows
+          .whereType<Map<String, dynamic>>()
+          .map(PhotoSyncJobItem.fromJson)
+          .toList();
+      final byName = <String, PhotoSyncJobItem>{};
+      for (final item in items) {
+        byName[item.sourceRelPath] = item;
+      }
+      for (final file in _pendingSyncFiles) {
+        final rel = (file.path?.split(RegExp(r'[\\/]')).last ?? file.name)
+            .trim();
+        final item = byName[rel];
+        if (item == null) continue;
+        await widget.api.ingestPhotoSyncItem(
+          jobId: jobId,
+          itemId: item.id,
+          file: file,
+        );
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _pendingSyncFiles = const [];
+        _syncSourceUriCtrl.clear();
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Sync source registered. Job #$jobId queued.')),
+      );
+      await _load(showSpinner: false);
+    } catch (err) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Sync registration failed: $err')));
+    } finally {
+      if (mounted) setState(() => _savingSyncSource = false);
+    }
+  }
+
+  Future<void> _toggleSyncSource(PhotoSyncSourceItem item) async {
+    setState(() => _updatingSyncSourceIds.add(item.id));
+    try {
+      await widget.api.updatePhotoSyncSource(
+        sourceId: item.id,
+        isActive: !item.isActive,
       );
       if (!mounted) return;
-      _watchFolderCtrl.clear();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Watched folder saved.')));
       await _load(showSpinner: false);
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Save watch folder failed: $err')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Update sync source failed: $err')),
+      );
     } finally {
-      if (mounted) setState(() => _savingWatchFolder = false);
+      if (mounted) setState(() => _updatingSyncSourceIds.remove(item.id));
     }
   }
 
-  Future<void> _toggleWatchFolder(PhotoWatchFolderItem item) async {
-    setState(() => _updatingWatchIds.add(item.id));
+  Future<void> _runSyncSource(PhotoSyncSourceItem item) async {
+    setState(() => _runningSyncSourceIds.add(item.id));
     try {
-      await widget.api.updatePhotoWatchFolder(watchId: item.id, isActive: !item.isActive);
+      await widget.api.enqueuePhotoSyncScan(item.id);
       if (!mounted) return;
       await _load(showSpinner: false);
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Update watch folder failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Run scan failed: $err')));
     } finally {
-      if (mounted) setState(() => _updatingWatchIds.remove(item.id));
+      if (mounted) setState(() => _runningSyncSourceIds.remove(item.id));
     }
   }
 
-  Future<void> _deleteWatchFolder(PhotoWatchFolderItem item) async {
-    setState(() => _deletingWatchIds.add(item.id));
+  Future<void> _retrySyncItem(PhotoSyncJobItem item) async {
+    setState(() => _retryingSyncItemIds.add(item.id));
     try {
-      await widget.api.deletePhotoWatchFolder(item.id);
+      await widget.api.retryPhotoSyncItem(item.id);
       if (!mounted) return;
       await _load(showSpinner: false);
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Delete watch folder failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Retry failed: $err')));
     } finally {
-      if (mounted) setState(() => _deletingWatchIds.remove(item.id));
+      if (mounted) setState(() => _retryingSyncItemIds.remove(item.id));
     }
+  }
+
+  DateTime? _mediaDate(PhotoAssetItem asset) =>
+      asset.capturedAt ?? asset.uploadedAt;
+
+  DateTime _dayOnly(DateTime value) =>
+      DateTime(value.year, value.month, value.day);
+
+  Future<void> _pickPhotoDateFilter({required bool isStart}) async {
+    final current = isStart ? _photoDateFrom : _photoDateTo;
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: current ?? DateTime.now(),
+      firstDate: DateTime(1990, 1, 1),
+      lastDate: DateTime(2100, 12, 31),
+    );
+    if (!mounted || picked == null) return;
+    setState(() {
+      if (isStart) {
+        _photoDateFrom = _dayOnly(picked);
+      } else {
+        _photoDateTo = _dayOnly(picked);
+      }
+    });
+    await _load(showSpinner: false, includeSyncDetails: false);
   }
 
   List<PhotoAssetItem> _filteredPhotoAssets() {
-    if (_selectedPhotoAlbumFilter == null) return _photoAssets;
-    return _photoAssets.where((a) => a.albumId == _selectedPhotoAlbumFilter).toList();
+    Iterable<PhotoAssetItem> rows = _photoAssets;
+    if (_selectedPhotoAlbumFilter != null) {
+      rows = rows.where((a) => a.albumId == _selectedPhotoAlbumFilter);
+    }
+    if (_photoDateFrom != null || _photoDateTo != null) {
+      rows = rows.where((asset) {
+        final media = _mediaDate(asset);
+        if (media == null) return false;
+        final day = _dayOnly(media);
+        if (_photoDateFrom != null && day.isBefore(_photoDateFrom!)) {
+          return false;
+        }
+        if (_photoDateTo != null && day.isAfter(_photoDateTo!)) {
+          return false;
+        }
+        return true;
+      });
+    }
+    final list = rows.toList();
+    list.sort((a, b) {
+      final ad = _mediaDate(a);
+      final bd = _mediaDate(b);
+      if (ad == null && bd == null) return b.id.compareTo(a.id);
+      if (ad == null) return 1;
+      if (bd == null) return -1;
+      final cmp = ad.compareTo(bd);
+      if (cmp == 0) return b.id.compareTo(a.id);
+      return _photoSortDir == 'asc' ? cmp : -cmp;
+    });
+    return list;
+  }
+
+  Future<void> _openPhotoAssetPreview(PhotoAssetItem asset) {
+    final mediaUrl = asset.isVideo
+        ? (asset.streamUrl.trim().isNotEmpty
+              ? asset.streamUrl
+              : asset.previewUrl)
+        : asset.previewUrl;
+    return _showMediaPreviewDialog(
+      context: context,
+      title: asset.originalFilename,
+      mediaUrl: _absoluteUrl(mediaUrl),
+      isVideo: asset.isVideo,
+    );
+  }
+
+  Future<void> _openSlideshowForSelectedAlbum() async {
+    final albumId = _selectedPhotoAlbumFilter;
+    final items = _filteredPhotoAssets();
+    if (items.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No media found for current filters.')),
+      );
+      return;
+    }
+    final albumName = albumId == null
+        ? 'All Visible Media'
+        : _albums
+              .firstWhere(
+                (a) => a.id == albumId,
+                orElse: () => PhotoAlbumSummary(
+                  id: albumId,
+                  name: 'Album #$albumId',
+                  creator: '',
+                  visibility: 'private',
+                  assetCount: items.length,
+                  coverUrl: '',
+                ),
+              )
+              .name;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _InteractiveSlideshowPage(
+          albumName: albumName,
+          items: items,
+          absoluteUrlBuilder: _absoluteUrl,
+        ),
+      ),
+    );
   }
 
   Widget _buildFilesTab(bool isAdmin, String member) {
+    final filtered = _filteredFiles();
+    const categoryLabels = <String, String>{
+      'all': 'All',
+      'photos_videos': 'Photos & Videos',
+      'documents': 'Documents',
+      'audio': 'Audio',
+      'archives': 'Archives',
+      'other': 'Other',
+    };
     return RefreshIndicator(
       onRefresh: () => _load(showSpinner: false),
       child: ListView.builder(
         padding: const EdgeInsets.all(12),
-        itemCount: _files.length + 1,
+        itemCount: filtered.length + 1,
         itemBuilder: (context, index) {
           if (index == 0) {
             return Padding(
               padding: const EdgeInsets.only(bottom: 12),
-              child: Align(
-                alignment: Alignment.centerRight,
-                child: FilledButton.icon(
-                  onPressed: _uploading ? null : _uploadFiles,
-                  icon: const Icon(Icons.upload_file),
-                  label: Text(_uploading ? 'Uploading...' : 'Upload Files'),
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: FilledButton.icon(
+                      onPressed: _uploading ? null : _uploadFiles,
+                      icon: const Icon(Icons.upload_file),
+                      label: Text(_uploading ? 'Uploading...' : 'Upload Files'),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: categoryLabels.entries
+                        .map(
+                          (entry) => ChoiceChip(
+                            label: Text(entry.value),
+                            selected: _selectedFileCategoryFilter == entry.key,
+                            onSelected: (_) => setState(
+                              () => _selectedFileCategoryFilter = entry.key,
+                            ),
+                          ),
+                        )
+                        .toList(),
+                  ),
+                ],
               ),
             );
           }
 
-          final file = _files[index - 1];
+          final file = filtered[index - 1];
           final canDelete = isAdmin || file.creator.toLowerCase() == member;
           final deleting = _deletingIds.contains(file.id);
           return Card(
             child: ListTile(
               leading: const Icon(Icons.insert_drive_file_outlined),
               title: Text(file.filename),
-              subtitle: Text('${file.creator} • ${file.category}${file.uploadTime != null ? ' • ${_fmtDateTime(file.uploadTime!)}' : ''}'),
+              subtitle: Text(
+                '${file.creator} • ${file.category}${file.uploadTime != null ? ' • ${_fmtDateTime(file.uploadTime!)}' : ''}',
+              ),
               trailing: Wrap(
                 spacing: 4,
                 children: [
@@ -12233,7 +16458,10 @@ class _SharedCloudPageState extends State<SharedCloudPage> {
                             mainAxisSize: MainAxisSize.min,
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('Download URL', style: TextStyle(fontWeight: FontWeight.w700)),
+                              const Text(
+                                'Download URL',
+                                style: TextStyle(fontWeight: FontWeight.w700),
+                              ),
                               const SizedBox(height: 8),
                               SelectableText(_absoluteUrl(file.downloadUrl)),
                             ],
@@ -12243,11 +16471,22 @@ class _SharedCloudPageState extends State<SharedCloudPage> {
                     },
                     icon: const Icon(Icons.link),
                   ),
+                  IconButton(
+                    tooltip: 'Move category',
+                    onPressed: deleting ? null : () => _moveFile(file),
+                    icon: const Icon(Icons.drive_file_move_outline),
+                  ),
                   if (canDelete)
                     IconButton(
                       tooltip: 'Delete file',
                       onPressed: deleting ? null : () => _deleteFile(file),
-                      icon: deleting ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.delete_outline),
+                      icon: deleting
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.delete_outline),
                     ),
                 ],
               ),
@@ -12260,6 +16499,11 @@ class _SharedCloudPageState extends State<SharedCloudPage> {
 
   Widget _buildPhotosTab(bool isAdmin, String member) {
     final filtered = _filteredPhotoAssets();
+    final visibleIds = filtered.take(100).map((a) => a.id).toSet();
+    _selectedPhotoDownloadIds.removeWhere((id) => !visibleIds.contains(id));
+    final allVisibleSelected =
+        visibleIds.isNotEmpty &&
+        visibleIds.every((id) => _selectedPhotoDownloadIds.contains(id));
     return RefreshIndicator(
       onRefresh: () => _load(showSpinner: false),
       child: ListView(
@@ -12271,28 +16515,48 @@ class _SharedCloudPageState extends State<SharedCloudPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Family Photos', style: TextStyle(fontWeight: FontWeight.w700)),
+                  const Text(
+                    'Interactive Slideshow & Media',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
                   const SizedBox(height: 10),
-                  TextField(controller: _albumNameCtrl, decoration: const InputDecoration(labelText: 'New album name')),
+                  TextField(
+                    controller: _albumNameCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'New album name',
+                    ),
+                  ),
                   const SizedBox(height: 8),
                   Row(
                     children: [
                       Expanded(
                         child: DropdownButtonFormField<String>(
                           initialValue: _photoVisibility,
-                          decoration: const InputDecoration(labelText: 'Visibility'),
+                          decoration: const InputDecoration(
+                            labelText: 'Visibility',
+                          ),
                           items: const [
-                            DropdownMenuItem(value: 'private', child: Text('Private')),
-                            DropdownMenuItem(value: 'family', child: Text('Family')),
+                            DropdownMenuItem(
+                              value: 'private',
+                              child: Text('Private'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'family',
+                              child: Text('Family'),
+                            ),
                           ],
-                          onChanged: (value) => setState(() => _photoVisibility = value ?? 'private'),
+                          onChanged: (value) => setState(
+                            () => _photoVisibility = value ?? 'private',
+                          ),
                         ),
                       ),
                       const SizedBox(width: 8),
                       FilledButton.icon(
                         onPressed: _creatingAlbum ? null : _createAlbum,
                         icon: const Icon(Icons.create_new_folder_outlined),
-                        label: Text(_creatingAlbum ? 'Creating...' : 'Create Album'),
+                        label: Text(
+                          _creatingAlbum ? 'Creating...' : 'Create Album',
+                        ),
                       ),
                     ],
                   ),
@@ -12302,19 +16566,32 @@ class _SharedCloudPageState extends State<SharedCloudPage> {
                       Expanded(
                         child: DropdownButtonFormField<int?>(
                           initialValue: _selectedPhotoUploadAlbum,
-                          decoration: const InputDecoration(labelText: 'Upload into album (optional)'),
+                          decoration: const InputDecoration(
+                            labelText: 'Upload into album (optional)',
+                          ),
                           items: [
-                            const DropdownMenuItem<int?>(value: null, child: Text('No album')),
-                            ..._albums.map((a) => DropdownMenuItem<int?>(value: a.id, child: Text(a.name))),
+                            const DropdownMenuItem<int?>(
+                              value: null,
+                              child: Text('No album'),
+                            ),
+                            ..._albums.map(
+                              (a) => DropdownMenuItem<int?>(
+                                value: a.id,
+                                child: Text(a.name),
+                              ),
+                            ),
                           ],
-                          onChanged: (value) => setState(() => _selectedPhotoUploadAlbum = value),
+                          onChanged: (value) =>
+                              setState(() => _selectedPhotoUploadAlbum = value),
                         ),
                       ),
                       const SizedBox(width: 8),
                       FilledButton.icon(
                         onPressed: _uploadingPhotos ? null : _uploadPhotos,
                         icon: const Icon(Icons.add_a_photo_outlined),
-                        label: Text(_uploadingPhotos ? 'Uploading...' : 'Upload'),
+                        label: Text(
+                          _uploadingPhotos ? 'Uploading...' : 'Upload',
+                        ),
                       ),
                     ],
                   ),
@@ -12323,99 +16600,318 @@ class _SharedCloudPageState extends State<SharedCloudPage> {
             ),
           ),
           const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
+          Row(
             children: [
-              ChoiceChip(
-                label: const Text('All Albums'),
-                selected: _selectedPhotoAlbumFilter == null,
-                onSelected: (_) => setState(() => _selectedPhotoAlbumFilter = null),
-              ),
-              ..._albums.map(
-                (a) => ChoiceChip(
-                  label: Text('${a.name} (${a.assetCount})'),
-                  selected: _selectedPhotoAlbumFilter == a.id,
-                  onSelected: (_) => setState(() => _selectedPhotoAlbumFilter = a.id),
+              Expanded(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      ChoiceChip(
+                        label: const Text('All Albums'),
+                        selected: _selectedPhotoAlbumFilter == null,
+                        onSelected: (_) =>
+                            setState(() => _selectedPhotoAlbumFilter = null),
+                      ),
+                      const SizedBox(width: 8),
+                      ..._albums.map(
+                        (a) => Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: ChoiceChip(
+                            label: Text('${a.name} (${a.assetCount})'),
+                            selected: _selectedPhotoAlbumFilter == a.id,
+                            onSelected: (_) => setState(
+                              () => _selectedPhotoAlbumFilter = a.id,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
+              ),
+              const SizedBox(width: 8),
+              FilledButton.icon(
+                onPressed: _openSlideshowForSelectedAlbum,
+                icon: const Icon(Icons.slideshow_outlined),
+                label: const Text('Start'),
               ),
             ],
           ),
           const SizedBox(height: 10),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  DropdownButton<String>(
+                    value: _photoSortDir,
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'desc',
+                        child: Text('Newest first'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'asc',
+                        child: Text('Oldest first'),
+                      ),
+                    ],
+                    onChanged: (value) async {
+                      if (value == null || value == _photoSortDir) return;
+                      setState(() => _photoSortDir = value);
+                      await _load(
+                        showSpinner: false,
+                        includeSyncDetails: false,
+                      );
+                    },
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: () => _pickPhotoDateFilter(isStart: true),
+                    icon: const Icon(Icons.event_available_outlined),
+                    label: Text(
+                      _photoDateFrom == null
+                          ? 'From'
+                          : 'From ${_fmtDate(_photoDateFrom!)}',
+                    ),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: () => _pickPhotoDateFilter(isStart: false),
+                    icon: const Icon(Icons.event_outlined),
+                    label: Text(
+                      _photoDateTo == null
+                          ? 'To'
+                          : 'To ${_fmtDate(_photoDateTo!)}',
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: (_photoDateFrom == null && _photoDateTo == null)
+                        ? null
+                        : () async {
+                            setState(() {
+                              _photoDateFrom = null;
+                              _photoDateTo = null;
+                            });
+                            await _load(
+                              showSpinner: false,
+                              includeSyncDetails: false,
+                            );
+                          },
+                    child: const Text('Clear dates'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final compact = constraints.maxWidth < 390;
+                  final selectBtn = OutlinedButton.icon(
+                    onPressed: visibleIds.isEmpty
+                        ? null
+                        : () {
+                            setState(() {
+                              if (allVisibleSelected) {
+                                _selectedPhotoDownloadIds.removeAll(visibleIds);
+                              } else {
+                                _selectedPhotoDownloadIds.addAll(visibleIds);
+                              }
+                            });
+                          },
+                    icon: Icon(
+                      allVisibleSelected ? Icons.deselect : Icons.select_all,
+                    ),
+                    label: Text(
+                      allVisibleSelected ? 'Clear Visible' : 'Select Visible',
+                    ),
+                  );
+                  final downloadSelectedBtn = FilledButton.icon(
+                    onPressed: _downloadSelectedPhotos,
+                    icon: const Icon(Icons.download_for_offline_outlined),
+                    label: Text(compact ? 'Selected' : 'Download Selected'),
+                  );
+                  final downloadAlbumBtn = OutlinedButton.icon(
+                    onPressed: _downloadCurrentAlbum,
+                    icon: const Icon(Icons.folder_zip_outlined),
+                    label: Text(compact ? 'Album' : 'Download Album'),
+                  );
+
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${_selectedPhotoDownloadIds.length} selected',
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          selectBtn,
+                          downloadSelectedBtn,
+                          downloadAlbumBtn,
+                        ],
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
           if (filtered.isEmpty)
-            const Card(child: ListTile(title: Text('No photos/videos available for your access rights.')))
+            const Card(
+              child: ListTile(
+                title: Text(
+                  'No photos/videos available for your access rights.',
+                ),
+              ),
+            )
           else
             ...filtered.take(100).map((asset) {
-              final canDelete = isAdmin || asset.uploader.toLowerCase() == member;
+              final canDelete =
+                  isAdmin || asset.uploader.toLowerCase() == member;
               final deleting = _deletingPhotoIds.contains(asset.id);
               return Card(
                 child: Padding(
                   padding: const EdgeInsets.all(10),
-                  child: Row(
-                    children: [
-                      ClipRRect(
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final compact = constraints.maxWidth < 360;
+                      final thumb = InkWell(
+                        onTap: () => _openPhotoAssetPreview(asset),
                         borderRadius: BorderRadius.circular(10),
-                        child: SizedBox(
-                          width: 72,
-                          height: 72,
-                          child: Stack(
-                            fit: StackFit.expand,
-                            children: [
-                              Image.network(
-                                _absoluteUrl(asset.previewUrl),
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) => const ColoredBox(color: Color(0xFFE2E8F0), child: Icon(Icons.broken_image_outlined)),
-                              ),
-                              if (asset.isVideo)
-                                const Align(
-                                  alignment: Alignment.center,
-                                  child: Icon(Icons.play_circle_outline, color: Colors.white, size: 28),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: SizedBox(
+                            width: compact ? 86 : 72,
+                            height: compact ? 86 : 72,
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                Image.network(
+                                  _absoluteUrl(asset.previewUrl),
+                                  fit: BoxFit.contain,
+                                  errorBuilder: (_, __, ___) =>
+                                      const ColoredBox(
+                                        color: Color(0xFFE2E8F0),
+                                        child: Icon(
+                                          Icons.broken_image_outlined,
+                                        ),
+                                      ),
                                 ),
-                            ],
+                                if (asset.isVideo)
+                                  const Align(
+                                    alignment: Alignment.center,
+                                    child: Icon(
+                                      Icons.play_circle_outline,
+                                      color: Colors.white,
+                                      size: 28,
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
+                      );
+                      final checkbox = Checkbox(
+                        value: _selectedPhotoDownloadIds.contains(asset.id),
+                        onChanged: (_) {
+                          setState(() {
+                            if (_selectedPhotoDownloadIds.contains(asset.id)) {
+                              _selectedPhotoDownloadIds.remove(asset.id);
+                            } else {
+                              _selectedPhotoDownloadIds.add(asset.id);
+                            }
+                          });
+                        },
+                      );
+                      final mediaDate = _mediaDate(asset);
+                      final meta = Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            asset.originalFilename,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '${asset.uploader} • ${asset.visibility}${mediaDate != null ? ' • ${asset.capturedAt != null ? 'Taken ' : 'Uploaded '}${_fmtDateTime(mediaDate)}' : ''}',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Color(0xFF64748B),
+                            ),
+                          ),
+                        ],
+                      );
+                      final actions = Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            tooltip: 'Download URL',
+                            onPressed: () => _showDownloadLinkSheet(
+                              asset.originalDownloadUrl.trim().isEmpty
+                                  ? asset.downloadUrl
+                                  : asset.originalDownloadUrl,
+                            ),
+                            icon: const Icon(Icons.link),
+                          ),
+                          if (canDelete)
+                            IconButton(
+                              tooltip: 'Delete photo',
+                              onPressed: deleting
+                                  ? null
+                                  : () => _deletePhoto(asset),
+                              icon: deleting
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Icon(Icons.delete_outline),
+                            ),
+                        ],
+                      );
+
+                      if (compact) {
+                        return Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(asset.originalFilename, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)),
-                            const SizedBox(height: 2),
-                            Text('${asset.uploader} • ${asset.visibility}${asset.uploadedAt != null ? ' • ${_fmtDateTime(asset.uploadedAt!)}' : ''}', style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
-                          ],
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: 'Download URL',
-                        onPressed: () {
-                          showModalBottomSheet<void>(
-                            context: context,
-                            useSafeArea: true,
-                            isScrollControlled: true,
-                            builder: (context) => Padding(
-                              padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text('Photo URL', style: TextStyle(fontWeight: FontWeight.w700)),
-                                  const SizedBox(height: 8),
-                                  SelectableText(_absoluteUrl(asset.downloadUrl)),
-                                ],
-                              ),
+                            Row(
+                              children: [
+                                thumb,
+                                const SizedBox(width: 8),
+                                checkbox,
+                                Expanded(child: meta),
+                              ],
                             ),
-                          );
-                        },
-                        icon: const Icon(Icons.link),
-                      ),
-                      if (canDelete)
-                        IconButton(
-                          tooltip: 'Delete photo',
-                          onPressed: deleting ? null : () => _deletePhoto(asset),
-                          icon: deleting ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.delete_outline),
-                        ),
-                    ],
+                            const SizedBox(height: 6),
+                            actions,
+                          ],
+                        );
+                      }
+
+                      return Row(
+                        children: [
+                          thumb,
+                          const SizedBox(width: 10),
+                          checkbox,
+                          Expanded(child: meta),
+                          actions,
+                        ],
+                      );
+                    },
                   ),
                 ),
               );
@@ -12425,7 +16921,8 @@ class _SharedCloudPageState extends State<SharedCloudPage> {
     );
   }
 
-  Widget _buildWatchFoldersTab() {
+  Widget _buildSyncSourcesTab() {
+    final latestJob = _syncJobs.isEmpty ? null : _syncJobs.first;
     return RefreshIndicator(
       onRefresh: () => _load(showSpinner: false),
       child: ListView(
@@ -12437,10 +16934,13 @@ class _SharedCloudPageState extends State<SharedCloudPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Watched Folders (Device Opt-In)', style: TextStyle(fontWeight: FontWeight.w700)),
+                  const Text(
+                    'Sync Sources',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
                   const SizedBox(height: 6),
                   const Text(
-                    'Add a local folder path/URI for this device. Devices opted into the same family scope/album sync photos across members who have album rights.',
+                    'Register a source and upload selected files into a central ingestion job. Job/item state shown below is from backend sync records.',
                     style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
                   ),
                   const SizedBox(height: 10),
@@ -12448,42 +16948,73 @@ class _SharedCloudPageState extends State<SharedCloudPage> {
                     children: [
                       Expanded(
                         child: TextField(
-                          controller: _watchFolderCtrl,
-                          decoration: const InputDecoration(labelText: 'Folder path or URI'),
+                          controller: _syncSourceUriCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Source URI',
+                          ),
                         ),
                       ),
                       const SizedBox(width: 8),
                       IconButton(
-                        tooltip: 'Pick folder',
-                        onPressed: _pickWatchFolderPath,
-                        icon: const Icon(Icons.folder_open),
+                        tooltip: 'Select files',
+                        onPressed: _pickSyncFiles,
+                        icon: const Icon(Icons.upload_file),
                       ),
                     ],
                   ),
+                  if (_pendingSyncFiles.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        '${_pendingSyncFiles.length} file(s) selected',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF64748B),
+                        ),
+                      ),
+                    ),
                   const SizedBox(height: 8),
                   Row(
                     children: [
                       Expanded(
                         child: DropdownButtonFormField<String>(
-                          initialValue: _watchScope,
+                          initialValue: _syncScope,
                           decoration: const InputDecoration(labelText: 'Scope'),
                           items: const [
-                            DropdownMenuItem(value: 'private', child: Text('Private')),
-                            DropdownMenuItem(value: 'family', child: Text('Family')),
+                            DropdownMenuItem(
+                              value: 'private',
+                              child: Text('Private'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'family',
+                              child: Text('Family'),
+                            ),
                           ],
-                          onChanged: (value) => setState(() => _watchScope = value ?? 'private'),
+                          onChanged: (value) =>
+                              setState(() => _syncScope = value ?? 'private'),
                         ),
                       ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: DropdownButtonFormField<int?>(
-                          initialValue: _selectedWatchAlbum,
-                          decoration: const InputDecoration(labelText: 'Target Album'),
+                          initialValue: _selectedSyncAlbum,
+                          decoration: const InputDecoration(
+                            labelText: 'Target Album',
+                          ),
                           items: [
-                            const DropdownMenuItem<int?>(value: null, child: Text('No album')),
-                            ..._albums.map((a) => DropdownMenuItem<int?>(value: a.id, child: Text(a.name))),
+                            const DropdownMenuItem<int?>(
+                              value: null,
+                              child: Text('No album'),
+                            ),
+                            ..._albums.map(
+                              (a) => DropdownMenuItem<int?>(
+                                value: a.id,
+                                child: Text(a.name),
+                              ),
+                            ),
                           ],
-                          onChanged: (value) => setState(() => _selectedWatchAlbum = value),
+                          onChanged: (value) =>
+                              setState(() => _selectedSyncAlbum = value),
                         ),
                       ),
                     ],
@@ -12492,9 +17023,13 @@ class _SharedCloudPageState extends State<SharedCloudPage> {
                   Align(
                     alignment: Alignment.centerRight,
                     child: FilledButton.icon(
-                      onPressed: _savingWatchFolder ? null : _addWatchFolder,
+                      onPressed: _savingSyncSource
+                          ? null
+                          : _registerSyncSourceAndUpload,
                       icon: const Icon(Icons.add_link),
-                      label: Text(_savingWatchFolder ? 'Saving...' : 'Save Watched Folder'),
+                      label: Text(
+                        _savingSyncSource ? 'Saving...' : 'Register Source',
+                      ),
                     ),
                   ),
                 ],
@@ -12502,34 +17037,120 @@ class _SharedCloudPageState extends State<SharedCloudPage> {
             ),
           ),
           const SizedBox(height: 10),
-          if (_watchFolders.isEmpty)
-            const Card(child: ListTile(title: Text('No watched folders configured on this member/device.')))
+          Card(
+            child: ListTile(
+              title: Text(
+                latestJob == null
+                    ? 'No recent jobs'
+                    : 'Latest job #${latestJob.id} • ${latestJob.state}',
+              ),
+              subtitle: latestJob == null
+                  ? const Text('No sync activity yet.')
+                  : Text(
+                      '${latestJob.processedItems}/${latestJob.totalItems} processed • ${latestJob.ingestedItems} ingested • ${latestJob.dedupedItems} deduped • ${latestJob.failedItems} failed',
+                    ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          if (_syncSources.isEmpty)
+            const Card(
+              child: ListTile(
+                title: Text(
+                  'No sync sources configured for this member/device.',
+                ),
+              ),
+            )
           else
-            ..._watchFolders.map((item) {
-              final updating = _updatingWatchIds.contains(item.id);
-              final deleting = _deletingWatchIds.contains(item.id);
+            ..._syncSources.map((item) {
+              final updating = _updatingSyncSourceIds.contains(item.id);
+              final running = _runningSyncSourceIds.contains(item.id);
               return Card(
                 child: ListTile(
-                  title: Text(item.folderUri, maxLines: 1, overflow: TextOverflow.ellipsis),
-                  subtitle: Text('${item.scope} • ${item.platform}${item.lastSyncedAt != null ? ' • last sync ${_fmtDateTime(item.lastSyncedAt!)}' : ' • never synced'}'),
+                  title: Text(
+                    item.sourceUri,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  subtitle: Text(
+                    '${item.scope} • ${item.platform}${item.lastScanAt != null ? ' • last scan ${_fmtDateTime(item.lastScanAt!)}' : ' • never scanned'}',
+                  ),
                   trailing: Wrap(
                     spacing: 4,
                     children: [
                       IconButton(
-                        tooltip: item.isActive ? 'Pause sync' : 'Resume sync',
-                        onPressed: updating ? null : () => _toggleWatchFolder(item),
-                        icon: updating
-                            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                            : Icon(item.isActive ? Icons.pause_circle_outline : Icons.play_circle_outline),
+                        tooltip: 'Run scan now',
+                        onPressed: running ? null : () => _runSyncSource(item),
+                        icon: running
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(
+                                Icons.playlist_add_check_circle_outlined,
+                              ),
                       ),
                       IconButton(
-                        tooltip: 'Delete watched folder',
-                        onPressed: deleting ? null : () => _deleteWatchFolder(item),
-                        icon: deleting
-                            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                            : const Icon(Icons.delete_outline),
+                        tooltip: item.isActive
+                            ? 'Pause source'
+                            : 'Resume source',
+                        onPressed: updating
+                            ? null
+                            : () => _toggleSyncSource(item),
+                        icon: updating
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : Icon(
+                                item.isActive
+                                    ? Icons.pause_circle_outline
+                                    : Icons.play_circle_outline,
+                              ),
                       ),
                     ],
+                  ),
+                ),
+              );
+            }),
+          const SizedBox(height: 10),
+          if (_failedSyncItems.isNotEmpty)
+            ..._failedSyncItems.take(8).map((item) {
+              final retrying = _retryingSyncItemIds.contains(item.id);
+              final title = item.filename.trim().isEmpty
+                  ? item.sourceRelPath
+                  : item.filename;
+              return Card(
+                child: ListTile(
+                  leading: const Icon(
+                    Icons.warning_amber_outlined,
+                    color: Colors.orange,
+                  ),
+                  title: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  subtitle: Text(
+                    item.lastError.trim().isEmpty ? 'Failed' : item.lastError,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: IconButton(
+                    tooltip: 'Retry item',
+                    onPressed: retrying ? null : () => _retrySyncItem(item),
+                    icon: retrying
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.refresh_outlined),
                   ),
                 ),
               );
@@ -12558,8 +17179,11 @@ class _SharedCloudPageState extends State<SharedCloudPage> {
           const TabBar(
             tabs: [
               Tab(text: 'Files', icon: Icon(Icons.cloud_outlined)),
-              Tab(text: 'Family Photos', icon: Icon(Icons.photo_library_outlined)),
-              Tab(text: 'Watched Folders', icon: Icon(Icons.folder_special_outlined)),
+              Tab(
+                text: 'Interactive Slideshow',
+                icon: Icon(Icons.photo_library_outlined),
+              ),
+              Tab(text: 'Sync Sources', icon: Icon(Icons.sync_outlined)),
             ],
           ),
           Expanded(
@@ -12567,11 +17191,179 @@ class _SharedCloudPageState extends State<SharedCloudPage> {
               children: [
                 _buildFilesTab(isAdmin, member),
                 _buildPhotosTab(isAdmin, member),
-                _buildWatchFoldersTab(),
+                _buildSyncSourcesTab(),
               ],
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _InteractiveSlideshowPage extends StatefulWidget {
+  const _InteractiveSlideshowPage({
+    required this.albumName,
+    required this.items,
+    required this.absoluteUrlBuilder,
+  });
+
+  final String albumName;
+  final List<PhotoAssetItem> items;
+  final String Function(String path) absoluteUrlBuilder;
+
+  @override
+  State<_InteractiveSlideshowPage> createState() =>
+      _InteractiveSlideshowPageState();
+}
+
+class _InteractiveSlideshowPageState extends State<_InteractiveSlideshowPage> {
+  int _index = 0;
+  bool _playing = true;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _schedule();
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _schedule() {
+    _timer?.cancel();
+    if (!_playing || widget.items.isEmpty) return;
+    final current = widget.items[_index % widget.items.length];
+    if (current.isVideo) return;
+    _timer = Timer(const Duration(seconds: 4), () {
+      if (!mounted) return;
+      _next();
+    });
+  }
+
+  void _next() {
+    if (widget.items.isEmpty) return;
+    setState(() => _index = (_index + 1) % widget.items.length);
+    _schedule();
+  }
+
+  void _prev() {
+    if (widget.items.isEmpty) return;
+    setState(() {
+      _index = (_index - 1 + widget.items.length) % widget.items.length;
+    });
+    _schedule();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final items = widget.items;
+    if (items.isEmpty) {
+      return Scaffold(
+        appBar: AppBar(title: Text(widget.albumName)),
+        body: const Center(child: Text('No media in this album.')),
+      );
+    }
+    final item = items[_index % items.length];
+    final mediaUrl = widget.absoluteUrlBuilder(
+      item.isVideo
+          ? (item.streamUrl.trim().isNotEmpty
+                ? item.streamUrl
+                : item.previewUrl)
+          : item.previewUrl,
+    );
+
+    return Scaffold(
+      appBar: AppBar(title: Text(widget.albumName)),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                '${_index + 1} / ${items.length}',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Color(0xFF64748B),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: InkWell(
+                  onTap: () => _showMediaPreviewDialog(
+                    context: context,
+                    title: item.originalFilename,
+                    mediaUrl: mediaUrl,
+                    isVideo: item.isVideo,
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                  child: item.isVideo
+                      ? _InlineMutedVideo(
+                          url: mediaUrl,
+                          startMuted: true,
+                          autoplay: _playing,
+                          borderRadius: 12,
+                          onEnded: _playing ? _next : null,
+                        )
+                      : ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: Container(
+                            color: Colors.black,
+                            child: Image.network(
+                              mediaUrl,
+                              fit: BoxFit.contain,
+                              errorBuilder: (_, __, ___) => const Icon(
+                                Icons.broken_image_outlined,
+                                color: Colors.white70,
+                              ),
+                            ),
+                          ),
+                        ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                item.originalFilename,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: _prev,
+                    icon: const Icon(Icons.skip_previous),
+                    label: const Text('Prev'),
+                  ),
+                  FilledButton.icon(
+                    onPressed: () {
+                      setState(() => _playing = !_playing);
+                      _schedule();
+                    },
+                    icon: Icon(_playing ? Icons.pause : Icons.play_arrow),
+                    label: Text(_playing ? 'Pause' : 'Play'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: _next,
+                    icon: const Icon(Icons.skip_next),
+                    label: const Text('Next'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -12646,7 +17438,9 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
     final configured = widget.api.settings.baseUrl.trim();
     final base = configured.isEmpty ? _cloudBaseUrl : configured;
     final root = Uri.parse(_normalizeBaseUrl(base));
-    final rootPath = root.path.endsWith('/') ? root.path.substring(0, root.path.length - 1) : root.path;
+    final rootPath = root.path.endsWith('/')
+        ? root.path.substring(0, root.path.length - 1)
+        : root.path;
     final assetPath = raw.startsWith('/') ? raw : '/$raw';
     return root.replace(path: '$rootPath$assetPath').toString();
   }
@@ -12682,20 +17476,34 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
         allowedExtensions: const ['jpg', 'jpeg', 'png', 'webp', 'gif'],
       );
       final file = result?.files.first;
-      if (file == null || file.path == null || file.path!.trim().isEmpty) return;
+      if (file == null || file.path == null || file.path!.trim().isEmpty)
+        return;
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Uploading photo...')));
-      final uploaded = await widget.api.uploadShoppingPurchasePhoto(file.path!.trim());
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Uploading photo...')));
+      final uploaded = await widget.api.uploadShoppingPurchasePhoto(
+        file.path!.trim(),
+      );
       if (!mounted) return;
       setState(() {
-        _pendingPurchasePhotoFilename = '${uploaded['filename'] ?? ''}'.trim().isEmpty ? null : '${uploaded['filename']}';
-        _pendingPurchasePhotoUrl = '${uploaded['url'] ?? ''}'.trim().isEmpty ? null : '${uploaded['url']}';
+        _pendingPurchasePhotoFilename =
+            '${uploaded['filename'] ?? ''}'.trim().isEmpty
+            ? null
+            : '${uploaded['filename']}';
+        _pendingPurchasePhotoUrl = '${uploaded['url'] ?? ''}'.trim().isEmpty
+            ? null
+            : '${uploaded['url']}';
         _pendingPurchasePhotoLocalPath = file.path;
       });
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Photo uploaded')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Photo uploaded')));
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Photo upload failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Photo upload failed: $err')));
     }
   }
 
@@ -12717,8 +17525,12 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
     });
     try {
       final lists = await widget.api.fetchShoppingLists();
-      final nextListId = _selectedListId ?? (lists.isNotEmpty ? _toInt(lists.first['id']) : null);
-      final items = nextListId == null ? <Map<String, dynamic>>[] : await widget.api.fetchShoppingItems(nextListId);
+      final nextListId =
+          _selectedListId ??
+          (lists.isNotEmpty ? _toInt(lists.first['id']) : null);
+      final items = nextListId == null
+          ? <Map<String, dynamic>>[]
+          : await widget.api.fetchShoppingItems(nextListId);
       final repoItems = await widget.api.fetchShoppingRepo();
       if (!mounted) return;
       setState(() {
@@ -12749,7 +17561,9 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
     } catch (err) {
       if (!mounted) return;
       setState(() => _repoLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Repo load failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Repo load failed: $err')));
     }
   }
 
@@ -12796,9 +17610,15 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
         quantity: quantity,
         store: store.isEmpty ? null : store,
         tags: tags,
-        purchaseCategory: _purchaseCategoryCtrl.text.trim().isEmpty ? null : _purchaseCategoryCtrl.text.trim(),
-        planningNotes: _planningNotesCtrl.text.trim().isEmpty ? null : _planningNotesCtrl.text.trim(),
-        sizeRequirements: _sizeRequirementsCtrl.text.trim().isEmpty ? null : _sizeRequirementsCtrl.text.trim(),
+        purchaseCategory: _purchaseCategoryCtrl.text.trim().isEmpty
+            ? null
+            : _purchaseCategoryCtrl.text.trim(),
+        planningNotes: _planningNotesCtrl.text.trim().isEmpty
+            ? null
+            : _planningNotesCtrl.text.trim(),
+        sizeRequirements: _sizeRequirementsCtrl.text.trim().isEmpty
+            ? null
+            : _sizeRequirementsCtrl.text.trim(),
         targetPrice: _parseNullableDouble(_targetPriceCtrl.text),
         budgetCeiling: _parseNullableDouble(_budgetCeilingCtrl.text),
         purchasePhotoFilename: _pendingPurchasePhotoFilename,
@@ -12814,7 +17634,9 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
       await _changeList(listId);
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Add failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Add failed: $err')));
     } finally {
       if (mounted) setState(() => _adding = false);
     }
@@ -12852,7 +17674,10 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
         return StatefulBuilder(
           builder: (ctx, setDialogState) {
             return AlertDialog(
-              insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+              insetPadding: const EdgeInsets.symmetric(
+                horizontal: 24,
+                vertical: 24,
+              ),
               title: Text(source == null ? 'New List' : 'Edit List'),
               content: SizedBox(
                 width: 420,
@@ -12862,14 +17687,19 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
                     children: [
                       TextField(
                         controller: nameCtrl,
-                        decoration: const InputDecoration(labelText: 'List name'),
+                        decoration: const InputDecoration(
+                          labelText: 'List name',
+                        ),
                       ),
                       const SizedBox(height: 10),
                       Align(
                         alignment: Alignment.centerLeft,
                         child: Text(
                           'Color',
-                          style: Theme.of(ctx).textTheme.bodySmall?.copyWith(color: const Color(0xFF475569), fontWeight: FontWeight.w600),
+                          style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                            color: const Color(0xFF475569),
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
                       const SizedBox(height: 8),
@@ -12878,9 +17708,12 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
                         runSpacing: 10,
                         children: [
                           ...colorPresets.map((hex) {
-                            final isSelected = selectedColorHex.toLowerCase() == hex.toLowerCase();
+                            final isSelected =
+                                selectedColorHex.toLowerCase() ==
+                                hex.toLowerCase();
                             return InkWell(
-                              onTap: () => setDialogState(() => selectedColorHex = hex),
+                              onTap: () =>
+                                  setDialogState(() => selectedColorHex = hex),
                               borderRadius: BorderRadius.circular(999),
                               child: Container(
                                 width: 30,
@@ -12889,7 +17722,9 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
                                   color: _colorFromHex(hex),
                                   shape: BoxShape.circle,
                                   border: Border.all(
-                                    color: isSelected ? const Color(0xFF0F172A) : const Color(0xFFE2E8F0),
+                                    color: isSelected
+                                        ? const Color(0xFF0F172A)
+                                        : const Color(0xFFE2E8F0),
                                     width: isSelected ? 3 : 1,
                                   ),
                                 ),
@@ -12898,14 +17733,20 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
                           }),
                           OutlinedButton.icon(
                             onPressed: () async {
-                              Color pickerColor = _colorFromHex(selectedColorHex);
+                              Color pickerColor = _colorFromHex(
+                                selectedColorHex,
+                              );
                               final picked = await showDialog<Color>(
                                 context: ctx,
                                 builder: (pickerCtx) {
                                   return StatefulBuilder(
                                     builder: (pickerCtx, setPickerState) {
                                       return AlertDialog(
-                                        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+                                        insetPadding:
+                                            const EdgeInsets.symmetric(
+                                              horizontal: 24,
+                                              vertical: 24,
+                                            ),
                                         title: const Text('Custom Color'),
                                         content: SizedBox(
                                           width: 380,
@@ -12918,52 +17759,100 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
                                                   width: double.infinity,
                                                   decoration: BoxDecoration(
                                                     color: pickerColor,
-                                                    borderRadius: BorderRadius.circular(10),
-                                                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          10,
+                                                        ),
+                                                    border: Border.all(
+                                                      color: const Color(
+                                                        0xFFE2E8F0,
+                                                      ),
+                                                    ),
                                                   ),
                                                 ),
                                                 const SizedBox(height: 8),
-                                                Text(toHex(pickerColor), style: const TextStyle(fontWeight: FontWeight.w700)),
+                                                Text(
+                                                  toHex(pickerColor),
+                                                  style: const TextStyle(
+                                                    fontWeight: FontWeight.w700,
+                                                  ),
+                                                ),
                                                 const SizedBox(height: 12),
                                                 Slider(
-                                                  value: ((pickerColor.toARGB32() >> 16) & 0xFF).toDouble(),
+                                                  value:
+                                                      ((pickerColor.toARGB32() >>
+                                                                  16) &
+                                                              0xFF)
+                                                          .toDouble(),
                                                   min: 0,
                                                   max: 255,
                                                   activeColor: Colors.red,
                                                   onChanged: (value) {
-                                                    final argb = pickerColor.toARGB32();
-                                                    final g = (argb >> 8) & 0xFF;
+                                                    final argb = pickerColor
+                                                        .toARGB32();
+                                                    final g =
+                                                        (argb >> 8) & 0xFF;
                                                     final b = argb & 0xFF;
                                                     setPickerState(() {
-                                                      pickerColor = Color.fromARGB(255, value.round(), g, b);
+                                                      pickerColor =
+                                                          Color.fromARGB(
+                                                            255,
+                                                            value.round(),
+                                                            g,
+                                                            b,
+                                                          );
                                                     });
                                                   },
                                                 ),
                                                 Slider(
-                                                  value: ((pickerColor.toARGB32() >> 8) & 0xFF).toDouble(),
+                                                  value:
+                                                      ((pickerColor.toARGB32() >>
+                                                                  8) &
+                                                              0xFF)
+                                                          .toDouble(),
                                                   min: 0,
                                                   max: 255,
                                                   activeColor: Colors.green,
                                                   onChanged: (value) {
-                                                    final argb = pickerColor.toARGB32();
-                                                    final r = (argb >> 16) & 0xFF;
+                                                    final argb = pickerColor
+                                                        .toARGB32();
+                                                    final r =
+                                                        (argb >> 16) & 0xFF;
                                                     final b = argb & 0xFF;
                                                     setPickerState(() {
-                                                      pickerColor = Color.fromARGB(255, r, value.round(), b);
+                                                      pickerColor =
+                                                          Color.fromARGB(
+                                                            255,
+                                                            r,
+                                                            value.round(),
+                                                            b,
+                                                          );
                                                     });
                                                   },
                                                 ),
                                                 Slider(
-                                                  value: (pickerColor.toARGB32() & 0xFF).toDouble(),
+                                                  value:
+                                                      (pickerColor.toARGB32() &
+                                                              0xFF)
+                                                          .toDouble(),
                                                   min: 0,
                                                   max: 255,
                                                   activeColor: Colors.blue,
                                                   onChanged: (value) {
-                                                    final argb = pickerColor.toARGB32();
-                                                    final r = (argb >> 16) & 0xFF;
-                                                    final g = (argb >> 8) & 0xFF;
+                                                    final argb = pickerColor
+                                                        .toARGB32();
+                                                    final r =
+                                                        (argb >> 16) & 0xFF;
+                                                    final g =
+                                                        (argb >> 8) & 0xFF;
                                                     setPickerState(() {
-                                                      pickerColor = Color.fromARGB(255, r, g, value.round());
+                                                      pickerColor =
+                                                          Color.fromARGB(
+                                                            255,
+                                                            r,
+                                                            g,
+                                                            value.round(),
+                                                          );
                                                     });
                                                   },
                                                 ),
@@ -12972,8 +17861,17 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
                                           ),
                                         ),
                                         actions: [
-                                          TextButton(onPressed: () => Navigator.of(pickerCtx).pop(), child: const Text('Cancel')),
-                                          FilledButton(onPressed: () => Navigator.of(pickerCtx).pop(pickerColor), child: const Text('Use Color')),
+                                          TextButton(
+                                            onPressed: () =>
+                                                Navigator.of(pickerCtx).pop(),
+                                            child: const Text('Cancel'),
+                                          ),
+                                          FilledButton(
+                                            onPressed: () => Navigator.of(
+                                              pickerCtx,
+                                            ).pop(pickerColor),
+                                            child: const Text('Use Color'),
+                                          ),
                                         ],
                                       );
                                     },
@@ -12981,7 +17879,9 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
                                 },
                               );
                               if (picked == null) return;
-                              setDialogState(() => selectedColorHex = toHex(picked));
+                              setDialogState(
+                                () => selectedColorHex = toHex(picked),
+                              );
                             },
                             icon: const Icon(Icons.palette_outlined, size: 18),
                             label: const Text('Custom'),
@@ -12997,20 +17897,33 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
                             decoration: BoxDecoration(
                               color: _colorFromHex(selectedColorHex),
                               shape: BoxShape.circle,
-                              border: Border.all(color: const Color(0xFFE2E8F0)),
+                              border: Border.all(
+                                color: const Color(0xFFE2E8F0),
+                              ),
                             ),
                           ),
                           const SizedBox(width: 8),
-                          Text(selectedColorHex, style: const TextStyle(fontWeight: FontWeight.w600)),
+                          Text(
+                            selectedColorHex,
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
                         ],
                       ),
                       const SizedBox(height: 10),
                       DropdownButtonFormField<String>(
                         initialValue: listType,
-                        decoration: const InputDecoration(labelText: 'List type'),
+                        decoration: const InputDecoration(
+                          labelText: 'List type',
+                        ),
                         items: const [
-                          DropdownMenuItem(value: 'standard', child: Text('Standard Shopping')),
-                          DropdownMenuItem(value: 'big_purchase', child: Text('Big Purchase Planner')),
+                          DropdownMenuItem(
+                            value: 'standard',
+                            child: Text('Standard Shopping'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'big_purchase',
+                            child: Text('Big Purchase Planner'),
+                          ),
                         ],
                         onChanged: (value) {
                           if (value == null) return;
@@ -13022,7 +17935,13 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
                           padding: const EdgeInsets.only(top: 10),
                           child: Align(
                             alignment: Alignment.centerLeft,
-                            child: Text(formError!, style: const TextStyle(color: Color(0xFFB91C1C), fontSize: 12)),
+                            child: Text(
+                              formError!,
+                              style: const TextStyle(
+                                color: Color(0xFFB91C1C),
+                                fontSize: 12,
+                              ),
+                            ),
                           ),
                         ),
                     ],
@@ -13030,13 +17949,18 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
                 ),
               ),
               actions: [
-                TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(false),
+                  child: const Text('Cancel'),
+                ),
                 FilledButton(
                   onPressed: _savingList
                       ? null
                       : () {
                           if (nameCtrl.text.trim().isEmpty) {
-                            setDialogState(() => formError = 'List name is required');
+                            setDialogState(
+                              () => formError = 'List name is required',
+                            );
                             return;
                           }
                           Navigator.of(ctx).pop(true);
@@ -13060,12 +17984,16 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
       if (source == null) {
         final created = await widget.api.createShoppingList(
           name: nameCtrl.text.trim(),
-          color: selectedColorHex.trim().isEmpty ? '#3B82F6' : selectedColorHex.trim(),
+          color: selectedColorHex.trim().isEmpty
+              ? '#3B82F6'
+              : selectedColorHex.trim(),
           listType: listType,
         );
         final createdList = created['list'] as Map<String, dynamic>?;
         await _load();
-        final createdId = createdList == null ? null : _toInt(createdList['id']);
+        final createdId = createdList == null
+            ? null
+            : _toInt(createdList['id']);
         if (createdId != null && mounted) {
           await _changeList(createdId);
         }
@@ -13073,14 +18001,18 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
         await widget.api.updateShoppingList(
           listId: _toInt(source['id']),
           name: nameCtrl.text.trim(),
-          color: selectedColorHex.trim().isEmpty ? '#3B82F6' : selectedColorHex.trim(),
+          color: selectedColorHex.trim().isEmpty
+              ? '#3B82F6'
+              : selectedColorHex.trim(),
           listType: listType,
         );
         await _load();
       }
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('List save failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('List save failed: $err')));
     } finally {
       if (mounted) setState(() => _savingList = false);
       nameCtrl.dispose();
@@ -13107,7 +18039,10 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
         return StatefulBuilder(
           builder: (ctx, setDialogState) {
             return AlertDialog(
-              insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+              insetPadding: const EdgeInsets.symmetric(
+                horizontal: 24,
+                vertical: 24,
+              ),
               title: const Text('Delete Shopping List'),
               content: SizedBox(
                 width: 460,
@@ -13120,10 +18055,18 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
                       const SizedBox(height: 10),
                       DropdownButtonFormField<String>(
                         initialValue: strategy,
-                        decoration: const InputDecoration(labelText: 'Delete strategy'),
+                        decoration: const InputDecoration(
+                          labelText: 'Delete strategy',
+                        ),
                         items: const [
-                          DropdownMenuItem(value: 'move', child: Text('Move items to another list')),
-                          DropdownMenuItem(value: 'delete_all', child: Text('Delete all items in this list')),
+                          DropdownMenuItem(
+                            value: 'move',
+                            child: Text('Move items to another list'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'delete_all',
+                            child: Text('Delete all items in this list'),
+                          ),
                         ],
                         onChanged: (value) {
                           if (value == null) return;
@@ -13133,7 +18076,9 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
                       const SizedBox(height: 10),
                       DropdownButtonFormField<int>(
                         initialValue: targetListId,
-                        decoration: const InputDecoration(labelText: 'Destination list'),
+                        decoration: const InputDecoration(
+                          labelText: 'Destination list',
+                        ),
                         items: _lists
                             .where((row) => _toInt(row['id']) != currentListId)
                             .map(
@@ -13154,10 +18099,15 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
                 ),
               ),
               actions: [
-                TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(false),
+                  child: const Text('Cancel'),
+                ),
                 FilledButton(
                   onPressed: () => Navigator.of(ctx).pop(true),
-                  style: FilledButton.styleFrom(backgroundColor: const Color(0xFFDC2626)),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFFDC2626),
+                  ),
                   child: const Text('Delete List'),
                 ),
               ],
@@ -13177,31 +18127,53 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
       );
       await _load();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('List deleted')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('List deleted')));
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Delete list failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Delete list failed: $err')));
     }
   }
 
   Future<void> _editItem(Map<String, dynamic> row) async {
     final id = _toInt(row['id']);
     final nameCtrl = TextEditingController(text: '${row['item'] ?? ''}');
-    final priceCtrl = TextEditingController(text: row['price'] == null ? '' : '${row['price']}');
-    final qtyCtrl = TextEditingController(text: row['quantity'] == null ? '1' : '${row['quantity']}');
+    final priceCtrl = TextEditingController(
+      text: row['price'] == null ? '' : '${row['price']}',
+    );
+    final qtyCtrl = TextEditingController(
+      text: row['quantity'] == null ? '1' : '${row['quantity']}',
+    );
 
-    final tagList = (row['tags'] is List ? (row['tags'] as List<dynamic>) : const <dynamic>[])
-        .map((e) => '$e'.trim())
-        .where((e) => e.isNotEmpty)
-        .toList();
+    final tagList =
+        (row['tags'] is List
+                ? (row['tags'] as List<dynamic>)
+                : const <dynamic>[])
+            .map((e) => '$e'.trim())
+            .where((e) => e.isNotEmpty)
+            .toList();
     final tagsCtrl = TextEditingController(text: tagList.join(', '));
-    final purchaseCategoryCtrl = TextEditingController(text: '${row['purchase_category'] ?? ''}');
-    final planningNotesCtrl = TextEditingController(text: '${row['planning_notes'] ?? ''}');
-    final targetPriceCtrl = TextEditingController(text: row['target_price'] == null ? '' : '${row['target_price']}');
-    final budgetCeilingCtrl = TextEditingController(text: row['budget_ceiling'] == null ? '' : '${row['budget_ceiling']}');
-    final sizeReqCtrl = TextEditingController(text: '${row['size_requirements'] ?? ''}');
+    final purchaseCategoryCtrl = TextEditingController(
+      text: '${row['purchase_category'] ?? ''}',
+    );
+    final planningNotesCtrl = TextEditingController(
+      text: '${row['planning_notes'] ?? ''}',
+    );
+    final targetPriceCtrl = TextEditingController(
+      text: row['target_price'] == null ? '' : '${row['target_price']}',
+    );
+    final budgetCeilingCtrl = TextEditingController(
+      text: row['budget_ceiling'] == null ? '' : '${row['budget_ceiling']}',
+    );
+    final sizeReqCtrl = TextEditingController(
+      text: '${row['size_requirements'] ?? ''}',
+    );
     int movedListId = _selectedListId ?? _toInt(row['list_id']);
-    String purchasePhotoFilename = '${row['purchase_photo_filename'] ?? ''}'.trim();
+    String purchasePhotoFilename = '${row['purchase_photo_filename'] ?? ''}'
+        .trim();
     String purchasePhotoUrl = '${row['purchase_photo_url'] ?? ''}'.trim();
     bool uploadingPhoto = false;
 
@@ -13211,7 +18183,10 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
         return StatefulBuilder(
           builder: (ctx, setDialogState) {
             return AlertDialog(
-              insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+              insetPadding: const EdgeInsets.symmetric(
+                horizontal: 24,
+                vertical: 24,
+              ),
               title: const Text('Edit Item'),
               content: SizedBox(
                 width: 460,
@@ -13219,31 +18194,99 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Item')),
+                      TextField(
+                        controller: nameCtrl,
+                        decoration: const InputDecoration(labelText: 'Item'),
+                      ),
                       const SizedBox(height: 10),
                       Row(
                         children: [
-                          Expanded(child: TextField(controller: priceCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Price'))),
+                          Expanded(
+                            child: TextField(
+                              controller: priceCtrl,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                              decoration: const InputDecoration(
+                                labelText: 'Price',
+                              ),
+                            ),
+                          ),
                           const SizedBox(width: 10),
-                          Expanded(child: TextField(controller: qtyCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Qty'))),
+                          Expanded(
+                            child: TextField(
+                              controller: qtyCtrl,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                              decoration: const InputDecoration(
+                                labelText: 'Qty',
+                              ),
+                            ),
+                          ),
                         ],
                       ),
                       const SizedBox(height: 10),
-                      TextField(controller: tagsCtrl, decoration: const InputDecoration(labelText: 'Tags (comma separated)')),
+                      TextField(
+                        controller: tagsCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Tags (comma separated)',
+                        ),
+                      ),
                       const SizedBox(height: 10),
-                      TextField(controller: purchaseCategoryCtrl, decoration: const InputDecoration(labelText: 'Purchase category')),
+                      TextField(
+                        controller: purchaseCategoryCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Purchase category',
+                        ),
+                      ),
                       const SizedBox(height: 10),
                       Row(
                         children: [
-                          Expanded(child: TextField(controller: targetPriceCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Target price'))),
+                          Expanded(
+                            child: TextField(
+                              controller: targetPriceCtrl,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                              decoration: const InputDecoration(
+                                labelText: 'Target price',
+                              ),
+                            ),
+                          ),
                           const SizedBox(width: 10),
-                          Expanded(child: TextField(controller: budgetCeilingCtrl, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Budget ceiling'))),
+                          Expanded(
+                            child: TextField(
+                              controller: budgetCeilingCtrl,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                              decoration: const InputDecoration(
+                                labelText: 'Budget ceiling',
+                              ),
+                            ),
+                          ),
                         ],
                       ),
                       const SizedBox(height: 10),
-                      TextField(controller: sizeReqCtrl, decoration: const InputDecoration(labelText: 'Size requirements')),
+                      TextField(
+                        controller: sizeReqCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Size requirements',
+                        ),
+                      ),
                       const SizedBox(height: 10),
-                      TextField(controller: planningNotesCtrl, maxLines: 2, decoration: const InputDecoration(labelText: 'Planning notes')),
+                      TextField(
+                        controller: planningNotesCtrl,
+                        maxLines: 2,
+                        decoration: const InputDecoration(
+                          labelText: 'Planning notes',
+                        ),
+                      ),
                       const SizedBox(height: 10),
                       Row(
                         children: [
@@ -13252,26 +18295,50 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
                               onPressed: uploadingPhoto
                                   ? null
                                   : () async {
-                                      final result = await FilePicker.platform.pickFiles(
-                                        type: FileType.custom,
-                                        allowMultiple: false,
-                                        allowedExtensions: const ['jpg', 'jpeg', 'png', 'webp', 'gif'],
-                                      );
+                                      final result = await FilePicker.platform
+                                          .pickFiles(
+                                            type: FileType.custom,
+                                            allowMultiple: false,
+                                            allowedExtensions: const [
+                                              'jpg',
+                                              'jpeg',
+                                              'png',
+                                              'webp',
+                                              'gif',
+                                            ],
+                                          );
                                       final file = result?.files.first;
-                                      if (file == null || file.path == null || file.path!.trim().isEmpty) return;
-                                      setDialogState(() => uploadingPhoto = true);
+                                      if (file == null ||
+                                          file.path == null ||
+                                          file.path!.trim().isEmpty)
+                                        return;
+                                      setDialogState(
+                                        () => uploadingPhoto = true,
+                                      );
                                       try {
-                                        final uploaded = await widget.api.uploadShoppingPurchasePhoto(file.path!.trim());
+                                        final uploaded = await widget.api
+                                            .uploadShoppingPurchasePhoto(
+                                              file.path!.trim(),
+                                            );
                                         setDialogState(() {
-                                          purchasePhotoFilename = '${uploaded['filename'] ?? ''}'.trim();
-                                          purchasePhotoUrl = '${uploaded['url'] ?? ''}'.trim();
+                                          purchasePhotoFilename =
+                                              '${uploaded['filename'] ?? ''}'
+                                                  .trim();
+                                          purchasePhotoUrl =
+                                              '${uploaded['url'] ?? ''}'.trim();
                                         });
                                       } finally {
-                                        setDialogState(() => uploadingPhoto = false);
+                                        setDialogState(
+                                          () => uploadingPhoto = false,
+                                        );
                                       }
                                     },
                               icon: const Icon(Icons.upload_file),
-                              label: Text(uploadingPhoto ? 'Uploading...' : 'Upload photo'),
+                              label: Text(
+                                uploadingPhoto
+                                    ? 'Uploading...'
+                                    : 'Upload photo',
+                              ),
                             ),
                           ),
                         ],
@@ -13317,8 +18384,14 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
                 ),
               ),
               actions: [
-                TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
-                FilledButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Save')),
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(ctx).pop(true),
+                  child: const Text('Save'),
+                ),
               ],
             );
           },
@@ -13353,7 +18426,9 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
         targetPrice: _parseNullableDouble(targetPriceCtrl.text),
         budgetCeiling: _parseNullableDouble(budgetCeilingCtrl.text),
         sizeRequirements: sizeReqCtrl.text.trim(),
-        purchasePhotoFilename: purchasePhotoFilename.trim().isEmpty ? null : purchasePhotoFilename.trim(),
+        purchasePhotoFilename: purchasePhotoFilename.trim().isEmpty
+            ? null
+            : purchasePhotoFilename.trim(),
       );
       final listId = _selectedListId;
       if (listId != null) {
@@ -13361,7 +18436,9 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
       }
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Update failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Update failed: $err')));
     } finally {
       if (mounted) setState(() => _updatingItemIds.remove(id));
       nameCtrl.dispose();
@@ -13379,8 +18456,12 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
   Future<void> _openRepoEditor({Map<String, dynamic>? source}) async {
     final nameCtrl = TextEditingController(text: '${source?['name'] ?? ''}');
     final storeCtrl = TextEditingController(text: '${source?['store'] ?? ''}');
-    final categoryCtrl = TextEditingController(text: '${source?['category'] ?? ''}');
-    final priceCtrl = TextEditingController(text: source?['price'] == null ? '' : '${source?['price']}');
+    final categoryCtrl = TextEditingController(
+      text: '${source?['category'] ?? ''}',
+    );
+    final priceCtrl = TextEditingController(
+      text: source?['price'] == null ? '' : '${source?['price']}',
+    );
     String? localError;
 
     final save = await showDialog<bool>(
@@ -13389,7 +18470,10 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
         return StatefulBuilder(
           builder: (ctx, setDialogState) {
             return AlertDialog(
-              insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+              insetPadding: const EdgeInsets.symmetric(
+                horizontal: 24,
+                vertical: 24,
+              ),
               title: Text(source == null ? 'Add Repo Item' : 'Edit Repo Item'),
               content: SizedBox(
                 width: 460,
@@ -13397,15 +18481,28 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Item')),
+                      TextField(
+                        controller: nameCtrl,
+                        decoration: const InputDecoration(labelText: 'Item'),
+                      ),
                       const SizedBox(height: 10),
-                      TextField(controller: storeCtrl, decoration: const InputDecoration(labelText: 'Store')),
+                      TextField(
+                        controller: storeCtrl,
+                        decoration: const InputDecoration(labelText: 'Store'),
+                      ),
                       const SizedBox(height: 10),
-                      TextField(controller: categoryCtrl, decoration: const InputDecoration(labelText: 'Category')),
+                      TextField(
+                        controller: categoryCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Category',
+                        ),
+                      ),
                       const SizedBox(height: 10),
                       TextField(
                         controller: priceCtrl,
-                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
                         decoration: const InputDecoration(labelText: 'Price'),
                       ),
                       if (localError != null)
@@ -13413,7 +18510,13 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
                           padding: const EdgeInsets.only(top: 10),
                           child: Align(
                             alignment: Alignment.centerLeft,
-                            child: Text(localError!, style: const TextStyle(color: Color(0xFFB91C1C), fontSize: 12)),
+                            child: Text(
+                              localError!,
+                              style: const TextStyle(
+                                color: Color(0xFFB91C1C),
+                                fontSize: 12,
+                              ),
+                            ),
                           ),
                         ),
                     ],
@@ -13421,13 +18524,18 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
                 ),
               ),
               actions: [
-                TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(false),
+                  child: const Text('Cancel'),
+                ),
                 FilledButton(
                   onPressed: _repoSaving
                       ? null
                       : () {
                           if (nameCtrl.text.trim().isEmpty) {
-                            setDialogState(() => localError = 'Name is required');
+                            setDialogState(
+                              () => localError = 'Name is required',
+                            );
                             return;
                           }
                           Navigator.of(ctx).pop(true);
@@ -13455,7 +18563,9 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
         await widget.api.createShoppingRepoItem(
           name: nameCtrl.text.trim(),
           store: storeCtrl.text.trim().isEmpty ? null : storeCtrl.text.trim(),
-          category: categoryCtrl.text.trim().isEmpty ? null : categoryCtrl.text.trim(),
+          category: categoryCtrl.text.trim().isEmpty
+              ? null
+              : categoryCtrl.text.trim(),
           price: _parseNullableDouble(priceCtrl.text),
         );
       } else {
@@ -13470,7 +18580,9 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
       await _loadRepo(query: _repoSearchCtrl.text.trim());
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Repo save failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Repo save failed: $err')));
     } finally {
       if (mounted) setState(() => _repoSaving = false);
       nameCtrl.dispose();
@@ -13488,10 +18600,15 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
         title: const Text('Delete Repo Item'),
         content: Text('Delete "${row['name'] ?? 'Item'}" from saved repo?'),
         actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFDC2626)),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFDC2626),
+            ),
             child: const Text('Delete'),
           ),
         ],
@@ -13504,7 +18621,9 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
       await _loadRepo(query: _repoSearchCtrl.text.trim());
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Repo delete failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Repo delete failed: $err')));
     }
   }
 
@@ -13520,10 +18639,14 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
       );
       await _changeList(listId);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Added ${row['name'] ?? 'item'}')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Added ${row['name'] ?? 'item'}')));
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Add from repo failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Add from repo failed: $err')));
     }
   }
 
@@ -13534,10 +18657,13 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
     }
     if (_selectedTag != null && _selectedTag!.isNotEmpty) {
       rows = rows.where((row) {
-        final tags = (row['tags'] is List ? (row['tags'] as List<dynamic>) : const <dynamic>[])
-            .map((e) => '$e'.trim().toLowerCase())
-            .where((e) => e.isNotEmpty)
-            .toList();
+        final tags =
+            (row['tags'] is List
+                    ? (row['tags'] as List<dynamic>)
+                    : const <dynamic>[])
+                .map((e) => '$e'.trim().toLowerCase())
+                .where((e) => e.isNotEmpty)
+                .toList();
         return tags.contains(_selectedTag!.toLowerCase());
       }).toList();
     }
@@ -13553,9 +18679,12 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
   List<String> get _availableTags {
     final set = <String>{};
     for (final row in _items) {
-      final tags = (row['tags'] is List ? (row['tags'] as List<dynamic>) : const <dynamic>[])
-          .map((e) => '$e'.trim())
-          .where((e) => e.isNotEmpty);
+      final tags =
+          (row['tags'] is List
+                  ? (row['tags'] as List<dynamic>)
+                  : const <dynamic>[])
+              .map((e) => '$e'.trim())
+              .where((e) => e.isNotEmpty);
       set.addAll(tags);
     }
     final out = set.toList();
@@ -13586,7 +18715,9 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
       }
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Update failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Update failed: $err')));
     } finally {
       if (mounted) setState(() => _updatingItemIds.remove(id));
     }
@@ -13603,7 +18734,9 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
       }
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Delete failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Delete failed: $err')));
     } finally {
       if (mounted) setState(() => _deletingItemIds.remove(id));
     }
@@ -13620,8 +18753,11 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
 
     final selectedId = _selectedListId;
     final selectedList = _selectedListRow;
-    final estimatedTotal = _toDouble(selectedList == null ? 0 : selectedList['estimated_total']);
-    final listType = '${selectedList == null ? 'standard' : (selectedList['list_type'] ?? 'standard')}';
+    final estimatedTotal = _toDouble(
+      selectedList == null ? 0 : selectedList['estimated_total'],
+    );
+    final listType =
+        '${selectedList == null ? 'standard' : (selectedList['list_type'] ?? 'standard')}';
     final tags = _availableTags;
     final stores = _availableStores;
     final visibleItems = _visibleItems;
@@ -13641,7 +18777,9 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
                       .map(
                         (row) => DropdownMenuItem<int>(
                           value: _toInt(row['id']),
-                          child: Text('${row['name'] ?? ''} (${_toInt(row['active_count'])})'),
+                          child: Text(
+                            '${row['name'] ?? ''} (${_toInt(row['active_count'])})',
+                          ),
                         ),
                       )
                       .toList(),
@@ -13656,7 +18794,11 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
                 tooltip: 'New list',
                 onPressed: _savingList ? null : () => _openListEditor(),
                 icon: _savingList
-                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
                     : const Icon(Icons.playlist_add),
               ),
               PopupMenuButton<String>(
@@ -13670,15 +18812,23 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
                   }
                 },
                 itemBuilder: (context) => const [
-                  PopupMenuItem<String>(value: 'edit', child: Text('Edit list')),
-                  PopupMenuItem<String>(value: 'delete', child: Text('Delete list')),
+                  PopupMenuItem<String>(
+                    value: 'edit',
+                    child: Text('Edit list'),
+                  ),
+                  PopupMenuItem<String>(
+                    value: 'delete',
+                    child: Text('Delete list'),
+                  ),
                 ],
               ),
             ],
           ),
           const SizedBox(height: 10),
           Card(
-            color: listType == 'big_purchase' ? const Color(0xFFE0E7FF) : const Color(0xFFE0F2FE),
+            color: listType == 'big_purchase'
+                ? const Color(0xFFE0E7FF)
+                : const Color(0xFFE0F2FE),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               child: Row(
@@ -13691,7 +18841,11 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
                   ),
                   Text(
                     listType == 'big_purchase' ? 'Big Purchase' : 'Standard',
-                    style: const TextStyle(fontSize: 12, color: Color(0xFF475569), fontWeight: FontWeight.w600),
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFF475569),
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ],
               ),
@@ -13703,7 +18857,10 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
               Expanded(
                 child: TextField(
                   controller: _itemCtrl,
-                  decoration: const InputDecoration(labelText: 'Add item', hintText: 'Milk, Bread, Eggs...'),
+                  decoration: const InputDecoration(
+                    labelText: 'Add item',
+                    hintText: 'Milk, Bread, Eggs...',
+                  ),
                   onSubmitted: (_) => _addItem(),
                 ),
               ),
@@ -13720,23 +18877,36 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
               Expanded(
                 child: TextField(
                   controller: _storeCtrl,
-                  decoration: const InputDecoration(labelText: 'Store (optional)', hintText: 'Drug Mart'),
+                  decoration: const InputDecoration(
+                    labelText: 'Store (optional)',
+                    hintText: 'Drug Mart',
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
                 child: TextField(
                   controller: _priceCtrl,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(labelText: 'Price', hintText: '0.00'),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: const InputDecoration(
+                    labelText: 'Price',
+                    hintText: '0.00',
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
                 child: TextField(
                   controller: _qtyCtrl,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(labelText: 'Qty', hintText: '1'),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: const InputDecoration(
+                    labelText: 'Qty',
+                    hintText: '1',
+                  ),
                 ),
               ),
             ],
@@ -13744,13 +18914,19 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
           const SizedBox(height: 8),
           TextField(
             controller: _tagsCtrl,
-            decoration: const InputDecoration(labelText: 'Tags (comma separated)', hintText: 'produce, weekly, pantry'),
+            decoration: const InputDecoration(
+              labelText: 'Tags (comma separated)',
+              hintText: 'produce, weekly, pantry',
+            ),
           ),
           if (listType == 'big_purchase') ...[
             const SizedBox(height: 8),
             TextField(
               controller: _purchaseCategoryCtrl,
-              decoration: const InputDecoration(labelText: 'Purchase category', hintText: 'electronics, appliance, furniture...'),
+              decoration: const InputDecoration(
+                labelText: 'Purchase category',
+                hintText: 'electronics, appliance, furniture...',
+              ),
             ),
             const SizedBox(height: 8),
             Row(
@@ -13758,16 +18934,26 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
                 Expanded(
                   child: TextField(
                     controller: _targetPriceCtrl,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    decoration: const InputDecoration(labelText: 'Target price', hintText: '999.00'),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: const InputDecoration(
+                      labelText: 'Target price',
+                      hintText: '999.00',
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: TextField(
                     controller: _budgetCeilingCtrl,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    decoration: const InputDecoration(labelText: 'Budget ceiling', hintText: '1299.00'),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: const InputDecoration(
+                      labelText: 'Budget ceiling',
+                      hintText: '1299.00',
+                    ),
                   ),
                 ),
               ],
@@ -13775,13 +18961,19 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
             const SizedBox(height: 8),
             TextField(
               controller: _sizeRequirementsCtrl,
-              decoration: const InputDecoration(labelText: 'Size requirements', hintText: '36in W x 30in D'),
+              decoration: const InputDecoration(
+                labelText: 'Size requirements',
+                hintText: '36in W x 30in D',
+              ),
             ),
             const SizedBox(height: 8),
             TextField(
               controller: _planningNotesCtrl,
               maxLines: 2,
-              decoration: const InputDecoration(labelText: 'Planning notes', hintText: 'Color, delivery, outlet requirements...'),
+              decoration: const InputDecoration(
+                labelText: 'Planning notes',
+                hintText: 'Color, delivery, outlet requirements...',
+              ),
             ),
             const SizedBox(height: 8),
             Row(
@@ -13793,25 +18985,32 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
                     label: const Text('Upload photo'),
                   ),
                 ),
-                if (_pendingPurchasePhotoFilename != null && _pendingPurchasePhotoFilename!.isNotEmpty) ...[
+                if (_pendingPurchasePhotoFilename != null &&
+                    _pendingPurchasePhotoFilename!.isNotEmpty) ...[
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       _pendingPurchasePhotoFilename!,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 12, color: Color(0xFF475569)),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF475569),
+                      ),
                     ),
                   ),
                 ],
               ],
             ),
-            if ((_pendingPurchasePhotoUrl ?? '').isNotEmpty || (_pendingPurchasePhotoLocalPath ?? '').isNotEmpty)
+            if ((_pendingPurchasePhotoUrl ?? '').isNotEmpty ||
+                (_pendingPurchasePhotoLocalPath ?? '').isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(10),
-                  child: _pendingPurchasePhotoLocalPath != null && _pendingPurchasePhotoLocalPath!.isNotEmpty
+                  child:
+                      _pendingPurchasePhotoLocalPath != null &&
+                          _pendingPurchasePhotoLocalPath!.isNotEmpty
                       ? Image.file(
                           File(_pendingPurchasePhotoLocalPath!),
                           height: 120,
@@ -13884,7 +19083,9 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
                   (tag) => ChoiceChip(
                     label: Text(tag),
                     selected: _selectedTag == tag,
-                    onSelected: (_) => setState(() => _selectedTag = _selectedTag == tag ? null : tag),
+                    onSelected: (_) => setState(
+                      () => _selectedTag = _selectedTag == tag ? null : tag,
+                    ),
                   ),
                 ),
               ],
@@ -13905,7 +19106,11 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
                   (store) => ChoiceChip(
                     label: Text(store),
                     selected: _selectedStore == store,
-                    onSelected: (_) => setState(() => _selectedStore = _selectedStore == store ? null : store),
+                    onSelected: (_) => setState(
+                      () => _selectedStore = _selectedStore == store
+                          ? null
+                          : store,
+                    ),
                   ),
                 ),
               ],
@@ -13921,30 +19126,48 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
               final updating = _updatingItemIds.contains(id);
               final deleting = _deletingItemIds.contains(id);
               final quantity = _toDouble(row['quantity']);
-              final price = row['price'] == null ? null : _toDouble(row['price']);
+              final price = row['price'] == null
+                  ? null
+                  : _toDouble(row['price']);
               final store = '${row['store'] ?? ''}'.trim();
-              final tags = (row['tags'] is List ? (row['tags'] as List<dynamic>) : const <dynamic>[])
-                  .map((e) => '$e'.trim())
-                  .where((e) => e.isNotEmpty)
-                  .toList();
+              final tags =
+                  (row['tags'] is List
+                          ? (row['tags'] as List<dynamic>)
+                          : const <dynamic>[])
+                      .map((e) => '$e'.trim())
+                      .where((e) => e.isNotEmpty)
+                      .toList();
               final purchaseMeta = <String>[];
-              if ('${row['purchase_category'] ?? ''}'.trim().isNotEmpty) purchaseMeta.add('${row['purchase_category']}');
-              if (row['target_price'] != null) purchaseMeta.add('Target ${_currency(_toDouble(row['target_price']))}');
-              if (row['budget_ceiling'] != null) purchaseMeta.add('Ceiling ${_currency(_toDouble(row['budget_ceiling']))}');
+              if ('${row['purchase_category'] ?? ''}'.trim().isNotEmpty)
+                purchaseMeta.add('${row['purchase_category']}');
+              if (row['target_price'] != null)
+                purchaseMeta.add(
+                  'Target ${_currency(_toDouble(row['target_price']))}',
+                );
+              if (row['budget_ceiling'] != null)
+                purchaseMeta.add(
+                  'Ceiling ${_currency(_toDouble(row['budget_ceiling']))}',
+                );
 
               final subtitleParts = <String>['${row['creator'] ?? ''}'];
               if (price != null) subtitleParts.add('Price ${_currency(price)}');
-              if (quantity > 0) subtitleParts.add('Qty ${quantity % 1 == 0 ? quantity.toInt() : quantity.toStringAsFixed(1)}');
+              if (quantity > 0)
+                subtitleParts.add(
+                  'Qty ${quantity % 1 == 0 ? quantity.toInt() : quantity.toStringAsFixed(1)}',
+                );
               if (store.isNotEmpty) subtitleParts.add(store);
               if (tags.isNotEmpty) subtitleParts.add(tags.join(', '));
-              if (purchaseMeta.isNotEmpty) subtitleParts.add(purchaseMeta.join(' • '));
+              if (purchaseMeta.isNotEmpty)
+                subtitleParts.add(purchaseMeta.join(' • '));
 
               return Card(
                 child: ListTile(
                   onTap: updating || deleting ? null : () => _editItem(row),
                   leading: Checkbox(
                     value: checked,
-                    onChanged: updating || deleting ? null : (_) => _toggleChecked(row),
+                    onChanged: updating || deleting
+                        ? null
+                        : (_) => _toggleChecked(row),
                   ),
                   title: Text(
                     '${row['item'] ?? ''}',
@@ -13956,9 +19179,15 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
                   subtitle: Text(subtitleParts.join(' • ')),
                   trailing: IconButton(
                     tooltip: 'Delete item',
-                    onPressed: deleting || updating ? null : () => _deleteItem(row),
+                    onPressed: deleting || updating
+                        ? null
+                        : () => _deleteItem(row),
                     icon: deleting
-                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
                         : const Icon(Icons.delete_outline),
                   ),
                 ),
@@ -13974,7 +19203,10 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
                   Row(
                     children: [
                       const Expanded(
-                        child: Text('Saved Item Repo', style: TextStyle(fontWeight: FontWeight.w700)),
+                        child: Text(
+                          'Saved Item Repo',
+                          style: TextStyle(fontWeight: FontWeight.w700),
+                        ),
                       ),
                       IconButton(
                         tooltip: 'Add repo item',
@@ -13988,13 +19220,20 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
                       Expanded(
                         child: TextField(
                           controller: _repoSearchCtrl,
-                          decoration: const InputDecoration(labelText: 'Search repo', hintText: 'eggs, milk, detergent...'),
-                          onSubmitted: (value) => _loadRepo(query: value.trim()),
+                          decoration: const InputDecoration(
+                            labelText: 'Search repo',
+                            hintText: 'eggs, milk, detergent...',
+                          ),
+                          onSubmitted: (value) =>
+                              _loadRepo(query: value.trim()),
                         ),
                       ),
                       const SizedBox(width: 8),
                       OutlinedButton(
-                        onPressed: _repoLoading ? null : () => _loadRepo(query: _repoSearchCtrl.text.trim()),
+                        onPressed: _repoLoading
+                            ? null
+                            : () =>
+                                  _loadRepo(query: _repoSearchCtrl.text.trim()),
                         child: const Text('Search'),
                       ),
                     ],
@@ -14003,10 +19242,15 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
                   if (_repoLoading)
                     const Center(child: CircularProgressIndicator())
                   else if (_repoItems.isEmpty)
-                    const Text('No repo items found.', style: TextStyle(color: Color(0xFF64748B)))
+                    const Text(
+                      'No repo items found.',
+                      style: TextStyle(color: Color(0xFF64748B)),
+                    )
                   else
                     ..._repoItems.take(30).map((row) {
-                      final price = row['price'] == null ? null : _toDouble(row['price']);
+                      final price = row['price'] == null
+                          ? null
+                          : _toDouble(row['price']);
                       final store = '${row['store'] ?? ''}'.trim();
                       final category = '${row['category'] ?? ''}'.trim();
                       final meta = <String>[];
@@ -14025,9 +19269,18 @@ class _ShoppingListPageState extends State<ShoppingListPage> {
                             if (value == 'delete') _deleteRepoItem(row);
                           },
                           itemBuilder: (context) => const [
-                            PopupMenuItem<String>(value: 'add', child: Text('Add to list')),
-                            PopupMenuItem<String>(value: 'edit', child: Text('Edit repo item')),
-                            PopupMenuItem<String>(value: 'delete', child: Text('Delete repo item')),
+                            PopupMenuItem<String>(
+                              value: 'add',
+                              child: Text('Add to list'),
+                            ),
+                            PopupMenuItem<String>(
+                              value: 'edit',
+                              child: Text('Edit repo item'),
+                            ),
+                            PopupMenuItem<String>(
+                              value: 'delete',
+                              child: Text('Delete repo item'),
+                            ),
                           ],
                         ),
                       );
@@ -14057,19 +19310,14 @@ class _ChoresPageState extends State<ChoresPage> {
   bool _adding = false;
   final Set<int> _updatingIds = <int>{};
   final Set<int> _deletingIds = <int>{};
+  List<Map<String, dynamic>> _members = const [];
   List<Map<String, dynamic>> _chores = const [];
-  final TextEditingController _descriptionCtrl = TextEditingController();
+  String _filter = 'all';
 
   @override
   void initState() {
     super.initState();
     _load();
-  }
-
-  @override
-  void dispose() {
-    _descriptionCtrl.dispose();
-    super.dispose();
   }
 
   Future<void> _load() async {
@@ -14078,9 +19326,15 @@ class _ChoresPageState extends State<ChoresPage> {
       _error = null;
     });
     try {
+      final membersObj = await widget.api.fetchFamilyMembers();
+      final members =
+          (membersObj['members'] as List<dynamic>? ?? const <dynamic>[])
+              .whereType<Map<String, dynamic>>()
+              .toList();
       final chores = await widget.api.fetchChores();
       if (!mounted) return;
       setState(() {
+        _members = members;
         _chores = chores;
         _loading = false;
       });
@@ -14094,19 +19348,185 @@ class _ChoresPageState extends State<ChoresPage> {
   }
 
   Future<void> _addChore() async {
-    final description = _descriptionCtrl.text.trim();
-    if (description.isEmpty) return;
-    setState(() => _adding = true);
+    final descriptionCtrl = TextEditingController();
+    final dueDateCtrl = TextEditingController();
+    final statusOptions = _collectStatusOptions();
+    String selectedStatus = statusOptions.contains('todo')
+        ? 'todo'
+        : statusOptions.first;
+    String selectedAssignee = '';
+
     try {
-      await widget.api.createChore(description);
-      _descriptionCtrl.clear();
+      final shouldCreate = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (dialogContext, setDialogState) => AlertDialog(
+            insetPadding: const EdgeInsets.symmetric(
+              horizontal: 24,
+              vertical: 24,
+            ),
+            title: const Text('New Task'),
+            content: SizedBox(
+              width: 460,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: descriptionCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Task title',
+                      ),
+                      autofocus: true,
+                    ),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<String>(
+                      initialValue: selectedStatus,
+                      decoration: const InputDecoration(labelText: 'Status'),
+                      items: statusOptions
+                          .map(
+                            (status) => DropdownMenuItem<String>(
+                              value: status,
+                              child: Text(_statusLabel(status)),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) {
+                        if (value != null) {
+                          setDialogState(() => selectedStatus = value);
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: dueDateCtrl,
+                      readOnly: true,
+                      decoration: InputDecoration(
+                        labelText: 'Due date',
+                        hintText: 'YYYY-MM-DD',
+                        suffixIcon: IconButton(
+                          tooltip: 'Pick due date',
+                          onPressed: () async {
+                            final picked = await showDatePicker(
+                              context: dialogContext,
+                              initialDate: DateTime.now(),
+                              firstDate: DateTime(2000),
+                              lastDate: DateTime(2100),
+                            );
+                            if (picked == null) return;
+                            setDialogState(
+                              () => dueDateCtrl.text = _dateOnlyIso(picked),
+                            );
+                          },
+                          icon: const Icon(Icons.calendar_today_outlined),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<String>(
+                      initialValue: selectedAssignee,
+                      decoration: const InputDecoration(labelText: 'Assignee'),
+                      items: [
+                        const DropdownMenuItem<String>(
+                          value: '',
+                          child: Text('Unassigned'),
+                        ),
+                        ..._members
+                            .map((row) => '${row['name'] ?? ''}'.trim())
+                            .where((name) => name.isNotEmpty)
+                            .toSet()
+                            .map(
+                              (name) => DropdownMenuItem<String>(
+                                value: name,
+                                child: Text(name),
+                              ),
+                            ),
+                      ],
+                      onChanged: (value) =>
+                          setDialogState(() => selectedAssignee = value ?? ''),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: const Text('Create Task'),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      if (shouldCreate != true) return;
+      final description = descriptionCtrl.text.trim();
+      if (description.isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Task title is required')));
+        return;
+      }
+
+      setState(() => _adding = true);
+      await widget.api.createChore(
+        description: description,
+        assignee: selectedAssignee.trim().isEmpty
+            ? null
+            : selectedAssignee.trim(),
+        dueDate: dueDateCtrl.text.trim().isEmpty
+            ? null
+            : dueDateCtrl.text.trim(),
+        status: _normalizeStatus(selectedStatus),
+        statusOptions: statusOptions,
+      );
       await _load();
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Add failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Add failed: $err')));
     } finally {
+      descriptionCtrl.dispose();
+      dueDateCtrl.dispose();
       if (mounted) setState(() => _adding = false);
     }
+  }
+
+  List<String> _collectStatusOptions() {
+    final options = <String>{'todo', 'in_progress', 'completed'};
+    for (final row in _chores) {
+      options.add(_normalizeStatus('${row['status'] ?? 'todo'}'));
+      final rowOptions =
+          (row['status_options'] as List<dynamic>? ?? const <dynamic>[]).map(
+            (value) => _normalizeStatus('$value'),
+          );
+      options.addAll(rowOptions);
+    }
+
+    final ordered = options.toList()
+      ..sort((a, b) {
+        const rank = <String, int>{'todo': 0, 'in_progress': 1, 'completed': 2};
+        final aRank = rank[a] ?? 99;
+        final bRank = rank[b] ?? 99;
+        if (aRank != bRank) return aRank.compareTo(bRank);
+        return a.compareTo(b);
+      });
+    return ordered;
+  }
+
+  String _statusLabel(String raw) {
+    final value = _normalizeStatus(raw);
+    return value
+        .split('_')
+        .where((part) => part.isNotEmpty)
+        .map((part) => '${part[0].toUpperCase()}${part.substring(1)}')
+        .join(' ');
   }
 
   Future<void> _toggleDone(Map<String, dynamic> row) async {
@@ -14118,7 +19538,270 @@ class _ChoresPageState extends State<ChoresPage> {
       await _load();
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Update failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Update failed: $err')));
+    } finally {
+      if (mounted) setState(() => _updatingIds.remove(id));
+    }
+  }
+
+  Future<void> _updateStatus(Map<String, dynamic> row, String status) async {
+    final id = _toInt(row['id']);
+    setState(() => _updatingIds.add(id));
+    try {
+      await widget.api.updateChore(choreId: id, status: status);
+      await _load();
+    } catch (err) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Status update failed: $err')));
+    } finally {
+      if (mounted) setState(() => _updatingIds.remove(id));
+    }
+  }
+
+  Future<void> _saveTaskDetails({
+    required Map<String, dynamic> row,
+    required String assignee,
+    required String dueDate,
+    required String status,
+    required String mentions,
+    required String details,
+    required String checklist,
+    required String chartData,
+    required String tableHeaders,
+    required String tableRows,
+  }) async {
+    final id = _toInt(row['id']);
+    setState(() => _updatingIds.add(id));
+    try {
+      await widget.api.updateChore(
+        choreId: id,
+        assignee: assignee.trim().isEmpty ? null : assignee.trim(),
+        dueDate: dueDate.trim().isEmpty ? null : dueDate.trim(),
+        status: _normalizeStatus(status),
+        mentions: mentions
+            .split(',')
+            .map((v) => v.trim().replaceFirst(RegExp(r'^@+'), ''))
+            .where((v) => v.isNotEmpty)
+            .toList(),
+        detailsHtml: details,
+        checklist: _parseChecklistText(checklist),
+        chartData: _parseChartText(chartData),
+        tableData: _parseTableText(tableHeaders, tableRows),
+      );
+      await _load();
+    } catch (err) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Save failed: $err')));
+    } finally {
+      if (mounted) setState(() => _updatingIds.remove(id));
+    }
+  }
+
+  Future<void> _editTask(Map<String, dynamic> row) async {
+    final assigneeCtrl = TextEditingController(
+      text: '${row['assignee'] ?? ''}',
+    );
+    final dueDateCtrl = TextEditingController(text: '${row['due_date'] ?? ''}');
+    final mentionsCtrl = TextEditingController(
+      text: (row['mentions'] as List<dynamic>? ?? const <dynamic>[])
+          .map((e) => '@$e')
+          .join(', '),
+    );
+    final detailsCtrl = TextEditingController(
+      text: '${row['details_html'] ?? ''}',
+    );
+    final checklistCtrl = TextEditingController(
+      text: (row['checklist'] as List<dynamic>? ?? const <dynamic>[])
+          .whereType<Map<String, dynamic>>()
+          .map(
+            (item) =>
+                '${item['done'] == true ? '- [x]' : '- [ ]'} ${item['text'] ?? ''}',
+          )
+          .join('\n'),
+    );
+    final chartCtrl = TextEditingController(
+      text: (row['chart_data'] as List<dynamic>? ?? const <dynamic>[])
+          .whereType<Map<String, dynamic>>()
+          .map((item) => '${item['label'] ?? ''}|${item['value'] ?? 0}')
+          .join('\n'),
+    );
+    final tableData =
+        row['table_data'] as Map<String, dynamic>? ?? const <String, dynamic>{};
+    final tableHeadersCtrl = TextEditingController(
+      text: (tableData['headers'] as List<dynamic>? ?? const <dynamic>[]).join(
+        ',',
+      ),
+    );
+    final tableRowsCtrl = TextEditingController(
+      text: (tableData['rows'] as List<dynamic>? ?? const <dynamic>[])
+          .whereType<List<dynamic>>()
+          .map((r) => r.join('|'))
+          .join('\n'),
+    );
+    String status = '${row['status'] ?? 'todo'}';
+    final statusOptions =
+        (row['status_options'] as List<dynamic>? ?? const <dynamic>[])
+            .map((e) => '$e')
+            .where((s) => s.trim().isNotEmpty)
+            .toList();
+    final options = statusOptions.isEmpty
+        ? <String>['todo', 'in_progress', 'completed']
+        : statusOptions;
+    if (!options.contains(status)) {
+      status = options.first;
+    }
+
+    final shouldSave = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+        title: const Text('Edit Task'),
+        content: SizedBox(
+          width: 640,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: assigneeCtrl,
+                  decoration: const InputDecoration(labelText: 'Assignee'),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: dueDateCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Due date (YYYY-MM-DD)',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                DropdownButtonFormField<String>(
+                  initialValue: status,
+                  decoration: const InputDecoration(labelText: 'Status'),
+                  items: options
+                      .map(
+                        (s) => DropdownMenuItem(
+                          value: s,
+                          child: Text(s.replaceAll('_', ' ')),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (value) {
+                    if (value != null) {
+                      status = value;
+                    }
+                  },
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: mentionsCtrl,
+                  decoration: const InputDecoration(labelText: 'Mentions'),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: detailsCtrl,
+                  minLines: 2,
+                  maxLines: 4,
+                  decoration: const InputDecoration(labelText: 'Notes'),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: checklistCtrl,
+                  minLines: 2,
+                  maxLines: 4,
+                  decoration: const InputDecoration(
+                    labelText: 'Checklist',
+                    hintText: '- [ ] Item\n- [x] Done item',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: chartCtrl,
+                  minLines: 2,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: 'Chart rows',
+                    hintText: 'Label|12',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: tableHeadersCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Table headers',
+                    hintText: 'Item,Owner,ETA',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: tableRowsCtrl,
+                  minLines: 2,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: 'Table rows',
+                    hintText: 'Milk|Alice|Today',
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldSave == true) {
+      await _saveTaskDetails(
+        row: row,
+        assignee: assigneeCtrl.text,
+        dueDate: dueDateCtrl.text,
+        status: status,
+        mentions: mentionsCtrl.text,
+        details: detailsCtrl.text,
+        checklist: checklistCtrl.text,
+        chartData: chartCtrl.text,
+        tableHeaders: tableHeadersCtrl.text,
+        tableRows: tableRowsCtrl.text,
+      );
+    }
+  }
+
+  Future<void> _updateChecklist(
+    Map<String, dynamic> row,
+    int index,
+    bool done,
+  ) async {
+    final id = _toInt(row['id']);
+    final current = (row['checklist'] as List<dynamic>? ?? const <dynamic>[])
+        .whereType<Map<String, dynamic>>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+    if (index < 0 || index >= current.length) return;
+    current[index]['done'] = done;
+
+    setState(() => _updatingIds.add(id));
+    try {
+      await widget.api.updateChore(choreId: id, checklist: current);
+      await _load();
+    } catch (err) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Checklist update failed: $err')));
     } finally {
       if (mounted) setState(() => _updatingIds.remove(id));
     }
@@ -14132,10 +19815,103 @@ class _ChoresPageState extends State<ChoresPage> {
       await _load();
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Delete failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Delete failed: $err')));
     } finally {
       if (mounted) setState(() => _deletingIds.remove(id));
     }
+  }
+
+  String _normalizeStatus(String raw) {
+    return raw
+            .toLowerCase()
+            .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+            .replaceAll(RegExp(r'_+'), '_')
+            .replaceAll(RegExp(r'^_|_$'), '')
+            .trim()
+            .isEmpty
+        ? 'todo'
+        : raw
+              .toLowerCase()
+              .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+              .replaceAll(RegExp(r'_+'), '_')
+              .replaceAll(RegExp(r'^_|_$'), '')
+              .trim();
+  }
+
+  String _dateOnlyIso(DateTime date) {
+    final mm = date.month.toString().padLeft(2, '0');
+    final dd = date.day.toString().padLeft(2, '0');
+    return '${date.year}-$mm-$dd';
+  }
+
+  List<Map<String, dynamic>> _parseChecklistText(String text) {
+    final rows = <Map<String, dynamic>>[];
+    for (final raw in text.split('\n')) {
+      final line = raw.trim();
+      if (line.isEmpty) continue;
+      final done = line.startsWith('[x]') || line.startsWith('- [x]');
+      final cleaned = line
+          .replaceFirst(RegExp(r'^-\s*\[x\]\s*', caseSensitive: false), '')
+          .replaceFirst(RegExp(r'^-\s*\[\s\]\s*', caseSensitive: false), '')
+          .replaceFirst(RegExp(r'^\[x\]\s*', caseSensitive: false), '')
+          .replaceFirst(RegExp(r'^\[\s\]\s*', caseSensitive: false), '')
+          .trim();
+      if (cleaned.isNotEmpty) {
+        rows.add({'text': cleaned, 'done': done});
+      }
+    }
+    return rows;
+  }
+
+  List<Map<String, dynamic>> _parseChartText(String text) {
+    final rows = <Map<String, dynamic>>[];
+    for (final raw in text.split('\n')) {
+      final line = raw.trim();
+      if (line.isEmpty || !line.contains('|')) continue;
+      final parts = line.split('|');
+      final label = parts.first.trim();
+      final value = double.tryParse(parts.sublist(1).join('|').trim()) ?? 0.0;
+      if (label.isNotEmpty) {
+        rows.add({'label': label, 'value': value});
+      }
+    }
+    return rows;
+  }
+
+  Map<String, dynamic> _parseTableText(String headersText, String rowsText) {
+    final headers = headersText
+        .split(',')
+        .map((h) => h.trim())
+        .where((h) => h.isNotEmpty)
+        .toList();
+    final rows = rowsText
+        .split('\n')
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .map((line) => line.split('|').map((cell) => cell.trim()).toList())
+        .toList();
+    return {'headers': headers, 'rows': rows};
+  }
+
+  List<Map<String, dynamic>> _filteredTasks() {
+    if (_filter == 'mine') {
+      return _chores
+          .where(
+            (row) =>
+                '${row['assignee'] ?? ''}'.trim().toLowerCase() ==
+                widget.api.settings.member.toLowerCase(),
+          )
+          .toList();
+    }
+    if (_filter == 'open') {
+      return _chores.where((row) => row['done'] != true).toList();
+    }
+    if (_filter == 'completed') {
+      return _chores.where((row) => row['done'] == true).toList();
+    }
+    return _chores;
   }
 
   @override
@@ -14152,51 +19928,293 @@ class _ChoresPageState extends State<ChoresPage> {
       child: ListView(
         padding: const EdgeInsets.all(12),
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _descriptionCtrl,
-                  decoration: const InputDecoration(labelText: 'Add chore', hintText: 'Take out trash, Vacuum living room...'),
-                  onSubmitted: (_) => _addChore(),
-                ),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: const [
+                        Text(
+                          'New Task',
+                          style: TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          'Simple task form with status, due date, and assignee.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF64748B),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  FilledButton(
+                    onPressed: _adding ? null : _addChore,
+                    child: Text(_adding ? 'Creating...' : 'New Task'),
+                  ),
+                ],
               ),
-              const SizedBox(width: 8),
-              FilledButton(
-                onPressed: _adding ? null : _addChore,
-                child: Text(_adding ? 'Adding...' : 'Add'),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            children: [
+              FilterChip(
+                label: const Text('All'),
+                selected: _filter == 'all',
+                onSelected: (_) => setState(() => _filter = 'all'),
+              ),
+              FilterChip(
+                label: const Text('Assigned to me'),
+                selected: _filter == 'mine',
+                onSelected: (_) => setState(() => _filter = 'mine'),
+              ),
+              FilterChip(
+                label: const Text('Open'),
+                selected: _filter == 'open',
+                onSelected: (_) => setState(() => _filter = 'open'),
+              ),
+              FilterChip(
+                label: const Text('Completed'),
+                selected: _filter == 'completed',
+                onSelected: (_) => setState(() => _filter = 'completed'),
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          if (_chores.isEmpty)
-            const Card(child: ListTile(title: Text('No chores yet.')))
+          const SizedBox(height: 8),
+          if (_filteredTasks().isEmpty)
+            const Card(
+              child: ListTile(title: Text('No tasks found for this filter.')),
+            )
           else
-            ..._chores.map((row) {
+            ..._filteredTasks().map((row) {
               final id = _toInt(row['id']);
               final done = row['done'] == true;
               final updating = _updatingIds.contains(id);
               final deleting = _deletingIds.contains(id);
+              final statusOptions =
+                  (row['status_options'] as List<dynamic>? ?? const <dynamic>[])
+                      .map((e) => '$e')
+                      .where((s) => s.trim().isNotEmpty)
+                      .toList();
+              final mentions =
+                  (row['mentions'] as List<dynamic>? ?? const <dynamic>[])
+                      .map((e) => '$e')
+                      .where((s) => s.trim().isNotEmpty)
+                      .toList();
+              final checklist =
+                  (row['checklist'] as List<dynamic>? ?? const <dynamic>[])
+                      .whereType<Map<String, dynamic>>()
+                      .toList();
+              final chartRows =
+                  (row['chart_data'] as List<dynamic>? ?? const <dynamic>[])
+                      .whereType<Map<String, dynamic>>()
+                      .toList();
+              final tableData =
+                  (row['table_data'] as Map<String, dynamic>? ??
+                  const <String, dynamic>{});
+              final tableHeaders =
+                  (tableData['headers'] as List<dynamic>? ?? const <dynamic>[])
+                      .map((e) => '$e')
+                      .toList();
+              final tableRows =
+                  (tableData['rows'] as List<dynamic>? ?? const <dynamic>[])
+                      .whereType<List<dynamic>>()
+                      .map((r) => r.map((c) => '$c').toList())
+                      .toList();
               return Card(
-                child: ListTile(
-                  leading: Checkbox(
-                    value: done,
-                    onChanged: updating || deleting ? null : (_) => _toggleDone(row),
-                  ),
-                  title: Text(
-                    '${row['description'] ?? ''}',
-                    style: TextStyle(
-                      decoration: done ? TextDecoration.lineThrough : null,
-                      color: done ? const Color(0xFF64748B) : null,
-                    ),
-                  ),
-                  subtitle: Text('${row['creator'] ?? ''}'),
-                  trailing: IconButton(
-                    tooltip: 'Delete chore',
-                    onPressed: deleting || updating ? null : () => _deleteChore(row),
-                    icon: deleting
-                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.delete_outline),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Checkbox(
+                            value: done,
+                            onChanged: updating || deleting
+                                ? null
+                                : (_) => _toggleDone(row),
+                          ),
+                          Expanded(
+                            child: Text(
+                              '${row['description'] ?? ''}',
+                              style: TextStyle(
+                                decoration: done
+                                    ? TextDecoration.lineThrough
+                                    : null,
+                                color: done ? const Color(0xFF64748B) : null,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          PopupMenuButton<String>(
+                            tooltip: 'Set status',
+                            onSelected: (value) => _updateStatus(row, value),
+                            itemBuilder: (context) {
+                              final options = statusOptions.isEmpty
+                                  ? <String>['todo', 'in_progress', 'completed']
+                                  : statusOptions;
+                              return options
+                                  .map(
+                                    (s) => PopupMenuItem(
+                                      value: s,
+                                      child: Text(s.replaceAll('_', ' ')),
+                                    ),
+                                  )
+                                  .toList();
+                            },
+                            icon: const Icon(Icons.flag_outlined),
+                          ),
+                          IconButton(
+                            tooltip: 'Edit details',
+                            onPressed: updating ? null : () => _editTask(row),
+                            icon: const Icon(Icons.edit_outlined),
+                          ),
+                          IconButton(
+                            tooltip: 'Delete task',
+                            onPressed: deleting || updating
+                                ? null
+                                : () => _deleteChore(row),
+                            icon: deleting
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.delete_outline),
+                          ),
+                        ],
+                      ),
+                      Text(
+                        'Type: ${row['task_type'] ?? 'task'} • Assignee: ${row['assignee'] ?? 'Unassigned'} • Due: ${row['due_date'] ?? '-'}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF64748B),
+                        ),
+                      ),
+                      if (mentions.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: mentions
+                              .map(
+                                (name) => Chip(
+                                  label: Text('@$name'),
+                                  visualDensity: VisualDensity.compact,
+                                ),
+                              )
+                              .toList(),
+                        ),
+                      ],
+                      if (checklist.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        const Text(
+                          'Checklist',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        ...List.generate(checklist.length, (idx) {
+                          final item = checklist[idx];
+                          final itemDone = item['done'] == true;
+                          return CheckboxListTile(
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            value: itemDone,
+                            onChanged: updating || deleting
+                                ? null
+                                : (next) =>
+                                      _updateChecklist(row, idx, next == true),
+                            title: Text(
+                              '${item['text'] ?? ''}',
+                              style: TextStyle(
+                                decoration: itemDone
+                                    ? TextDecoration.lineThrough
+                                    : null,
+                                color: itemDone
+                                    ? const Color(0xFF64748B)
+                                    : null,
+                              ),
+                            ),
+                          );
+                        }),
+                      ],
+                      if (chartRows.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        const Text(
+                          'Chart',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        ...chartRows.map((chartRow) {
+                          final label = '${chartRow['label'] ?? ''}';
+                          final value =
+                              (chartRow['value'] as num?)?.toDouble() ?? 0.0;
+                          final maxVal = chartRows
+                              .map(
+                                (e) => (e['value'] as num?)?.toDouble() ?? 0.0,
+                              )
+                              .fold<double>(1.0, (a, b) => a > b ? a : b);
+                          final pct = (value / (maxVal <= 0 ? 1.0 : maxVal))
+                              .clamp(0.0, 1.0);
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '$label (${value.toStringAsFixed(2)})',
+                                  style: const TextStyle(fontSize: 12),
+                                ),
+                                LinearProgressIndicator(value: pct),
+                              ],
+                            ),
+                          );
+                        }),
+                      ],
+                      if (tableHeaders.isNotEmpty || tableRows.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        const Text(
+                          'Table',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: DataTable(
+                            columns:
+                                (tableHeaders.isEmpty
+                                        ? List.generate(
+                                            tableRows.isNotEmpty
+                                                ? tableRows.first.length
+                                                : 0,
+                                            (i) => 'Column ${i + 1}',
+                                          )
+                                        : tableHeaders)
+                                    .map(
+                                      (header) =>
+                                          DataColumn(label: Text(header)),
+                                    )
+                                    .toList(),
+                            rows: tableRows
+                                .map(
+                                  (cells) => DataRow(
+                                    cells: cells
+                                        .map((cell) => DataCell(Text(cell)))
+                                        .toList(),
+                                  ),
+                                )
+                                .toList(),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
               );
@@ -14239,8 +20257,14 @@ class _ProjectsSpacesPageState extends State<ProjectsSpacesPage> {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.of(context).pop(controller.text.trim()), child: const Text('Create')),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+            child: const Text('Create'),
+          ),
         ],
       ),
     );
@@ -14256,7 +20280,9 @@ class _ProjectsSpacesPageState extends State<ProjectsSpacesPage> {
       setState(() => _future = widget.api.fetchWorkspacesOverview());
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Create project failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Create project failed: $err')));
     }
   }
 
@@ -14269,7 +20295,9 @@ class _ProjectsSpacesPageState extends State<ProjectsSpacesPage> {
       setState(() => _future = widget.api.fetchWorkspacesOverview());
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Create space failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Create space failed: $err')));
     }
   }
 
@@ -14281,15 +20309,24 @@ class _ProjectsSpacesPageState extends State<ProjectsSpacesPage> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 24,
+            vertical: 24,
+          ),
           title: const Text('Create Template'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Template name')),
+                TextField(
+                  controller: nameCtrl,
+                  decoration: const InputDecoration(labelText: 'Template name'),
+                ),
                 const SizedBox(height: 8),
-                TextField(controller: descriptionCtrl, decoration: const InputDecoration(labelText: 'Description')),
+                TextField(
+                  controller: descriptionCtrl,
+                  decoration: const InputDecoration(labelText: 'Description'),
+                ),
                 const SizedBox(height: 8),
                 DropdownButtonFormField<String>(
                   initialValue: type,
@@ -14298,26 +20335,39 @@ class _ProjectsSpacesPageState extends State<ProjectsSpacesPage> {
                     DropdownMenuItem(value: 'project', child: Text('Project')),
                     DropdownMenuItem(value: 'space', child: Text('Space')),
                   ],
-                  onChanged: (value) => setDialogState(() => type = value ?? 'project'),
+                  onChanged: (value) =>
+                      setDialogState(() => type = value ?? 'project'),
                 ),
               ],
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Create')),
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Create'),
+            ),
           ],
         ),
       ),
     );
     if (should != true) return;
     try {
-      await widget.api.createWorkspaceTemplate(name: nameCtrl.text.trim(), templateType: type, description: descriptionCtrl.text.trim());
+      await widget.api.createWorkspaceTemplate(
+        name: nameCtrl.text.trim(),
+        templateType: type,
+        description: descriptionCtrl.text.trim(),
+      );
       if (!mounted) return;
       setState(() => _future = widget.api.fetchWorkspacesOverview());
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Create template failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Create template failed: $err')));
     }
   }
 
@@ -14329,32 +20379,51 @@ class _ProjectsSpacesPageState extends State<ProjectsSpacesPage> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 24,
+            vertical: 24,
+          ),
           title: Text('Use Template • ${template['name'] ?? ''}'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Name')),
+                TextField(
+                  controller: nameCtrl,
+                  decoration: const InputDecoration(labelText: 'Name'),
+                ),
                 const SizedBox(height: 8),
-                TextField(controller: descriptionCtrl, decoration: const InputDecoration(labelText: 'Description')),
+                TextField(
+                  controller: descriptionCtrl,
+                  decoration: const InputDecoration(labelText: 'Description'),
+                ),
                 const SizedBox(height: 8),
                 DropdownButtonFormField<String>(
                   initialValue: visibility,
                   decoration: const InputDecoration(labelText: 'Visibility'),
                   items: const [
                     DropdownMenuItem(value: 'family', child: Text('Family')),
-                    DropdownMenuItem(value: 'restricted', child: Text('Restricted')),
+                    DropdownMenuItem(
+                      value: 'restricted',
+                      child: Text('Restricted'),
+                    ),
                     DropdownMenuItem(value: 'private', child: Text('Private')),
                   ],
-                  onChanged: (value) => setDialogState(() => visibility = value ?? 'family'),
+                  onChanged: (value) =>
+                      setDialogState(() => visibility = value ?? 'family'),
                 ),
               ],
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Create')),
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Create'),
+            ),
           ],
         ),
       ),
@@ -14372,7 +20441,9 @@ class _ProjectsSpacesPageState extends State<ProjectsSpacesPage> {
       setState(() => _future = widget.api.fetchWorkspacesOverview());
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Create from template failed: $err')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Create from template failed: $err')),
+      );
     }
   }
 
@@ -14384,8 +20455,14 @@ class _ProjectsSpacesPageState extends State<ProjectsSpacesPage> {
         title: const Text('Delete Template'),
         content: Text('Delete "${template['name'] ?? ''}"?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
         ],
       ),
     );
@@ -14396,42 +20473,67 @@ class _ProjectsSpacesPageState extends State<ProjectsSpacesPage> {
       setState(() => _future = widget.api.fetchWorkspacesOverview());
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Delete template failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Delete template failed: $err')));
     }
   }
 
   Future<void> _editProject(Map<String, dynamic> project) async {
     final nameCtrl = TextEditingController(text: '${project['name'] ?? ''}');
-    final descriptionCtrl = TextEditingController(text: '${project['description'] ?? ''}');
-    final allowedCtrl = TextEditingController(text: ((project['allowed_members'] as List<dynamic>? ?? const <dynamic>[]).join(', ')));
+    final descriptionCtrl = TextEditingController(
+      text: '${project['description'] ?? ''}',
+    );
+    final allowedCtrl = TextEditingController(
+      text: ((project['allowed_members'] as List<dynamic>? ?? const <dynamic>[])
+          .join(', ')),
+    );
     String visibility = '${project['visibility'] ?? 'family'}';
     bool archived = project['archived'] == true;
     final should = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 24,
+            vertical: 24,
+          ),
           title: const Text('Edit Project'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Name')),
+                TextField(
+                  controller: nameCtrl,
+                  decoration: const InputDecoration(labelText: 'Name'),
+                ),
                 const SizedBox(height: 8),
-                TextField(controller: descriptionCtrl, decoration: const InputDecoration(labelText: 'Description')),
+                TextField(
+                  controller: descriptionCtrl,
+                  decoration: const InputDecoration(labelText: 'Description'),
+                ),
                 const SizedBox(height: 8),
                 DropdownButtonFormField<String>(
                   initialValue: visibility,
                   decoration: const InputDecoration(labelText: 'Visibility'),
                   items: const [
                     DropdownMenuItem(value: 'family', child: Text('Family')),
-                    DropdownMenuItem(value: 'restricted', child: Text('Restricted')),
+                    DropdownMenuItem(
+                      value: 'restricted',
+                      child: Text('Restricted'),
+                    ),
                     DropdownMenuItem(value: 'private', child: Text('Private')),
                   ],
-                  onChanged: (value) => setDialogState(() => visibility = value ?? 'family'),
+                  onChanged: (value) =>
+                      setDialogState(() => visibility = value ?? 'family'),
                 ),
                 const SizedBox(height: 8),
-                TextField(controller: allowedCtrl, decoration: const InputDecoration(labelText: 'Allowed members (comma separated)')),
+                TextField(
+                  controller: allowedCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Allowed members (comma separated)',
+                  ),
+                ),
                 const SizedBox(height: 8),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
@@ -14443,15 +20545,25 @@ class _ProjectsSpacesPageState extends State<ProjectsSpacesPage> {
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Save'),
+            ),
           ],
         ),
       ),
     );
     if (should != true) return;
     try {
-      final allowedMembers = allowedCtrl.text.split(',').map((value) => value.trim()).where((value) => value.isNotEmpty).toList();
+      final allowedMembers = allowedCtrl.text
+          .split(',')
+          .map((value) => value.trim())
+          .where((value) => value.isNotEmpty)
+          .toList();
       await widget.api.updateWorkspaceProject(
         projectId: _toInt(project['id']),
         name: nameCtrl.text.trim(),
@@ -14464,42 +20576,67 @@ class _ProjectsSpacesPageState extends State<ProjectsSpacesPage> {
       setState(() => _future = widget.api.fetchWorkspacesOverview());
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Update project failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Update project failed: $err')));
     }
   }
 
   Future<void> _editSpace(Map<String, dynamic> space) async {
     final nameCtrl = TextEditingController(text: '${space['name'] ?? ''}');
-    final descriptionCtrl = TextEditingController(text: '${space['description'] ?? ''}');
-    final allowedCtrl = TextEditingController(text: ((space['allowed_members'] as List<dynamic>? ?? const <dynamic>[]).join(', ')));
+    final descriptionCtrl = TextEditingController(
+      text: '${space['description'] ?? ''}',
+    );
+    final allowedCtrl = TextEditingController(
+      text: ((space['allowed_members'] as List<dynamic>? ?? const <dynamic>[])
+          .join(', ')),
+    );
     String visibility = '${space['visibility'] ?? 'family'}';
     bool archived = space['archived'] == true;
     final should = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 24,
+            vertical: 24,
+          ),
           title: const Text('Edit Space'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Name')),
+                TextField(
+                  controller: nameCtrl,
+                  decoration: const InputDecoration(labelText: 'Name'),
+                ),
                 const SizedBox(height: 8),
-                TextField(controller: descriptionCtrl, decoration: const InputDecoration(labelText: 'Description')),
+                TextField(
+                  controller: descriptionCtrl,
+                  decoration: const InputDecoration(labelText: 'Description'),
+                ),
                 const SizedBox(height: 8),
                 DropdownButtonFormField<String>(
                   initialValue: visibility,
                   decoration: const InputDecoration(labelText: 'Visibility'),
                   items: const [
                     DropdownMenuItem(value: 'family', child: Text('Family')),
-                    DropdownMenuItem(value: 'restricted', child: Text('Restricted')),
+                    DropdownMenuItem(
+                      value: 'restricted',
+                      child: Text('Restricted'),
+                    ),
                     DropdownMenuItem(value: 'private', child: Text('Private')),
                   ],
-                  onChanged: (value) => setDialogState(() => visibility = value ?? 'family'),
+                  onChanged: (value) =>
+                      setDialogState(() => visibility = value ?? 'family'),
                 ),
                 const SizedBox(height: 8),
-                TextField(controller: allowedCtrl, decoration: const InputDecoration(labelText: 'Allowed members (comma separated)')),
+                TextField(
+                  controller: allowedCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Allowed members (comma separated)',
+                  ),
+                ),
                 const SizedBox(height: 8),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
@@ -14511,15 +20648,25 @@ class _ProjectsSpacesPageState extends State<ProjectsSpacesPage> {
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Save'),
+            ),
           ],
         ),
       ),
     );
     if (should != true) return;
     try {
-      final allowedMembers = allowedCtrl.text.split(',').map((value) => value.trim()).where((value) => value.isNotEmpty).toList();
+      final allowedMembers = allowedCtrl.text
+          .split(',')
+          .map((value) => value.trim())
+          .where((value) => value.isNotEmpty)
+          .toList();
       await widget.api.updateWorkspaceSpace(
         spaceId: _toInt(space['id']),
         name: nameCtrl.text.trim(),
@@ -14532,7 +20679,9 @@ class _ProjectsSpacesPageState extends State<ProjectsSpacesPage> {
       setState(() => _future = widget.api.fetchWorkspacesOverview());
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Update space failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Update space failed: $err')));
     }
   }
 
@@ -14542,10 +20691,18 @@ class _ProjectsSpacesPageState extends State<ProjectsSpacesPage> {
       builder: (context) => AlertDialog(
         insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
         title: const Text('Delete Project'),
-        content: Text('Delete "${project['name'] ?? ''}"? This cannot be undone.'),
+        content: Text(
+          'Delete "${project['name'] ?? ''}"? This cannot be undone.',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
         ],
       ),
     );
@@ -14556,7 +20713,9 @@ class _ProjectsSpacesPageState extends State<ProjectsSpacesPage> {
       setState(() => _future = widget.api.fetchWorkspacesOverview());
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Delete project failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Delete project failed: $err')));
     }
   }
 
@@ -14566,10 +20725,18 @@ class _ProjectsSpacesPageState extends State<ProjectsSpacesPage> {
       builder: (context) => AlertDialog(
         insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
         title: const Text('Delete Space'),
-        content: Text('Delete "${space['name'] ?? ''}"? This cannot be undone.'),
+        content: Text(
+          'Delete "${space['name'] ?? ''}"? This cannot be undone.',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
         ],
       ),
     );
@@ -14580,7 +20747,9 @@ class _ProjectsSpacesPageState extends State<ProjectsSpacesPage> {
       setState(() => _future = widget.api.fetchWorkspacesOverview());
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Delete space failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Delete space failed: $err')));
     }
   }
 
@@ -14588,17 +20757,30 @@ class _ProjectsSpacesPageState extends State<ProjectsSpacesPage> {
     final full = _moduleUrl(widget.api.settings.baseUrl, partialUrl);
     await Clipboard.setData(ClipboardData(text: full));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Share link copied')));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Share link copied')));
   }
 
-  Future<void> _openProject(Map<String, dynamic> project, Map<String, dynamic> data) async {
+  Future<void> _openProject(
+    Map<String, dynamic> project,
+    Map<String, dynamic> data,
+  ) async {
     final projectId = _toInt(project['id']);
-    final columns = ((data['columns_by_project'] as Map<String, dynamic>? ?? const <String, dynamic>{})['$projectId'] as List<dynamic>? ?? const <dynamic>[])
-        .whereType<Map<String, dynamic>>()
-        .toList();
-    final cards = ((data['cards_by_project'] as Map<String, dynamic>? ?? const <String, dynamic>{})['$projectId'] as List<dynamic>? ?? const <dynamic>[])
-        .whereType<Map<String, dynamic>>()
-        .toList();
+    final columns =
+        ((data['columns_by_project'] as Map<String, dynamic>? ??
+                        const <String, dynamic>{})['$projectId']
+                    as List<dynamic>? ??
+                const <dynamic>[])
+            .whereType<Map<String, dynamic>>()
+            .toList();
+    final cards =
+        ((data['cards_by_project'] as Map<String, dynamic>? ??
+                        const <String, dynamic>{})['$projectId']
+                    as List<dynamic>? ??
+                const <dynamic>[])
+            .whereType<Map<String, dynamic>>()
+            .toList();
 
     final changed = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
@@ -14615,15 +20797,23 @@ class _ProjectsSpacesPageState extends State<ProjectsSpacesPage> {
     }
   }
 
-  Future<void> _openSpace(Map<String, dynamic> space, Map<String, dynamic> data) async {
+  Future<void> _openSpace(
+    Map<String, dynamic> space,
+    Map<String, dynamic> data,
+  ) async {
     final spaceId = _toInt(space['id']);
-    final pages = ((data['pages_by_space'] as Map<String, dynamic>? ?? const <String, dynamic>{})['$spaceId'] as List<dynamic>? ?? const <dynamic>[])
-        .whereType<Map<String, dynamic>>()
-        .toList();
+    final pages =
+        ((data['pages_by_space'] as Map<String, dynamic>? ??
+                        const <String, dynamic>{})['$spaceId']
+                    as List<dynamic>? ??
+                const <dynamic>[])
+            .whereType<Map<String, dynamic>>()
+            .toList();
 
     final changed = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
-        builder: (_) => SpaceWikiPage(api: widget.api, space: space, initialPages: pages),
+        builder: (_) =>
+            SpaceWikiPage(api: widget.api, space: space, initialPages: pages),
       ),
     );
     if (changed == true && mounted) {
@@ -14645,72 +20835,140 @@ class _ProjectsSpacesPageState extends State<ProjectsSpacesPage> {
             return const Center(child: CircularProgressIndicator());
           }
           if (snapshot.hasError) {
-            return ErrorPanel(error: '${snapshot.error}', onRetry: () => setState(() => _future = widget.api.fetchWorkspacesOverview()));
+            return ErrorPanel(
+              error: '${snapshot.error}',
+              onRetry: () => setState(
+                () => _future = widget.api.fetchWorkspacesOverview(),
+              ),
+            );
           }
 
           final data = snapshot.data ?? const <String, dynamic>{};
-          final projects = (data['projects'] as List<dynamic>? ?? const <dynamic>[]).whereType<Map<String, dynamic>>().toList();
-          final spaces = (data['spaces'] as List<dynamic>? ?? const <dynamic>[]).whereType<Map<String, dynamic>>().toList();
-          final templates = (data['templates'] as List<dynamic>? ?? const <dynamic>[]).whereType<Map<String, dynamic>>().toList();
-          final cardsByProject = (data['cards_by_project'] as Map<String, dynamic>? ?? const <String, dynamic>{});
-          final pagesBySpace = (data['pages_by_space'] as Map<String, dynamic>? ?? const <String, dynamic>{});
+          final projects =
+              (data['projects'] as List<dynamic>? ?? const <dynamic>[])
+                  .whereType<Map<String, dynamic>>()
+                  .toList();
+          final spaces = (data['spaces'] as List<dynamic>? ?? const <dynamic>[])
+              .whereType<Map<String, dynamic>>()
+              .toList();
+          final templates =
+              (data['templates'] as List<dynamic>? ?? const <dynamic>[])
+                  .whereType<Map<String, dynamic>>()
+                  .toList();
+          final cardsByProject =
+              (data['cards_by_project'] as Map<String, dynamic>? ??
+              const <String, dynamic>{});
+          final pagesBySpace =
+              (data['pages_by_space'] as Map<String, dynamic>? ??
+              const <String, dynamic>{});
 
           return ListView(
             padding: const EdgeInsets.all(12),
             children: [
               Row(
                 children: [
-                  Expanded(child: FilledButton.icon(onPressed: _createProject, icon: const Icon(Icons.add), label: const Text('New Project'))),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: _createProject,
+                      icon: const Icon(Icons.add),
+                      label: const Text('New Project'),
+                    ),
+                  ),
                   const SizedBox(width: 8),
-                  Expanded(child: FilledButton.icon(onPressed: _createSpace, icon: const Icon(Icons.add), label: const Text('New Space'))),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: _createSpace,
+                      icon: const Icon(Icons.add),
+                      label: const Text('New Space'),
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 8),
-              FilledButton.icon(onPressed: _createTemplate, icon: const Icon(Icons.auto_awesome_motion), label: const Text('New Template')),
+              FilledButton.icon(
+                onPressed: _createTemplate,
+                icon: const Icon(Icons.auto_awesome_motion),
+                label: const Text('New Template'),
+              ),
               const SizedBox(height: 12),
-              Text('Templates (${templates.length})', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+              Text(
+                'Templates (${templates.length})',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              ),
               const SizedBox(height: 8),
               if (templates.isEmpty)
                 const Card(child: ListTile(title: Text('No templates yet.')))
               else
-                ...templates.map((template) => Card(
-                      child: ListTile(
-                        title: Text('${template['name'] ?? ''}'),
-                        subtitle: Text('${template['template_type'] ?? ''} • ${template['description'] ?? ''}'),
-                        trailing: Wrap(
-                          spacing: 4,
-                          children: [
-                            TextButton(onPressed: () => _createFromTemplate(template), child: const Text('Use')),
-                            IconButton(onPressed: () => _deleteTemplate(template), icon: const Icon(Icons.delete_outline), tooltip: 'Delete'),
-                          ],
-                        ),
+                ...templates.map(
+                  (template) => Card(
+                    child: ListTile(
+                      title: Text('${template['name'] ?? ''}'),
+                      subtitle: Text(
+                        '${template['template_type'] ?? ''} • ${template['description'] ?? ''}',
                       ),
-                    )),
+                      trailing: Wrap(
+                        spacing: 4,
+                        children: [
+                          TextButton(
+                            onPressed: () => _createFromTemplate(template),
+                            child: const Text('Use'),
+                          ),
+                          IconButton(
+                            onPressed: () => _deleteTemplate(template),
+                            icon: const Icon(Icons.delete_outline),
+                            tooltip: 'Delete',
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
               const SizedBox(height: 14),
-              Text('Projects (${projects.length})', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+              Text(
+                'Projects (${projects.length})',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              ),
               const SizedBox(height: 8),
               if (projects.isEmpty)
                 const Card(child: ListTile(title: Text('No projects yet.')))
               else
                 ...projects.map((project) {
                   final id = _toInt(project['id']);
-                  final cards = (cardsByProject['$id'] as List<dynamic>? ?? const <dynamic>[]);
+                  final cards =
+                      (cardsByProject['$id'] as List<dynamic>? ??
+                      const <dynamic>[]);
                   return Card(
                     child: ListTile(
                       title: Text('${project['name'] ?? ''}'),
-                      subtitle: Text('${project['description'] ?? ''}\n${cards.length} cards • ${project['visibility'] ?? 'family'}${project['archived'] == true ? ' • archived' : ''}'),
+                      subtitle: Text(
+                        '${project['description'] ?? ''}\n${cards.length} cards • ${project['visibility'] ?? 'family'}${project['archived'] == true ? ' • archived' : ''}',
+                      ),
                       isThreeLine: true,
                       trailing: PopupMenuButton<String>(
                         onSelected: (value) {
                           if (value == 'open') _openProject(project, data);
                           if (value == 'edit') _editProject(project);
                           if (value == 'delete') _deleteProject(project);
-                          if (value == 'share') _copyShareLink('${project['share_url'] ?? ''}');
+                          if (value == 'share')
+                            _copyShareLink('${project['share_url'] ?? ''}');
                         },
                         itemBuilder: (context) => const [
-                          PopupMenuItem(value: 'open', child: Text('Open board')),
-                          PopupMenuItem(value: 'edit', child: Text('Edit / visibility')),
-                          PopupMenuItem(value: 'share', child: Text('Copy share link')),
+                          PopupMenuItem(
+                            value: 'open',
+                            child: Text('Open board'),
+                          ),
+                          PopupMenuItem(
+                            value: 'edit',
+                            child: Text('Edit / visibility'),
+                          ),
+                          PopupMenuItem(
+                            value: 'share',
+                            child: Text('Copy share link'),
+                          ),
                           PopupMenuItem(value: 'delete', child: Text('Delete')),
                         ],
                       ),
@@ -14719,30 +20977,49 @@ class _ProjectsSpacesPageState extends State<ProjectsSpacesPage> {
                   );
                 }),
               const SizedBox(height: 12),
-              Text('Spaces (${spaces.length})', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+              Text(
+                'Spaces (${spaces.length})',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              ),
               const SizedBox(height: 8),
               if (spaces.isEmpty)
                 const Card(child: ListTile(title: Text('No spaces yet.')))
               else
                 ...spaces.map((space) {
                   final id = _toInt(space['id']);
-                  final pages = (pagesBySpace['$id'] as List<dynamic>? ?? const <dynamic>[]);
+                  final pages =
+                      (pagesBySpace['$id'] as List<dynamic>? ??
+                      const <dynamic>[]);
                   return Card(
                     child: ListTile(
                       title: Text('${space['name'] ?? ''}'),
-                      subtitle: Text('${space['description'] ?? ''}\n${pages.length} pages • ${space['visibility'] ?? 'family'}${space['archived'] == true ? ' • archived' : ''}'),
+                      subtitle: Text(
+                        '${space['description'] ?? ''}\n${pages.length} pages • ${space['visibility'] ?? 'family'}${space['archived'] == true ? ' • archived' : ''}',
+                      ),
                       isThreeLine: true,
                       trailing: PopupMenuButton<String>(
                         onSelected: (value) {
                           if (value == 'open') _openSpace(space, data);
                           if (value == 'edit') _editSpace(space);
                           if (value == 'delete') _deleteSpace(space);
-                          if (value == 'share') _copyShareLink('${space['share_url'] ?? ''}');
+                          if (value == 'share')
+                            _copyShareLink('${space['share_url'] ?? ''}');
                         },
                         itemBuilder: (context) => const [
-                          PopupMenuItem(value: 'open', child: Text('Open wiki')),
-                          PopupMenuItem(value: 'edit', child: Text('Edit / visibility')),
-                          PopupMenuItem(value: 'share', child: Text('Copy share link')),
+                          PopupMenuItem(
+                            value: 'open',
+                            child: Text('Open wiki'),
+                          ),
+                          PopupMenuItem(
+                            value: 'edit',
+                            child: Text('Edit / visibility'),
+                          ),
+                          PopupMenuItem(
+                            value: 'share',
+                            child: Text('Copy share link'),
+                          ),
                           PopupMenuItem(value: 'delete', child: Text('Delete')),
                         ],
                       ),
@@ -14784,7 +21061,8 @@ class _ProjectBoardPageState extends State<ProjectBoardPage> {
   @override
   void initState() {
     super.initState();
-    _columns = [...widget.initialColumns]..sort((a, b) => _toInt(a['position']).compareTo(_toInt(b['position'])));
+    _columns = [...widget.initialColumns]
+      ..sort((a, b) => _toInt(a['position']).compareTo(_toInt(b['position'])));
     _cards = [...widget.initialCards];
   }
 
@@ -14795,21 +21073,35 @@ class _ProjectBoardPageState extends State<ProjectBoardPage> {
       builder: (context) => AlertDialog(
         insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
         title: const Text('Add Column'),
-        content: TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Column name')),
+        content: TextField(
+          controller: nameCtrl,
+          decoration: const InputDecoration(labelText: 'Column name'),
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Add')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Add'),
+          ),
         ],
       ),
     );
     if (should != true) return;
     try {
-      await widget.api.addProjectColumn(projectId: _toInt(widget.project['id']), name: nameCtrl.text.trim());
+      await widget.api.addProjectColumn(
+        projectId: _toInt(widget.project['id']),
+        name: nameCtrl.text.trim(),
+      );
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Add column failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Add column failed: $err')));
     }
   }
 
@@ -14825,15 +21117,29 @@ class _ProjectBoardPageState extends State<ProjectBoardPage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(controller: titleCtrl, decoration: const InputDecoration(labelText: 'Title')),
+              TextField(
+                controller: titleCtrl,
+                decoration: const InputDecoration(labelText: 'Title'),
+              ),
               const SizedBox(height: 8),
-              TextField(controller: descCtrl, minLines: 2, maxLines: 4, decoration: const InputDecoration(labelText: 'Description')),
+              TextField(
+                controller: descCtrl,
+                minLines: 2,
+                maxLines: 4,
+                decoration: const InputDecoration(labelText: 'Description'),
+              ),
             ],
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Add')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Add'),
+          ),
         ],
       ),
     );
@@ -14849,7 +21155,9 @@ class _ProjectBoardPageState extends State<ProjectBoardPage> {
       Navigator.of(context).pop(true);
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Add card failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Add card failed: $err')));
     }
   }
 
@@ -14859,17 +21167,33 @@ class _ProjectBoardPageState extends State<ProjectBoardPage> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 24,
+            vertical: 24,
+          ),
           title: const Text('Move Card'),
           content: DropdownButtonFormField<String>(
             initialValue: selected,
             decoration: const InputDecoration(labelText: 'Target column'),
-            items: _columns.map((col) => DropdownMenuItem<String>(value: '${col['id']}', child: Text('${col['name']}'))).toList(),
+            items: _columns
+                .map(
+                  (col) => DropdownMenuItem<String>(
+                    value: '${col['id']}',
+                    child: Text('${col['name']}'),
+                  ),
+                )
+                .toList(),
             onChanged: (value) => setDialogState(() => selected = value),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Move')),
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Move'),
+            ),
           ],
         ),
       ),
@@ -14877,12 +21201,17 @@ class _ProjectBoardPageState extends State<ProjectBoardPage> {
     if (should != true || selected == null) return;
     setState(() => _saving = true);
     try {
-      await widget.api.moveProjectCard(cardId: _toInt(card['id']), columnId: int.parse(selected!));
+      await widget.api.moveProjectCard(
+        cardId: _toInt(card['id']),
+        columnId: int.parse(selected!),
+      );
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Move failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Move failed: $err')));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -14896,7 +21225,9 @@ class _ProjectBoardPageState extends State<ProjectBoardPage> {
       Navigator.of(context).pop(true);
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Delete failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Delete failed: $err')));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -14913,7 +21244,11 @@ class _ProjectBoardPageState extends State<ProjectBoardPage> {
       appBar: AppBar(
         title: Text('${widget.project['name'] ?? 'Project'}'),
         actions: [
-          IconButton(onPressed: _saving ? null : _addColumn, icon: const Icon(Icons.view_column_outlined), tooltip: 'Add column'),
+          IconButton(
+            onPressed: _saving ? null : _addColumn,
+            icon: const Icon(Icons.view_column_outlined),
+            tooltip: 'Add column',
+          ),
         ],
       ),
       body: ListView(
@@ -14921,7 +21256,8 @@ class _ProjectBoardPageState extends State<ProjectBoardPage> {
         children: [
           ..._columns.map((col) {
             final colId = _toInt(col['id']);
-            final cards = cardsByColumn[colId] ?? const <Map<String, dynamic>>[];
+            final cards =
+                cardsByColumn[colId] ?? const <Map<String, dynamic>>[];
             return Card(
               child: Padding(
                 padding: const EdgeInsets.all(10),
@@ -14930,27 +21266,50 @@ class _ProjectBoardPageState extends State<ProjectBoardPage> {
                   children: [
                     Row(
                       children: [
-                        Expanded(child: Text('${col['name'] ?? ''}', style: const TextStyle(fontWeight: FontWeight.w700))),
-                        IconButton(onPressed: _saving ? null : () => _addCard(colId), icon: const Icon(Icons.add_circle_outline), tooltip: 'Add card'),
+                        Expanded(
+                          child: Text(
+                            '${col['name'] ?? ''}',
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: _saving ? null : () => _addCard(colId),
+                          icon: const Icon(Icons.add_circle_outline),
+                          tooltip: 'Add card',
+                        ),
                       ],
                     ),
                     if (cards.isEmpty)
                       const Text('No cards')
                     else
-                      ...cards.map((card) => Card(
-                            color: const Color(0xFFF8FAFC),
-                            child: ListTile(
-                              title: Text('${card['title'] ?? ''}'),
-                              subtitle: Text('${card['description'] ?? ''}'),
-                              trailing: Wrap(
-                                spacing: 4,
-                                children: [
-                                  IconButton(onPressed: _saving ? null : () => _moveCard(card), icon: const Icon(Icons.swap_horiz), tooltip: 'Move'),
-                                  IconButton(onPressed: _saving ? null : () => _deleteCard(card), icon: const Icon(Icons.delete_outline), tooltip: 'Delete'),
-                                ],
-                              ),
+                      ...cards.map(
+                        (card) => Card(
+                          color: const Color(0xFFF8FAFC),
+                          child: ListTile(
+                            title: Text('${card['title'] ?? ''}'),
+                            subtitle: Text('${card['description'] ?? ''}'),
+                            trailing: Wrap(
+                              spacing: 4,
+                              children: [
+                                IconButton(
+                                  onPressed: _saving
+                                      ? null
+                                      : () => _moveCard(card),
+                                  icon: const Icon(Icons.swap_horiz),
+                                  tooltip: 'Move',
+                                ),
+                                IconButton(
+                                  onPressed: _saving
+                                      ? null
+                                      : () => _deleteCard(card),
+                                  icon: const Icon(Icons.delete_outline),
+                                  tooltip: 'Delete',
+                                ),
+                              ],
                             ),
-                          )),
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -14963,7 +21322,12 @@ class _ProjectBoardPageState extends State<ProjectBoardPage> {
 }
 
 class SpaceWikiPage extends StatefulWidget {
-  const SpaceWikiPage({super.key, required this.api, required this.space, required this.initialPages});
+  const SpaceWikiPage({
+    super.key,
+    required this.api,
+    required this.space,
+    required this.initialPages,
+  });
 
   final HomeHubApi api;
   final Map<String, dynamic> space;
@@ -14991,20 +21355,45 @@ class _SpaceWikiPageState extends State<SpaceWikiPage> {
       useSafeArea: true,
       isScrollControlled: true,
       builder: (context) => Padding(
-        padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + MediaQuery.of(context).viewInsets.bottom),
+        padding: EdgeInsets.fromLTRB(
+          16,
+          16,
+          16,
+          16 + MediaQuery.of(context).viewInsets.bottom,
+        ),
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(controller: titleCtrl, decoration: const InputDecoration(labelText: 'Page title')),
+              TextField(
+                controller: titleCtrl,
+                decoration: const InputDecoration(labelText: 'Page title'),
+              ),
               const SizedBox(height: 8),
-              TextField(controller: contentCtrl, minLines: 4, maxLines: 10, decoration: const InputDecoration(labelText: 'Content (HTML/text)')),
+              TextField(
+                controller: contentCtrl,
+                minLines: 4,
+                maxLines: 10,
+                decoration: const InputDecoration(
+                  labelText: 'Content (HTML/text)',
+                ),
+              ),
               const SizedBox(height: 10),
               Row(
                 children: [
-                  Expanded(child: OutlinedButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel'))),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.of(context).pop(false),
+                      child: const Text('Cancel'),
+                    ),
+                  ),
                   const SizedBox(width: 8),
-                  Expanded(child: FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Save'))),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: () => Navigator.of(context).pop(true),
+                      child: const Text('Save'),
+                    ),
+                  ),
                 ],
               ),
             ],
@@ -15015,12 +21404,18 @@ class _SpaceWikiPageState extends State<SpaceWikiPage> {
     if (should != true) return;
     setState(() => _saving = true);
     try {
-      await widget.api.createSpacePage(spaceId: _toInt(widget.space['id']), title: titleCtrl.text.trim(), content: contentCtrl.text.trim());
+      await widget.api.createSpacePage(
+        spaceId: _toInt(widget.space['id']),
+        title: titleCtrl.text.trim(),
+        content: contentCtrl.text.trim(),
+      );
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Add page failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Add page failed: $err')));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -15034,7 +21429,9 @@ class _SpaceWikiPageState extends State<SpaceWikiPage> {
       Navigator.of(context).pop(true);
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Delete page failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Delete page failed: $err')));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -15046,7 +21443,11 @@ class _SpaceWikiPageState extends State<SpaceWikiPage> {
       appBar: AppBar(
         title: Text('${widget.space['name'] ?? 'Space'}'),
         actions: [
-          IconButton(onPressed: _saving ? null : _addPage, icon: const Icon(Icons.note_add_outlined), tooltip: 'Add page'),
+          IconButton(
+            onPressed: _saving ? null : _addPage,
+            icon: const Icon(Icons.note_add_outlined),
+            tooltip: 'Add page',
+          ),
         ],
       ),
       body: ListView(
@@ -15055,25 +21456,27 @@ class _SpaceWikiPageState extends State<SpaceWikiPage> {
           if (_pages.isEmpty)
             const Card(child: ListTile(title: Text('No pages yet.')))
           else
-            ..._pages.map((page) => Card(
-                  child: ExpansionTile(
-                    title: Text('${page['title'] ?? ''}'),
-                    subtitle: Text('Updated ${page['updated_at'] ?? ''}'),
-                    trailing: IconButton(
-                      onPressed: _saving ? null : () => _deletePage(page),
-                      icon: const Icon(Icons.delete_outline),
-                    ),
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text(_stripHtml('${page['content'] ?? ''}')),
-                        ),
-                      ),
-                    ],
+            ..._pages.map(
+              (page) => Card(
+                child: ExpansionTile(
+                  title: Text('${page['title'] ?? ''}'),
+                  subtitle: Text('Updated ${page['updated_at'] ?? ''}'),
+                  trailing: IconButton(
+                    onPressed: _saving ? null : () => _deletePage(page),
+                    icon: const Icon(Icons.delete_outline),
                   ),
-                )),
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(_stripHtml('${page['content'] ?? ''}')),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -15110,16 +21513,31 @@ class _RecipeBookPageState extends State<RecipeBookPage> {
       isScrollControlled: true,
       builder: (context) => StatefulBuilder(
         builder: (context, setModalState) => Padding(
-          padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + MediaQuery.of(context).viewInsets.bottom),
+          padding: EdgeInsets.fromLTRB(
+            16,
+            16,
+            16,
+            16 + MediaQuery.of(context).viewInsets.bottom,
+          ),
           child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                TextField(controller: titleCtrl, decoration: const InputDecoration(labelText: 'Title')),
+                TextField(
+                  controller: titleCtrl,
+                  decoration: const InputDecoration(labelText: 'Title'),
+                ),
                 const SizedBox(height: 8),
                 Row(
                   children: [
-                    Expanded(child: TextField(controller: linkCtrl, decoration: const InputDecoration(labelText: 'Recipe URL'))),
+                    Expanded(
+                      child: TextField(
+                        controller: linkCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Recipe URL',
+                        ),
+                      ),
+                    ),
                     const SizedBox(width: 8),
                     FilledButton(
                       onPressed: parsing
@@ -15129,15 +21547,24 @@ class _RecipeBookPageState extends State<RecipeBookPage> {
                               if (url.isEmpty) return;
                               setModalState(() => parsing = true);
                               try {
-                                final parsed = await widget.api.parseRecipeLink(url);
-                                final recipe = parsed['recipe'] as Map<String, dynamic>? ?? const <String, dynamic>{};
-                                titleCtrl.text = '${recipe['title'] ?? titleCtrl.text}';
-                                ingredientsCtrl.text = '${recipe['ingredients_html'] ?? ingredientsCtrl.text}';
-                                instructionsCtrl.text = '${recipe['instructions_html'] ?? instructionsCtrl.text}';
+                                final parsed = await widget.api.parseRecipeLink(
+                                  url,
+                                );
+                                final recipe =
+                                    parsed['recipe'] as Map<String, dynamic>? ??
+                                    const <String, dynamic>{};
+                                titleCtrl.text =
+                                    '${recipe['title'] ?? titleCtrl.text}';
+                                ingredientsCtrl.text =
+                                    '${recipe['ingredients_html'] ?? ingredientsCtrl.text}';
+                                instructionsCtrl.text =
+                                    '${recipe['instructions_html'] ?? instructionsCtrl.text}';
                                 linkCtrl.text = '${recipe['link'] ?? url}';
                               } catch (err) {
                                 if (!mounted) return;
-                                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Parse failed: $err')));
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Parse failed: $err')),
+                                );
                               } finally {
                                 setModalState(() => parsing = false);
                               }
@@ -15147,15 +21574,39 @@ class _RecipeBookPageState extends State<RecipeBookPage> {
                   ],
                 ),
                 const SizedBox(height: 8),
-                TextField(controller: ingredientsCtrl, minLines: 3, maxLines: 6, decoration: const InputDecoration(labelText: 'Ingredients (HTML/text)')),
+                TextField(
+                  controller: ingredientsCtrl,
+                  minLines: 3,
+                  maxLines: 6,
+                  decoration: const InputDecoration(
+                    labelText: 'Ingredients (HTML/text)',
+                  ),
+                ),
                 const SizedBox(height: 8),
-                TextField(controller: instructionsCtrl, minLines: 3, maxLines: 6, decoration: const InputDecoration(labelText: 'Instructions (HTML/text)')),
+                TextField(
+                  controller: instructionsCtrl,
+                  minLines: 3,
+                  maxLines: 6,
+                  decoration: const InputDecoration(
+                    labelText: 'Instructions (HTML/text)',
+                  ),
+                ),
                 const SizedBox(height: 10),
                 Row(
                   children: [
-                    Expanded(child: OutlinedButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel'))),
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.of(context).pop(false),
+                        child: const Text('Cancel'),
+                      ),
+                    ),
                     const SizedBox(width: 8),
-                    Expanded(child: FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Save'))),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: () => Navigator.of(context).pop(true),
+                        child: const Text('Save'),
+                      ),
+                    ),
                   ],
                 ),
               ],
@@ -15176,7 +21627,9 @@ class _RecipeBookPageState extends State<RecipeBookPage> {
       setState(() => _future = widget.api.fetchRecipes());
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Save failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Save failed: $err')));
     }
   }
 
@@ -15187,7 +21640,9 @@ class _RecipeBookPageState extends State<RecipeBookPage> {
       setState(() => _future = widget.api.fetchRecipes());
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Delete failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Delete failed: $err')));
     }
   }
 
@@ -15201,46 +21656,75 @@ class _RecipeBookPageState extends State<RecipeBookPage> {
       child: FutureBuilder<List<Map<String, dynamic>>>(
         future: _future,
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-          if (snapshot.hasError) return ErrorPanel(error: '${snapshot.error}', onRetry: () => setState(() => _future = widget.api.fetchRecipes()));
+          if (snapshot.connectionState == ConnectionState.waiting)
+            return const Center(child: CircularProgressIndicator());
+          if (snapshot.hasError)
+            return ErrorPanel(
+              error: '${snapshot.error}',
+              onRetry: () =>
+                  setState(() => _future = widget.api.fetchRecipes()),
+            );
           final rows = snapshot.data ?? const <Map<String, dynamic>>[];
           return ListView(
             padding: const EdgeInsets.all(12),
             children: [
               Align(
                 alignment: Alignment.centerRight,
-                child: FilledButton.icon(onPressed: _addRecipe, icon: const Icon(Icons.add), label: const Text('Add Recipe')),
+                child: FilledButton.icon(
+                  onPressed: _addRecipe,
+                  icon: const Icon(Icons.add),
+                  label: const Text('Add Recipe'),
+                ),
               ),
               const SizedBox(height: 8),
               if (rows.isEmpty)
                 const Card(child: ListTile(title: Text('No recipes yet.')))
               else
-                ...rows.map((row) => Card(
-                      child: ListTile(
-                        title: Text('${row['title'] ?? ''}'),
-                        subtitle: Text('${row['creator'] ?? ''}'),
-                        trailing: Wrap(
-                          spacing: 4,
-                          children: [
-                            IconButton(
-                              onPressed: () async {
-                                try {
-                                  await widget.api.addRecipeIngredientsToShopping(_toInt(row['id']));
-                                  if (!mounted) return;
-                                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ingredients added to shopping list.')));
-                                } catch (err) {
-                                  if (!mounted) return;
-                                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Add ingredients failed: $err')));
-                                }
-                              },
-                              icon: const Icon(Icons.shopping_cart_outlined),
-                              tooltip: 'Add ingredients to shopping',
-                            ),
-                            IconButton(onPressed: () => _deleteRecipe(_toInt(row['id'])), icon: const Icon(Icons.delete_outline)),
-                          ],
-                        ),
+                ...rows.map(
+                  (row) => Card(
+                    child: ListTile(
+                      title: Text('${row['title'] ?? ''}'),
+                      subtitle: Text('${row['creator'] ?? ''}'),
+                      trailing: Wrap(
+                        spacing: 4,
+                        children: [
+                          IconButton(
+                            onPressed: () async {
+                              try {
+                                await widget.api.addRecipeIngredientsToShopping(
+                                  _toInt(row['id']),
+                                );
+                                if (!mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Ingredients added to shopping list.',
+                                    ),
+                                  ),
+                                );
+                              } catch (err) {
+                                if (!mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      'Add ingredients failed: $err',
+                                    ),
+                                  ),
+                                );
+                              }
+                            },
+                            icon: const Icon(Icons.shopping_cart_outlined),
+                            tooltip: 'Add ingredients to shopping',
+                          ),
+                          IconButton(
+                            onPressed: () => _deleteRecipe(_toInt(row['id'])),
+                            icon: const Icon(Icons.delete_outline),
+                          ),
+                        ],
                       ),
-                    )),
+                    ),
+                  ),
+                ),
             ],
           );
         },
@@ -15300,13 +21784,19 @@ class _ExpiryTrackerPageState extends State<ExpiryTrackerPage> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 24,
+            vertical: 24,
+          ),
           title: const Text('Add Expiry Item'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Item name')),
+                TextField(
+                  controller: nameCtrl,
+                  decoration: const InputDecoration(labelText: 'Item name'),
+                ),
                 const SizedBox(height: 8),
                 OutlinedButton.icon(
                   onPressed: () async {
@@ -15327,19 +21817,30 @@ class _ExpiryTrackerPageState extends State<ExpiryTrackerPage> {
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Save')),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Save'),
+            ),
           ],
         ),
       ),
     );
     if (shouldSave != true) return;
     try {
-      await widget.api.saveExpiryItem(name: nameCtrl.text.trim(), expiryDate: _fmtDate(selected));
+      await widget.api.saveExpiryItem(
+        name: nameCtrl.text.trim(),
+        expiryDate: _fmtDate(selected),
+      );
       await _load();
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Save failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Save failed: $err')));
     }
   }
 
@@ -15355,45 +21856,65 @@ class _ExpiryTrackerPageState extends State<ExpiryTrackerPage> {
         children: [
           Align(
             alignment: Alignment.centerRight,
-            child: FilledButton.icon(onPressed: _addItem, icon: const Icon(Icons.add), label: const Text('Add Item')),
+            child: FilledButton.icon(
+              onPressed: _addItem,
+              icon: const Icon(Icons.add),
+              label: const Text('Add Item'),
+            ),
           ),
           const SizedBox(height: 8),
           if (_reminders.isNotEmpty) ...[
-            Text('Pending Reminders', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+            Text(
+              'Pending Reminders',
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+            ),
             const SizedBox(height: 8),
-            ..._reminders.map((row) => Card(
-                  child: ListTile(
-                    title: Text('${row['name'] ?? ''}'),
-                    subtitle: Text('Days left: ${row['days_left'] ?? ''}'),
-                    trailing: TextButton(
-                      onPressed: () async {
-                        await widget.api.ackExpiryReminder(_toInt(row['id']));
-                        await _load();
-                      },
-                      child: const Text('Ack'),
-                    ),
+            ..._reminders.map(
+              (row) => Card(
+                child: ListTile(
+                  title: Text('${row['name'] ?? ''}'),
+                  subtitle: Text('Days left: ${row['days_left'] ?? ''}'),
+                  trailing: TextButton(
+                    onPressed: () async {
+                      await widget.api.ackExpiryReminder(_toInt(row['id']));
+                      await _load();
+                    },
+                    child: const Text('Ack'),
                   ),
-                )),
+                ),
+              ),
+            ),
             const SizedBox(height: 10),
           ],
-          Text('Expiry Items (${_items.length})', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+          Text(
+            'Expiry Items (${_items.length})',
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+          ),
           const SizedBox(height: 8),
           if (_items.isEmpty)
             const Card(child: ListTile(title: Text('No expiry items yet.')))
           else
-            ..._items.map((row) => Card(
-                  child: ListTile(
-                    title: Text('${row['name'] ?? ''}'),
-                    subtitle: Text('Expiry: ${row['expiry_date'] ?? ''} • Days left: ${row['days_left'] ?? ''}'),
-                    trailing: IconButton(
-                      onPressed: () async {
-                        await widget.api.deleteExpiryItem(_toInt(row['id']));
-                        await _load();
-                      },
-                      icon: const Icon(Icons.delete_outline),
-                    ),
+            ..._items.map(
+              (row) => Card(
+                child: ListTile(
+                  title: Text('${row['name'] ?? ''}'),
+                  subtitle: Text(
+                    'Expiry: ${row['expiry_date'] ?? ''} • Days left: ${row['days_left'] ?? ''}',
                   ),
-                )),
+                  trailing: IconButton(
+                    onPressed: () async {
+                      await widget.api.deleteExpiryItem(_toInt(row['id']));
+                      await _load();
+                    },
+                    icon: const Icon(Icons.delete_outline),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -15459,7 +21980,9 @@ class _QrGeneratorPageState extends State<QrGeneratorPage> {
       await _load();
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Generate failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Generate failed: $err')));
     }
   }
 
@@ -15473,9 +21996,18 @@ class _QrGeneratorPageState extends State<QrGeneratorPage> {
       child: ListView(
         padding: const EdgeInsets.all(12),
         children: [
-          TextField(controller: _textCtrl, decoration: const InputDecoration(labelText: 'QR text / URL / WIFI payload')),
+          TextField(
+            controller: _textCtrl,
+            decoration: const InputDecoration(
+              labelText: 'QR text / URL / WIFI payload',
+            ),
+          ),
           const SizedBox(height: 8),
-          FilledButton.icon(onPressed: _generate, icon: const Icon(Icons.qr_code_2), label: const Text('Generate QR')),
+          FilledButton.icon(
+            onPressed: _generate,
+            icon: const Icon(Icons.qr_code_2),
+            label: const Text('Generate QR'),
+          ),
           if (_latestB64 != null && _latestB64!.isNotEmpty) ...[
             const SizedBox(height: 12),
             Card(
@@ -15486,24 +22018,31 @@ class _QrGeneratorPageState extends State<QrGeneratorPage> {
             ),
           ],
           const SizedBox(height: 12),
-          Text('History (${_history.length})', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+          Text(
+            'History (${_history.length})',
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+          ),
           const SizedBox(height: 8),
           if (_history.isEmpty)
             const Card(child: ListTile(title: Text('No QR history yet.')))
           else
-            ..._history.map((row) => Card(
-                  child: ListTile(
-                    title: Text('${row['original_input'] ?? row['text'] ?? ''}'),
-                    subtitle: Text('${row['creator'] ?? ''}'),
-                    trailing: IconButton(
-                      onPressed: () async {
-                        await widget.api.deleteQr(_toInt(row['id']));
-                        await _load();
-                      },
-                      icon: const Icon(Icons.delete_outline),
-                    ),
+            ..._history.map(
+              (row) => Card(
+                child: ListTile(
+                  title: Text('${row['original_input'] ?? row['text'] ?? ''}'),
+                  subtitle: Text('${row['creator'] ?? ''}'),
+                  trailing: IconButton(
+                    onPressed: () async {
+                      await widget.api.deleteQr(_toInt(row['id']));
+                      await _load();
+                    },
+                    icon: const Icon(Icons.delete_outline),
                   ),
-                )),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -15552,8 +22091,13 @@ class _SettingsNativePageState extends State<SettingsNativePage> {
       final membersObj = await widget.api.fetchFamilyMembers();
       final menuObj = await widget.api.fetchMenuVisibility();
       final permissionObj = await widget.api.fetchPermissionSchemes();
-      final members = (membersObj['members'] as List<dynamic>? ?? const <dynamic>[]).whereType<Map<String, dynamic>>().toList();
-      final menuVisibility = (menuObj['menu_visibility'] as Map<String, dynamic>? ?? const <String, dynamic>{});
+      final members =
+          (membersObj['members'] as List<dynamic>? ?? const <dynamic>[])
+              .whereType<Map<String, dynamic>>()
+              .toList();
+      final menuVisibility =
+          (menuObj['menu_visibility'] as Map<String, dynamic>? ??
+          const <String, dynamic>{});
       if (!mounted) return;
       setState(() {
         _hubCtrl.text = '${settings['hub_name'] ?? ''}';
@@ -15583,38 +22127,59 @@ class _SettingsNativePageState extends State<SettingsNativePage> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 24,
+            vertical: 24,
+          ),
           title: const Text('Edit Member'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Name')),
+                TextField(
+                  controller: nameCtrl,
+                  decoration: const InputDecoration(labelText: 'Name'),
+                ),
                 const SizedBox(height: 8),
-                TextField(controller: emailCtrl, decoration: const InputDecoration(labelText: 'Email')),
+                TextField(
+                  controller: emailCtrl,
+                  decoration: const InputDecoration(labelText: 'Email'),
+                ),
                 const SizedBox(height: 8),
                 DropdownButtonFormField<String>(
                   initialValue: role,
                   decoration: const InputDecoration(labelText: 'Role'),
                   items: const [
-                    DropdownMenuItem(value: 'standard', child: Text('Standard')),
+                    DropdownMenuItem(
+                      value: 'standard',
+                      child: Text('Standard'),
+                    ),
                     DropdownMenuItem(value: 'admin', child: Text('Admin')),
                   ],
-                  onChanged: (value) => setDialogState(() => role = value ?? 'standard'),
+                  onChanged: (value) =>
+                      setDialogState(() => role = value ?? 'standard'),
                 ),
                 const SizedBox(height: 8),
                 TextField(
                   controller: pinCtrl,
                   keyboardType: TextInputType.number,
                   obscureText: true,
-                  decoration: const InputDecoration(labelText: 'PIN (optional, 4 digits)'),
+                  decoration: const InputDecoration(
+                    labelText: 'PIN (optional, 4 digits)',
+                  ),
                 ),
               ],
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Save')),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Save'),
+            ),
           ],
         ),
       ),
@@ -15632,7 +22197,9 @@ class _SettingsNativePageState extends State<SettingsNativePage> {
       await _load();
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Update failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Update failed: $err')));
     }
   }
 
@@ -15644,7 +22211,9 @@ class _SettingsNativePageState extends State<SettingsNativePage> {
       await _load();
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Delete failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Delete failed: $err')));
     }
   }
 
@@ -15654,11 +22223,15 @@ class _SettingsNativePageState extends State<SettingsNativePage> {
     try {
       await widget.api.resetMemberPin(id);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('PIN reset.')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('PIN reset.')));
       await _load();
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('PIN reset failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('PIN reset failed: $err')));
     }
   }
 
@@ -15669,22 +22242,34 @@ class _SettingsNativePageState extends State<SettingsNativePage> {
       setState(() => _menuVisibility = {..._menuVisibility, key: visible});
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Menu update failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Menu update failed: $err')));
     }
   }
 
   Future<void> _editAppModulePermission(Map<String, dynamic> appModule) async {
     final moduleKey = '${appModule['resource_key'] ?? ''}';
     if (moduleKey.isEmpty) return;
-    final grants = (_permissionSchemes['grants'] as List<dynamic>? ?? const <dynamic>[]).whereType<Map<String, dynamic>>().where((row) {
-      return '${row['resource_type'] ?? ''}' == 'app_module' && '${row['resource_key'] ?? ''}' == moduleKey;
-    }).toList();
-    final members = (_permissionSchemes['members'] as List<dynamic>? ?? const <dynamic>[]).map((value) => '$value').where((value) => value.isNotEmpty).toList();
+    final grants =
+        (_permissionSchemes['grants'] as List<dynamic>? ?? const <dynamic>[])
+            .whereType<Map<String, dynamic>>()
+            .where((row) {
+              return '${row['resource_type'] ?? ''}' == 'app_module' &&
+                  '${row['resource_key'] ?? ''}' == moduleKey;
+            })
+            .toList();
+    final members =
+        (_permissionSchemes['members'] as List<dynamic>? ?? const <dynamic>[])
+            .map((value) => '$value')
+            .where((value) => value.isNotEmpty)
+            .toList();
 
     String visibility = 'family';
     final allowed = <String>{};
     for (final grant in grants) {
-      if ('${grant['subject_type'] ?? ''}' == 'member' && grant['can_read'] == true) {
+      if ('${grant['subject_type'] ?? ''}' == 'member' &&
+          grant['can_read'] == true) {
         final member = '${grant['subject_value'] ?? ''}'.trim();
         if (member.isNotEmpty) allowed.add(member);
       }
@@ -15694,7 +22279,10 @@ class _SettingsNativePageState extends State<SettingsNativePage> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 24,
+            vertical: 24,
+          ),
           title: Text('Permissions • $moduleKey'),
           content: SingleChildScrollView(
             child: Column(
@@ -15705,10 +22293,14 @@ class _SettingsNativePageState extends State<SettingsNativePage> {
                   decoration: const InputDecoration(labelText: 'Visibility'),
                   items: const [
                     DropdownMenuItem(value: 'family', child: Text('Family')),
-                    DropdownMenuItem(value: 'restricted', child: Text('Restricted')),
+                    DropdownMenuItem(
+                      value: 'restricted',
+                      child: Text('Restricted'),
+                    ),
                     DropdownMenuItem(value: 'private', child: Text('Private')),
                   ],
-                  onChanged: (value) => setDialogState(() => visibility = value ?? 'family'),
+                  onChanged: (value) =>
+                      setDialogState(() => visibility = value ?? 'family'),
                 ),
                 const SizedBox(height: 8),
                 ...members.map(
@@ -15732,19 +22324,31 @@ class _SettingsNativePageState extends State<SettingsNativePage> {
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Save'),
+            ),
           ],
         ),
       ),
     );
     if (should != true) return;
     try {
-      await widget.api.updateAppPermissionScheme(moduleKey: moduleKey, visibility: visibility, allowedMembers: allowed.toList());
+      await widget.api.updateAppPermissionScheme(
+        moduleKey: moduleKey,
+        visibility: visibility,
+        allowedMembers: allowed.toList(),
+      );
       await _load();
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Permission update failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Permission update failed: $err')));
     }
   }
 
@@ -15753,50 +22357,117 @@ class _SettingsNativePageState extends State<SettingsNativePage> {
     if (memberId <= 0) return;
     try {
       final profile = await widget.api.getMemberProfile(memberId);
-      final emailCtrl = TextEditingController(text: '${profile['email'] ?? ''}');
-      final statusCtrl = TextEditingController(text: '${profile['status'] ?? ''}');
-      final birthdayCtrl = TextEditingController(text: '${profile['birthday'] ?? ''}');
-      final colorCtrl = TextEditingController(text: '${profile['favorite_color'] ?? ''}');
-      final songCtrl = TextEditingController(text: '${profile['favorite_song'] ?? ''}');
-      final wishlistCtrl = TextEditingController(text: '${profile['amazon_wishlist_url'] ?? ''}');
+      final emailCtrl = TextEditingController(
+        text: '${profile['email'] ?? ''}',
+      );
+      final statusCtrl = TextEditingController(
+        text: '${profile['status'] ?? ''}',
+      );
+      final birthdayCtrl = TextEditingController(
+        text: '${profile['birthday'] ?? ''}',
+      );
+      final colorCtrl = TextEditingController(
+        text: '${profile['favorite_color'] ?? ''}',
+      );
+      final songCtrl = TextEditingController(
+        text: '${profile['favorite_song'] ?? ''}',
+      );
+      final wishlistCtrl = TextEditingController(
+        text: '${profile['amazon_wishlist_url'] ?? ''}',
+      );
+      bool miniSlideshowEnabled = profile['mini_slideshow_enabled'] == true;
 
       final should = await showDialog<bool>(
         context: context,
-        builder: (context) => AlertDialog(
-          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-          title: Text('Profile • ${memberRow['name'] ?? ''}'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(controller: emailCtrl, decoration: const InputDecoration(labelText: 'Email')),
-                const SizedBox(height: 8),
-                TextField(controller: statusCtrl, decoration: const InputDecoration(labelText: 'Status')),
-                const SizedBox(height: 8),
-                TextField(controller: birthdayCtrl, decoration: const InputDecoration(labelText: 'Birthday (YYYY-MM-DD)')),
-                const SizedBox(height: 8),
-                TextField(controller: colorCtrl, decoration: const InputDecoration(labelText: 'Favorite color')),
-                const SizedBox(height: 8),
-                TextField(controller: songCtrl, decoration: const InputDecoration(labelText: 'Favorite song')),
-                const SizedBox(height: 8),
-                TextField(controller: wishlistCtrl, decoration: const InputDecoration(labelText: 'Amazon wishlist URL')),
-              ],
+        builder: (context) => StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            insetPadding: const EdgeInsets.symmetric(
+              horizontal: 24,
+              vertical: 24,
             ),
+            title: Text('Profile • ${memberRow['name'] ?? ''}'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: emailCtrl,
+                    decoration: const InputDecoration(labelText: 'Email'),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: statusCtrl,
+                    decoration: const InputDecoration(labelText: 'Status'),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: birthdayCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Birthday (YYYY-MM-DD)',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: colorCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Favorite color',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: songCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Favorite song',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: wishlistCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Amazon wishlist URL',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  CheckboxListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    value: miniSlideshowEnabled,
+                    onChanged: (value) => setDialogState(
+                      () => miniSlideshowEnabled = value == true,
+                    ),
+                    title: const Text('Enable mini slideshow on dashboard'),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () async {
+                  try {
+                    await widget.api.testMemberEmail(memberId);
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Test email sent.')),
+                    );
+                  } catch (err) {
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Test email failed: $err')),
+                    );
+                  }
+                },
+                child: const Text('Test Email'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Save'),
+              ),
+            ],
           ),
-          actions: [
-            TextButton(onPressed: () async {
-              try {
-                await widget.api.testMemberEmail(memberId);
-                if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Test email sent.')));
-              } catch (err) {
-                if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Test email failed: $err')));
-              }
-            }, child: const Text('Test Email')),
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
-          ],
         ),
       );
       if (should != true) return;
@@ -15807,12 +22478,17 @@ class _SettingsNativePageState extends State<SettingsNativePage> {
         'favorite_color': colorCtrl.text.trim(),
         'favorite_song': songCtrl.text.trim(),
         'amazon_wishlist_url': wishlistCtrl.text.trim(),
+        'mini_slideshow_enabled': miniSlideshowEnabled,
       });
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile updated.')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Profile updated.')));
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Profile update failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Profile update failed: $err')));
     }
   }
 
@@ -15826,23 +22502,33 @@ class _SettingsNativePageState extends State<SettingsNativePage> {
       child: ListView(
         padding: const EdgeInsets.all(12),
         children: [
-          TextField(controller: _hubCtrl, decoration: const InputDecoration(labelText: 'Hub Name')),
+          TextField(
+            controller: _hubCtrl,
+            decoration: const InputDecoration(labelText: 'Hub Name'),
+          ),
           const SizedBox(height: 8),
           FilledButton(
             onPressed: () async {
               try {
                 await widget.api.updateHubName(_hubCtrl.text.trim());
                 if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Hub updated.')));
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text('Hub updated.')));
               } catch (err) {
                 if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Update failed: $err')));
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(SnackBar(content: Text('Update failed: $err')));
               }
             },
             child: const Text('Save Hub Name'),
           ),
           const SizedBox(height: 14),
-          TextField(controller: _memberCtrl, decoration: const InputDecoration(labelText: 'Add Family Member')),
+          TextField(
+            controller: _memberCtrl,
+            decoration: const InputDecoration(labelText: 'Add Family Member'),
+          ),
           const SizedBox(height: 8),
           DropdownButtonFormField<String>(
             initialValue: _newMemberRole,
@@ -15851,7 +22537,8 @@ class _SettingsNativePageState extends State<SettingsNativePage> {
               DropdownMenuItem(value: 'standard', child: Text('Standard')),
               DropdownMenuItem(value: 'admin', child: Text('Admin')),
             ],
-            onChanged: (value) => setState(() => _newMemberRole = value ?? 'standard'),
+            onChanged: (value) =>
+                setState(() => _newMemberRole = value ?? 'standard'),
           ),
           const SizedBox(height: 8),
           FilledButton(
@@ -15859,35 +22546,66 @@ class _SettingsNativePageState extends State<SettingsNativePage> {
               final name = _memberCtrl.text.trim();
               if (name.isEmpty) return;
               try {
-                await widget.api.addFamilyMember(name: name, role: _newMemberRole);
+                await widget.api.addFamilyMember(
+                  name: name,
+                  role: _newMemberRole,
+                );
                 _memberCtrl.clear();
                 await _load();
               } catch (err) {
                 if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Add failed: $err')));
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(SnackBar(content: Text('Add failed: $err')));
               }
             },
             child: const Text('Add Member'),
           ),
           const SizedBox(height: 12),
-          Text('Family Members (${_members.length})', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+          Text(
+            'Family Members (${_members.length})',
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+          ),
           const SizedBox(height: 8),
-          ..._members.map((row) => Card(
-                child: ListTile(
-                  title: Text('${row['name'] ?? ''}'),
-                  subtitle: Text('${row['role'] ?? 'standard'}${row['pin'] == true ? ' • PIN set' : ' • No PIN'}'),
-                  trailing: Wrap(
-                    spacing: 4,
-                    children: [
-                      IconButton(onPressed: () => _editMember(row), icon: const Icon(Icons.edit_outlined), tooltip: 'Edit'),
-                      IconButton(onPressed: () => _resetPin(row), icon: const Icon(Icons.lock_reset), tooltip: 'Reset PIN'),
-                      IconButton(onPressed: () => _deleteMember(row), icon: const Icon(Icons.delete_outline), tooltip: 'Delete'),
-                    ],
-                  ),
+          ..._members.map(
+            (row) => Card(
+              child: ListTile(
+                title: Text('${row['name'] ?? ''}'),
+                subtitle: Text(
+                  '${row['role'] ?? 'standard'}${row['pin'] == true ? ' • PIN set' : ' • No PIN'}',
                 ),
-              )),
+                trailing: Wrap(
+                  spacing: 4,
+                  children: [
+                    IconButton(
+                      onPressed: () => _editMember(row),
+                      icon: const Icon(Icons.edit_outlined),
+                      tooltip: 'Edit',
+                    ),
+                    IconButton(
+                      onPressed: () => _resetPin(row),
+                      icon: const Icon(Icons.lock_reset),
+                      tooltip: 'Reset PIN',
+                    ),
+                    IconButton(
+                      onPressed: () => _deleteMember(row),
+                      icon: const Icon(Icons.delete_outline),
+                      tooltip: 'Delete',
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
           const SizedBox(height: 12),
-          Text('Menu Visibility', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+          Text(
+            'Menu Visibility',
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+          ),
           const SizedBox(height: 8),
           ..._menuVisibility.entries.map(
             (entry) => Card(
@@ -15899,28 +22617,49 @@ class _SettingsNativePageState extends State<SettingsNativePage> {
             ),
           ),
           const SizedBox(height: 12),
-          Text('App Permissions', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+          Text(
+            'App Permissions',
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+          ),
           const SizedBox(height: 8),
-          ...((_permissionSchemes['resources'] as Map<String, dynamic>? ?? const <String, dynamic>{})['app_modules'] as List<dynamic>? ?? const <dynamic>[])
+          ...((_permissionSchemes['resources'] as Map<String, dynamic>? ??
+                          const <String, dynamic>{})['app_modules']
+                      as List<dynamic>? ??
+                  const <dynamic>[])
               .whereType<Map<String, dynamic>>()
               .map(
                 (moduleRow) => Card(
                   child: ListTile(
-                    title: Text('${moduleRow['label'] ?? moduleRow['resource_key'] ?? ''}'),
+                    title: Text(
+                      '${moduleRow['label'] ?? moduleRow['resource_key'] ?? ''}',
+                    ),
                     subtitle: Text('${moduleRow['resource_key'] ?? ''}'),
-                    trailing: TextButton(onPressed: () => _editAppModulePermission(moduleRow), child: const Text('Edit')),
+                    trailing: TextButton(
+                      onPressed: () => _editAppModulePermission(moduleRow),
+                      child: const Text('Edit'),
+                    ),
                   ),
                 ),
               ),
           const SizedBox(height: 12),
-          Text('Member Profiles', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+          Text(
+            'Member Profiles',
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+          ),
           const SizedBox(height: 8),
           ..._members.map(
             (row) => Card(
               child: ListTile(
                 title: Text('${row['name'] ?? ''}'),
                 subtitle: Text('${row['email'] ?? ''}'),
-                trailing: TextButton(onPressed: () => _editMemberProfile(row), child: const Text('Profile')),
+                trailing: TextButton(
+                  onPressed: () => _editMemberProfile(row),
+                  child: const Text('Profile'),
+                ),
               ),
             ),
           ),
@@ -15946,7 +22685,10 @@ class _NotificationsPageState extends State<NotificationsPage> {
   bool _markingAllRead = false;
 
   Future<List<AppNotificationItem>> _loadNotifications() {
-    return widget.api.fetchNotifications(unreadOnly: _unreadOnly, eventType: _eventTypeFilter);
+    return widget.api.fetchNotifications(
+      unreadOnly: _unreadOnly,
+      eventType: _eventTypeFilter,
+    );
   }
 
   Future<void> _refresh() async {
@@ -15959,11 +22701,15 @@ class _NotificationsPageState extends State<NotificationsPage> {
     try {
       await widget.api.markAllNotificationsRead(eventType: _eventTypeFilter);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Marked notifications as read')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Marked notifications as read')),
+      );
       await _refresh();
     } catch (err) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Mark all failed: $err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Mark all failed: $err')));
     } finally {
       if (mounted) setState(() => _markingAllRead = false);
     }
@@ -15986,12 +22732,21 @@ class _NotificationsPageState extends State<NotificationsPage> {
             return const Center(child: CircularProgressIndicator());
           }
           if (snapshot.hasError) {
-            return ErrorPanel(error: snapshot.error.toString(), onRetry: () => setState(() => _future = _loadNotifications()));
+            return ErrorPanel(
+              error: snapshot.error.toString(),
+              onRetry: () => setState(() => _future = _loadNotifications()),
+            );
           }
 
           final rows = snapshot.data ?? [];
           final unreadCount = rows.where((item) => !item.isRead).length;
-          final categories = rows.map((item) => item.eventType.trim()).where((v) => v.isNotEmpty).toSet().toList()..sort();
+          final categories =
+              rows
+                  .map((item) => item.eventType.trim())
+                  .where((v) => v.isNotEmpty)
+                  .toSet()
+                  .toList()
+                ..sort();
           if (rows.isEmpty) {
             return const Center(child: Text('No notifications yet.'));
           }
@@ -16007,9 +22762,20 @@ class _NotificationsPageState extends State<NotificationsPage> {
                     children: [
                       Row(
                         children: [
-                          Text('Notifications', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+                          Text(
+                            'Notifications',
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(fontWeight: FontWeight.w700),
+                          ),
                           const Spacer(),
-                          Text('$unreadCount unread', style: const TextStyle(fontSize: 12, color: Color(0xFF64748B), fontWeight: FontWeight.w600)),
+                          Text(
+                            '$unreadCount unread',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Color(0xFF64748B),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
                         ],
                       ),
                       const SizedBox(height: 10),
@@ -16031,8 +22797,16 @@ class _NotificationsPageState extends State<NotificationsPage> {
                             child: DropdownButton<String>(
                               value: _eventTypeFilter,
                               items: [
-                                const DropdownMenuItem<String>(value: '', child: Text('All categories')),
-                                ...categories.map((value) => DropdownMenuItem<String>(value: value, child: Text(value))),
+                                const DropdownMenuItem<String>(
+                                  value: '',
+                                  child: Text('All categories'),
+                                ),
+                                ...categories.map(
+                                  (value) => DropdownMenuItem<String>(
+                                    value: value,
+                                    child: Text(value),
+                                  ),
+                                ),
                               ],
                               onChanged: (value) {
                                 setState(() {
@@ -16043,9 +22817,13 @@ class _NotificationsPageState extends State<NotificationsPage> {
                             ),
                           ),
                           FilledButton.icon(
-                            onPressed: _markingAllRead || unreadCount == 0 ? null : _markAllRead,
+                            onPressed: _markingAllRead || unreadCount == 0
+                                ? null
+                                : _markAllRead,
                             icon: const Icon(Icons.done_all),
-                            label: Text(_markingAllRead ? 'Updating...' : 'Mark all read'),
+                            label: Text(
+                              _markingAllRead ? 'Updating...' : 'Mark all read',
+                            ),
                           ),
                         ],
                       ),
@@ -16055,7 +22833,9 @@ class _NotificationsPageState extends State<NotificationsPage> {
               ),
               const SizedBox(height: 8),
               ...rows.map((item) {
-                final timeText = item.createdAt == null ? '' : _relativeTime(item.createdAt!.toIso8601String());
+                final timeText = item.createdAt == null
+                    ? ''
+                    : _relativeTime(item.createdAt!.toIso8601String());
                 return Card(
                   child: ListTile(
                     tileColor: item.isRead ? null : const Color(0xFFEFF6FF),
@@ -16066,8 +22846,12 @@ class _NotificationsPageState extends State<NotificationsPage> {
                             if (!mounted) return;
                             setState(() => _future = _loadNotifications());
                           },
-                    title: Text(item.title.isNotEmpty ? item.title : item.eventType),
-                    subtitle: Text('${item.message}${timeText.isNotEmpty ? '\n$timeText' : ''}'),
+                    title: Text(
+                      item.title.isNotEmpty ? item.title : item.eventType,
+                    ),
+                    subtitle: Text(
+                      '${item.message}${timeText.isNotEmpty ? '\n$timeText' : ''}',
+                    ),
                     isThreeLine: timeText.isNotEmpty,
                     trailing: item.isRead
                         ? const Icon(Icons.done, color: Colors.green)
@@ -16128,13 +22912,21 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
       child: SafeArea(
         top: false,
         child: SingleChildScrollView(
-          padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + MediaQuery.of(context).viewInsets.bottom),
+          padding: EdgeInsets.fromLTRB(
+            16,
+            16,
+            16,
+            16 + MediaQuery.of(context).viewInsets.bottom,
+          ),
           child: Form(
             key: _formKey,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Text('Quick Add Entry', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                const Text(
+                  'Quick Add Entry',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
                   initialValue: _entryType,
@@ -16150,10 +22942,17 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
                   initialValue: _recurrence,
                   decoration: const InputDecoration(labelText: 'Recurrence'),
                   items: const [
-                    DropdownMenuItem(value: 'one-time', child: Text('One-time')),
-                    DropdownMenuItem(value: 'recurring', child: Text('Recurring')),
+                    DropdownMenuItem(
+                      value: 'one-time',
+                      child: Text('One-time'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'recurring',
+                      child: Text('Recurring'),
+                    ),
                   ],
-                  onChanged: (v) => setState(() => _recurrence = v ?? 'one-time'),
+                  onChanged: (v) =>
+                      setState(() => _recurrence = v ?? 'one-time'),
                 ),
                 const SizedBox(height: 10),
                 if (_recurrence == 'recurring')
@@ -16162,16 +22961,24 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
                     decoration: const InputDecoration(labelText: 'Frequency'),
                     items: const [
                       DropdownMenuItem(value: 'weekly', child: Text('Weekly')),
-                      DropdownMenuItem(value: 'biweekly', child: Text('Biweekly')),
-                      DropdownMenuItem(value: 'monthly', child: Text('Monthly')),
+                      DropdownMenuItem(
+                        value: 'biweekly',
+                        child: Text('Biweekly'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'monthly',
+                        child: Text('Monthly'),
+                      ),
                     ],
-                    onChanged: (v) => setState(() => _frequency = v ?? 'monthly'),
+                    onChanged: (v) =>
+                        setState(() => _frequency = v ?? 'monthly'),
                   ),
                 if (_recurrence == 'recurring') const SizedBox(height: 10),
                 TextFormField(
                   controller: _titleCtrl,
                   decoration: const InputDecoration(labelText: 'Title'),
-                  validator: (v) => (v == null || v.trim().isEmpty) ? 'Title required' : null,
+                  validator: (v) =>
+                      (v == null || v.trim().isEmpty) ? 'Title required' : null,
                 ),
                 const SizedBox(height: 10),
                 TextFormField(
@@ -16181,11 +22988,14 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
                 const SizedBox(height: 10),
                 TextFormField(
                   controller: _amountCtrl,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
                   decoration: const InputDecoration(labelText: 'Amount'),
                   validator: (v) {
                     final amount = double.tryParse((v ?? '').trim());
-                    if (amount == null || amount <= 0) return 'Valid amount required';
+                    if (amount == null || amount <= 0)
+                      return 'Valid amount required';
                     return null;
                   },
                 ),
@@ -16223,11 +23033,19 @@ class _QuickAddSheetState extends State<QuickAddSheet> {
                               amount: double.parse(_amountCtrl.text.trim()),
                             );
                             if (!mounted) return;
-                            messenger.showSnackBar(SnackBar(content: Text('${result['message'] ?? 'Saved'}')));
+                            messenger.showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  '${result['message'] ?? 'Saved'}',
+                                ),
+                              ),
+                            );
                             navigator.pop(true);
                           } catch (err) {
                             if (!mounted) return;
-                            messenger.showSnackBar(SnackBar(content: Text('Save failed: $err')));
+                            messenger.showSnackBar(
+                              SnackBar(content: Text('Save failed: $err')),
+                            );
                           } finally {
                             if (mounted) setState(() => _saving = false);
                           }
@@ -16256,18 +23074,29 @@ class ErrorPanel extends StatelessWidget {
       padding: const EdgeInsets.all(24),
       children: [
         const SizedBox(height: 80),
-        Icon(Icons.error_outline, color: Theme.of(context).colorScheme.error, size: 48),
+        Icon(
+          Icons.error_outline,
+          color: Theme.of(context).colorScheme.error,
+          size: 48,
+        ),
         const SizedBox(height: 12),
         Text(error, textAlign: TextAlign.center),
         const SizedBox(height: 14),
-        Center(child: FilledButton(onPressed: onRetry, child: const Text('Retry'))),
+        Center(
+          child: FilledButton(onPressed: onRetry, child: const Text('Retry')),
+        ),
       ],
     );
   }
 }
 
 class _MetricCard extends StatelessWidget {
-  const _MetricCard({required this.title, required this.value, required this.subtitle, required this.icon});
+  const _MetricCard({
+    required this.title,
+    required this.value,
+    required this.subtitle,
+    required this.icon,
+  });
 
   final String title;
   final String value;
@@ -16295,14 +23124,33 @@ class _MetricCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, style: const TextStyle(fontSize: 12, color: Color(0xFF64748B), fontWeight: FontWeight.w600)),
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFF64748B),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                   const SizedBox(height: 2),
-                  Text(value, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
+                  Text(
+                    value,
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                   const SizedBox(height: 2),
-                  Text(subtitle, style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFF64748B),
+                    ),
+                  ),
                 ],
               ),
-            )
+            ),
           ],
         ),
       ),
@@ -16323,7 +23171,9 @@ double _toDouble(dynamic value) {
 
 DateTime? _parseDateTime(dynamic value) {
   if (value == null) return null;
-  return DateTime.tryParse('$value');
+  final parsed = DateTime.tryParse('$value');
+  if (parsed == null) return null;
+  return parsed.isUtc ? parsed.toLocal() : parsed;
 }
 
 String _currency(double value) => '\$${value.toStringAsFixed(2)}';
@@ -16342,9 +23192,14 @@ String _fmtDateTime(DateTime d) {
 }
 
 String _moduleUrl(String baseUrl, String path) {
-  final normalized = baseUrl.startsWith('http://') || baseUrl.startsWith('https://') ? baseUrl : 'http://$baseUrl';
+  final normalized =
+      baseUrl.startsWith('http://') || baseUrl.startsWith('https://')
+      ? baseUrl
+      : 'http://$baseUrl';
   final root = Uri.parse(normalized);
-  final rootPath = root.path.endsWith('/') ? root.path.substring(0, root.path.length - 1) : root.path;
+  final rootPath = root.path.endsWith('/')
+      ? root.path.substring(0, root.path.length - 1)
+      : root.path;
   final modulePath = path.startsWith('/') ? path : '/$path';
   return root
       .replace(path: '$rootPath$modulePath', queryParameters: {'mobile': '1'})
@@ -16369,7 +23224,20 @@ DateTime _endOfWeek(DateTime d) {
 }
 
 String _monthLabel(DateTime d) {
-  const names = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const names = [
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
+  ];
   return '${names[d.month - 1]} ${d.year}';
 }
 
@@ -16447,7 +23315,11 @@ List<DateTime> _daysInMonth(DateTime month) {
   final first = DateTime(month.year, month.month, 1);
   final last = DateTime(month.year, month.month + 1, 0);
   final days = <DateTime>[];
-  for (var day = first; !day.isAfter(last); day = day.add(const Duration(days: 1))) {
+  for (
+    var day = first;
+    !day.isAfter(last);
+    day = day.add(const Duration(days: 1))
+  ) {
     days.add(day);
   }
   return days;
@@ -16463,7 +23335,10 @@ Color _colorFromHex(String hex) {
 }
 
 String _stripHtml(String raw) {
-  return raw.replaceAll(RegExp(r'<[^>]*>'), '').replaceAll('&nbsp;', ' ').trim();
+  return raw
+      .replaceAll(RegExp(r'<[^>]*>'), '')
+      .replaceAll('&nbsp;', ' ')
+      .trim();
 }
 
 String? _normalizeTimeInput(String raw) {
@@ -16473,6 +23348,7 @@ String? _normalizeTimeInput(String raw) {
   if (match == null) return text;
   final hh = int.tryParse(match.group(1) ?? '');
   final mm = int.tryParse(match.group(2) ?? '');
-  if (hh == null || mm == null || hh < 0 || hh > 23 || mm < 0 || mm > 59) return text;
+  if (hh == null || mm == null || hh < 0 || hh > 23 || mm < 0 || mm > 59)
+    return text;
   return '${hh.toString().padLeft(2, '0')}:${mm.toString().padLeft(2, '0')}';
 }

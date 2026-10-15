@@ -3,6 +3,10 @@
 <style>
   .calendar-header-dense { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:0.5rem; }
   .calendar-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:0.4rem; }
+  .calendar-workspace { background:linear-gradient(145deg,rgba(255,255,255,.96),rgba(248,250,252,.84)); border:1px solid rgba(226,232,240,.9); box-shadow:0 18px 42px rgba(15,23,42,.08); }
+  .calendar-kicker { color:rgb(99 102 241); font-size:.72rem; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
+  .calendar-action-row { display:flex; flex-wrap:wrap; gap:.5rem; }
+  .calendar-action-row .btn { min-height:2.5rem; }
   .calendar-avatar-row { display:flex; gap:0.4rem; overflow-x:auto; padding-bottom:0.2rem; }
   .calendar-avatar-pill { display:inline-flex; align-items:center; gap:0.38rem; border:1px solid rgba(148,163,184,0.28); border-radius:999px; padding:0.2rem 0.52rem 0.2rem 0.24rem; background:rgba(248,250,252,0.8); white-space:nowrap; }
   .calendar-avatar-dot { width:1.35rem; height:1.35rem; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; font-size:0.62rem; font-weight:700; color:white; }
@@ -17,6 +21,10 @@
   .calendar-fab-lake { background:linear-gradient(145deg,#0ea5e9,#2563eb); width:2.5rem; height:2.5rem; margin-left:auto; }
   .month-shell { display: grid; grid-template-columns: 280px 1fr; gap: 0.75rem; }
   .month-sidebar { border: 1px solid rgba(148,163,184,0.25); border-radius: 0.9rem; padding: 0.75rem; background: rgba(248,250,252,0.7); }
+  .month-sidebar-section { border-top:1px solid rgba(148,163,184,.2); margin-top:.75rem; padding-top:.75rem; }
+  .month-sidebar-heading { font-size:.7rem; font-weight:800; letter-spacing:.06em; color:rgb(71 85 105); text-transform:uppercase; margin-bottom:.45rem; }
+  .month-upcoming-item { display:block; padding:.45rem 0; border-bottom:1px solid rgba(148,163,184,.16); }
+  .month-upcoming-item:last-child { border-bottom:0; }
   .month-main { border: 1px solid rgba(148,163,184,0.25); border-radius: 0.9rem; overflow: hidden; }
   .month-weekday { font-size: 0.72rem; font-weight: 700; color: rgb(100 116 139); text-align: center; padding: 0.45rem 0; background: rgba(241,245,249,0.8); border-bottom: 1px solid rgba(148,163,184,0.25); }
   .month-day-cell { min-height: 168px; border-right: 1px solid rgba(148,163,184,0.2); border-bottom: 1px solid rgba(148,163,184,0.2); padding: 0.42rem; }
@@ -54,13 +62,34 @@
   .dark .month-mini-cell { color: rgb(148 163 184); }
   .dark .calendar-avatar-pill { background: rgba(15,23,42,0.45); border-color: rgba(71,85,105,0.55); }
   .dark .calendar-avatar-label { color: rgb(203 213 225); }
+  .calendar-collapsible-summary { list-style: none; }
+  .calendar-collapsible-summary::-webkit-details-marker { display: none; }
+  #calendar-share-details .calendar-share-chevron { transition: transform 0.18s ease; }
+  #calendar-share-details[open] .calendar-share-chevron { transform: rotate(180deg); }
 
   @media (max-width: 1279px) {
     .month-shell { grid-template-columns: 1fr; }
     .month-sidebar { display: none; }
   }
   @media (max-width: 767px) {
-    .calendar-fab-wrap { right:0.7rem; bottom:0.85rem; }
+    #family-calendar-root { min-width:0; }
+    .calendar-workspace { padding:.9rem; }
+    .calendar-header-dense { align-items:stretch; }
+    .calendar-header-dense > * { min-width:0; }
+    .calendar-toolbar, .calendar-action-row { width:100%; }
+    .calendar-toolbar > .btn, .calendar-action-row > .btn { flex:1 1 auto; justify-content:center; min-height:44px; }
+    .calendar-toolbar select { width:100%; min-height:44px; }
+    .calendar-avatar-row { margin-inline:-.15rem; padding-inline:.15rem; }
+    .month-shell { display:block; }
+    .month-sidebar { display:none; }
+    .month-main { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+    .month-main > .grid { min-width:700px; }
+    .month-day-cell { min-height:132px; }
+    .month-event-chip { font-size:.68rem; padding:.25rem .35rem; }
+    #calendar-canvas > .grid { min-width:0; }
+    .calendar-fab-wrap { bottom:max(.85rem, env(safe-area-inset-bottom)); }
+    #calendar-share-details summary { min-height:44px; }
+    .calendar-fab-wrap { right:0.7rem; }
     .calendar-fab { width:2.8rem; height:2.8rem; }
     .calendar-fab-secondary { width:2.3rem; height:2.3rem; }
   }
@@ -76,22 +105,25 @@
       </div>
     </div>
   </div>
-  <div class="card p-4 sm:p-6">
+  <div class="calendar-workspace card p-4 sm:p-6">
     <div class="calendar-header-dense mb-3">
       <div class="min-w-0">
-        <h2 class="text-xl sm:text-2xl font-bold flex items-center gap-2"><i class="fa-solid fa-calendar-days text-indigo-500"></i>Family Calendar</h2>
-        <p class="text-xs sm:text-sm text-gray-600 dark:text-gray-400 truncate">Shared events, reminders, birthdays, and invites.</p>
+        <div class="calendar-kicker">Family planning</div>
+        <h2 class="text-xl sm:text-2xl font-bold">Every plan. One family calendar.</h2>
+        <p class="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Shared moments, birthdays, meals, and everything in between.</p>
       </div>
-      <div class="calendar-toolbar">
-        {% if not shared_mode %}<button id="cal-lake-house-btn" class="btn btn-secondary"><i class="fa-solid fa-house mr-1"></i>Lake House</button>{% endif %}
-        <button id="cal-prev" class="btn btn-secondary"><i class="fa-solid fa-chevron-left"></i></button>
-        <button id="cal-today" class="btn btn-secondary">Today</button>
-        <button id="cal-next" class="btn btn-secondary"><i class="fa-solid fa-chevron-right"></i></button>
+      <div class="calendar-action-row">
+        {% if not shared_mode %}<button id="cal-header-add" class="btn btn-primary"><i class="fa-solid fa-plus mr-1"></i>Create event</button><button id="cal-share-jump" class="btn btn-secondary"><i class="fa-solid fa-share-nodes mr-1"></i>Share calendar</button>{% endif %}
       </div>
     </div>
 
     <div class="calendar-header-dense mb-3">
-      <div id="cal-label" class="text-lg font-semibold"></div>
+      <div class="calendar-toolbar">
+        {% if not shared_mode %}<button id="cal-lake-house-btn" class="btn btn-secondary"><i class="fa-solid fa-house mr-1"></i>Lake House</button>{% endif %}
+        <button id="cal-prev" class="btn btn-secondary" aria-label="Previous period"><i class="fa-solid fa-chevron-left"></i></button>
+        <button id="cal-today" class="btn btn-secondary">Today</button>
+        <button id="cal-next" class="btn btn-secondary" aria-label="Next period"><i class="fa-solid fa-chevron-right"></i></button>
+      </div>
       <div class="calendar-toolbar">
         <select id="cal-member-filter" class="p-2 border rounded dark:bg-gray-800 dark:border-gray-600"></select>
         {% if not shared_mode %}
@@ -101,44 +133,116 @@
         </label>
         {% endif %}
         <div class="inline-flex rounded-lg border border-gray-300 dark:border-gray-600 overflow-hidden">
-          <button data-view="week" class="cal-view-btn px-3 py-2 text-sm bg-white dark:bg-gray-800">Week</button>
-          <button data-view="two-week" class="cal-view-btn px-3 py-2 text-sm bg-white dark:bg-gray-800 border-l border-gray-300 dark:border-gray-600">2 Weeks</button>
-          <button data-view="month" class="cal-view-btn px-3 py-2 text-sm bg-white dark:bg-gray-800 border-l border-gray-300 dark:border-gray-600">Month</button>
-          <button data-view="three-month" class="cal-view-btn px-3 py-2 text-sm bg-white dark:bg-gray-800 border-l border-gray-300 dark:border-gray-600">3 Months</button>
+          <button data-view="day" class="cal-view-btn px-3 py-2 text-sm bg-white dark:bg-gray-800">Daily</button>
+          <button data-view="week" class="cal-view-btn px-3 py-2 text-sm bg-white dark:bg-gray-800 border-l border-gray-300 dark:border-gray-600">Weekly</button>
+          <button data-view="month" class="cal-view-btn px-3 py-2 text-sm bg-white dark:bg-gray-800 border-l border-gray-300 dark:border-gray-600">Monthly</button>
         </div>
       </div>
     </div>
+    <div id="cal-label" class="text-lg font-semibold mb-3"></div>
 
     <div id="cal-avatar-strip" class="calendar-avatar-row mb-3"></div>
+
+    {% if not shared_mode %}
+    <div class="mb-4 rounded-xl border border-pink-200 dark:border-pink-900/50 bg-pink-50/70 dark:bg-pink-900/10 p-3 sm:p-4">
+      <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+        <div>
+          <div class="text-sm font-semibold text-pink-800 dark:text-pink-200">Birthday Tracker</div>
+          <div class="text-xs text-pink-700/90 dark:text-pink-300/90">Track family and friends birthdays, with popup and mobile reminders.</div>
+        </div>
+        <label class="inline-flex items-center gap-2 text-xs sm:text-sm px-3 py-2 rounded-lg border border-pink-200 dark:border-pink-800 bg-white/90 dark:bg-gray-900/50">
+          <input id="birthdayOptInToggle" type="checkbox" class="rounded">
+          <span>Birthday notifications (in-app + mobile)</span>
+        </label>
+      </div>
+      <form id="birthdayTrackerForm" class="grid grid-cols-1 md:grid-cols-5 gap-2">
+        <input id="birthdayName" type="text" class="p-2 border rounded dark:bg-gray-800 dark:border-gray-600 md:col-span-2" placeholder="Name (family member or friend)" required>
+        <input id="birthdayDate" type="date" class="p-2 border rounded dark:bg-gray-800 dark:border-gray-600" required>
+        <input id="birthdayRelation" type="text" class="p-2 border rounded dark:bg-gray-800 dark:border-gray-600" placeholder="Relation (optional)">
+        <button type="submit" class="btn btn-primary">Add Birthday</button>
+      </form>
+      <div id="birthdayTrackerList" class="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2"></div>
+    </div>
+    {% endif %}
 
     {% if shared_mode and invalid_share %}
       <div class="p-4 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300">
         This shared calendar link is invalid or expired.
       </div>
     {% endif %}
-
-    <div id="calendar-share-wrap" class="mb-4 {% if shared_mode %}hidden{% endif %}">
-      <div class="rounded-xl border border-gray-200 dark:border-gray-700 p-3 bg-gray-50 dark:bg-gray-900/30">
-        <div class="text-sm font-semibold mb-2">External Share Link</div>
-        <div class="flex flex-col sm:flex-row gap-2">
-          <input id="calendar-share-url" type="text" readonly class="flex-1 p-2 border rounded dark:bg-gray-800 dark:border-gray-600" placeholder="Create a share link...">
-          <button id="calendar-create-share" class="btn btn-primary">Create Link</button>
-          <button id="calendar-copy-share" class="btn btn-secondary">Copy</button>
-        </div>
-        <div class="mt-3">
-          <div class="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Calendar Sync</div>
-          <div class="flex flex-wrap gap-2">
-            <a id="calendar-sync-google" href="#" target="_blank" rel="noopener" class="btn btn-secondary pointer-events-none opacity-50"><i class="fa-brands fa-google mr-1"></i>Google</a>
-            <a id="calendar-sync-outlook" href="#" target="_blank" rel="noopener" class="btn btn-secondary pointer-events-none opacity-50"><i class="fa-brands fa-microsoft mr-1"></i>Outlook</a>
-            <button id="calendar-sync-apple" type="button" class="btn btn-secondary opacity-50" disabled><i class="fa-brands fa-apple mr-1"></i>Apple</button>
-            <a id="calendar-sync-ics" href="#" target="_blank" rel="noopener" class="btn btn-secondary pointer-events-none opacity-50"><i class="fa-solid fa-download mr-1"></i>.ics</a>
-          </div>
-          <input id="calendar-sync-webcal" type="text" readonly class="mt-2 w-full p-2 border rounded dark:bg-gray-800 dark:border-gray-600 text-xs" placeholder="Create share link to enable Apple sync URL">
-        </div>
-      </div>
-    </div>
-
     <div id="calendar-canvas" class="space-y-3"></div>
+
+    <div id="calendar-share-wrap" class="mt-4 {% if shared_mode %}hidden{% endif %}">
+      <details id="calendar-share-details" class="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30">
+        <summary class="calendar-collapsible-summary cursor-pointer p-3 sm:p-4 select-none">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <div class="text-sm font-semibold">External Share Links</div>
+              <div class="text-xs text-gray-500 dark:text-gray-400">Manage share links, sync URLs, and ICS import tools.</div>
+            </div>
+            <i class="calendar-share-chevron fa-solid fa-chevron-down text-xs text-slate-500"></i>
+          </div>
+        </summary>
+        <div class="px-3 pb-3 sm:px-4 sm:pb-4 border-t border-gray-200 dark:border-gray-700">
+          <div class="grid grid-cols-1 md:grid-cols-5 gap-2 mt-3">
+            <select id="calendar-share-link-select" class="p-2 border rounded dark:bg-gray-800 dark:border-gray-600 md:col-span-2">
+              <option value="">No active share links</option>
+            </select>
+            <input id="calendar-share-label" type="text" class="p-2 border rounded dark:bg-gray-800 dark:border-gray-600" placeholder="Link label, e.g. Lake House Guests">
+            <button id="calendar-create-share" class="btn btn-primary">Create New Link</button>
+            <button id="calendar-delete-share" class="btn btn-danger" type="button">Delete Selected</button>
+          </div>
+          <div class="flex flex-col sm:flex-row gap-2 mt-2">
+            <input id="calendar-share-url" type="text" readonly class="flex-1 p-2 border rounded dark:bg-gray-800 dark:border-gray-600" placeholder="Select or create a share link...">
+            <button id="calendar-copy-share" class="btn btn-secondary">Copy</button>
+          </div>
+          <div class="mt-2 flex flex-wrap gap-3 text-sm">
+            <label class="inline-flex items-center gap-2">
+              <input id="calendar-share-include-private" type="checkbox" class="rounded">
+              <span>Include private/restricted events</span>
+            </label>
+            <label class="inline-flex items-center gap-2">
+              <input id="calendar-share-include-descriptions" type="checkbox" class="rounded" checked>
+              <span>Include descriptions</span>
+            </label>
+          </div>
+          <div class="mt-3">
+            <div class="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Calendar Sync</div>
+            <div class="flex flex-wrap gap-2">
+              <a id="calendar-sync-google" href="#" target="_blank" rel="noopener" class="btn btn-secondary pointer-events-none opacity-50"><i class="fa-brands fa-google mr-1"></i>Google</a>
+              <a id="calendar-sync-outlook" href="#" target="_blank" rel="noopener" class="btn btn-secondary pointer-events-none opacity-50"><i class="fa-brands fa-microsoft mr-1"></i>Outlook</a>
+              <button id="calendar-sync-apple" type="button" class="btn btn-secondary opacity-50" disabled><i class="fa-brands fa-apple mr-1"></i>Apple</button>
+              <a id="calendar-sync-ics" href="#" target="_blank" rel="noopener" class="btn btn-secondary pointer-events-none opacity-50"><i class="fa-solid fa-download mr-1"></i>.ics</a>
+              <a id="calendar-sync-ics-download" href="#" target="_blank" rel="noopener" class="btn btn-secondary pointer-events-none opacity-50"><i class="fa-solid fa-file-arrow-down mr-1"></i>Download ICS</a>
+            </div>
+            <input id="calendar-sync-webcal" type="text" readonly class="mt-2 w-full p-2 border rounded dark:bg-gray-800 dark:border-gray-600 text-xs" placeholder="Create share link to enable Apple sync URL">
+            <div class="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+              <div class="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">ICS Feed Filter</div>
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
+                <select id="calendar-feed-preset" class="p-2 border rounded dark:bg-gray-800 dark:border-gray-600 text-sm">
+                  <option value="all">Share everything</option>
+                  <option value="lake-house">Lake House only</option>
+                  <option value="custom">Custom keyword filter</option>
+                </select>
+                <input id="calendar-feed-keywords" type="text" class="p-2 border rounded dark:bg-gray-800 dark:border-gray-600 text-sm md:col-span-2" placeholder="Keywords (comma-separated), e.g. Lake House, Marblehead">
+              </div>
+              <div class="mt-2 flex flex-wrap gap-2 items-center">
+                <button id="calendar-feed-apply" type="button" class="btn btn-secondary">Apply Filter</button>
+                <span class="text-xs text-gray-500 dark:text-gray-400">Only matching titles are included in your shared ICS feed.</span>
+              </div>
+            </div>
+            <div class="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+              <div class="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Import External ICS</div>
+              <div class="flex flex-col sm:flex-row gap-2">
+                <input id="calendar-import-ics-url" type="url" class="flex-1 p-2 border rounded dark:bg-gray-800 dark:border-gray-600 text-sm" placeholder="https://example.com/calendar.ics">
+                <button id="calendar-import-ics-btn" type="button" class="btn btn-secondary">Import ICS</button>
+              </div>
+              <div class="text-xs text-gray-500 dark:text-gray-400 mt-2">Paste any public ICS URL to import calendar entries into HomeHub.</div>
+            </div>
+          </div>
+        </div>
+      </details>
+    </div>
   </div>
 </div>
 
@@ -287,6 +391,16 @@
   </div>
 </div>
 
+<div id="birthdayTodayModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 p-4 sm:p-6">
+  <div class="card w-full max-w-xl p-5 sm:p-6 max-h-[calc(100vh-4rem)] overflow-y-auto rounded-2xl">
+    <div class="flex items-center justify-between gap-2 mb-3">
+      <h3 class="text-xl font-bold text-pink-700 dark:text-pink-300">Today's Birthdays</h3>
+      <button id="birthdayTodayClose" class="btn btn-secondary">Close</button>
+    </div>
+    <div id="birthdayTodayList" class="space-y-2 text-sm"></div>
+  </div>
+</div>
+
 <script>
 (function(){
   const root = document.getElementById('family-calendar-root');
@@ -322,14 +436,25 @@
   const showMealsToggle = document.getElementById('cal-show-meals-toggle');
   const viewButtons = document.querySelectorAll('.cal-view-btn');
   const lakeHouseBtn = document.getElementById('cal-lake-house-btn');
+  const shareLinkSelect = document.getElementById('calendar-share-link-select');
+  const shareLabelInput = document.getElementById('calendar-share-label');
   const shareUrlInput = document.getElementById('calendar-share-url');
   const createShareBtn = document.getElementById('calendar-create-share');
+  const deleteShareBtn = document.getElementById('calendar-delete-share');
   const copyShareBtn = document.getElementById('calendar-copy-share');
+  const shareIncludePrivateInput = document.getElementById('calendar-share-include-private');
+  const shareIncludeDescriptionsInput = document.getElementById('calendar-share-include-descriptions');
   const syncGoogle = document.getElementById('calendar-sync-google');
   const syncOutlook = document.getElementById('calendar-sync-outlook');
   const syncApple = document.getElementById('calendar-sync-apple');
   const syncIcs = document.getElementById('calendar-sync-ics');
+  const syncIcsDownload = document.getElementById('calendar-sync-ics-download');
   const syncWebcalInput = document.getElementById('calendar-sync-webcal');
+  const feedPresetInput = document.getElementById('calendar-feed-preset');
+  const feedKeywordsInput = document.getElementById('calendar-feed-keywords');
+  const feedApplyBtn = document.getElementById('calendar-feed-apply');
+  const importIcsUrlInput = document.getElementById('calendar-import-ics-url');
+  const importIcsBtn = document.getElementById('calendar-import-ics-btn');
 
   const modal = document.getElementById('calendar-event-modal');
   const closeModalBtn = document.getElementById('calendar-modal-close');
@@ -363,9 +488,20 @@
   const fabAdd = document.getElementById('cal-fab-add');
   const fabMini = document.getElementById('cal-fab-mini');
   const fabLake = document.getElementById('cal-fab-lake');
+  const headerAdd = document.getElementById('cal-header-add');
+  const shareJumpBtn = document.getElementById('cal-share-jump');
+  const birthdayOptInToggle = document.getElementById('birthdayOptInToggle');
+  const birthdayTrackerForm = document.getElementById('birthdayTrackerForm');
+  const birthdayNameInput = document.getElementById('birthdayName');
+  const birthdayDateInput = document.getElementById('birthdayDate');
+  const birthdayRelationInput = document.getElementById('birthdayRelation');
+  const birthdayTrackerList = document.getElementById('birthdayTrackerList');
+  const birthdayTodayModal = document.getElementById('birthdayTodayModal');
+  const birthdayTodayList = document.getElementById('birthdayTodayList');
+  const birthdayTodayClose = document.getElementById('birthdayTodayClose');
 
   let anchorDate = new Date();
-  let currentView = 'month';
+  let currentView = window.matchMedia('(max-width: 767px)').matches ? 'day' : 'month';
   let events = [];
   let mealEntries = [];
   let members = [];
@@ -373,6 +509,8 @@
   let currentMemberName = '';
   let lastInteractionDate = fmtISO(new Date());
   let showFamilyMeals = !sharedMode && localStorage.getItem('calendar_show_family_meals') === '1';
+  let shareLinks = [];
+  let selectedShareLinkId = null;
 
   const mealTypeColors = {
     breakfast: '#f59e0b',
@@ -387,8 +525,88 @@
     else alert(msg);
   };
 
+  function parseKeywordList(raw){
+    return String(raw || '')
+      .split(',')
+      .map(v => v.trim())
+      .filter(Boolean);
+  }
+
+  function applyFeedFilterUi(filters){
+    const titleKeywords = Array.isArray(filters?.title_keywords) ? filters.title_keywords : [];
+    if (feedKeywordsInput) {
+      feedKeywordsInput.value = titleKeywords.join(', ');
+    }
+    if (!feedPresetInput) return;
+    const lower = titleKeywords.map(v => String(v).toLowerCase());
+    if (!titleKeywords.length) {
+      feedPresetInput.value = 'all';
+      return;
+    }
+    if (lower.length === 2 && lower.includes('lake house') && lower.includes('marblehead lake house')) {
+      feedPresetInput.value = 'lake-house';
+      return;
+    }
+    feedPresetInput.value = 'custom';
+  }
+
+  function getSelectedFeedKeywords(){
+    const preset = feedPresetInput?.value || 'all';
+    if (preset === 'all') return [];
+    if (preset === 'lake-house') return ['Lake House', 'Marblehead Lake House'];
+    return parseKeywordList(feedKeywordsInput?.value || '');
+  }
+
+  function selectedShareLink(){
+    if (!shareLinks.length) return null;
+    if (selectedShareLinkId == null) return shareLinks[0] || null;
+    return shareLinks.find(link => Number(link.id) === Number(selectedShareLinkId)) || shareLinks[0] || null;
+  }
+
+  function renderShareLinkOptions(){
+    if (!shareLinkSelect) return;
+    if (!shareLinks.length) {
+      shareLinkSelect.innerHTML = '<option value="">No active share links</option>';
+      return;
+    }
+    shareLinkSelect.innerHTML = shareLinks.map(link => {
+      const label = String(link.label || 'Family Calendar Share');
+      return `<option value="${Number(link.id)}">${escapeHtml(label)}</option>`;
+    }).join('');
+  }
+
+  function applyShareLinkToUi(link){
+    if (!link) {
+      if (shareUrlInput) shareUrlInput.value = '';
+      if (shareLabelInput) shareLabelInput.value = '';
+      if (syncGoogle) syncGoogle.href = '#';
+      if (syncOutlook) syncOutlook.href = '#';
+      if (syncIcs) syncIcs.href = '#';
+      if (syncIcsDownload) syncIcsDownload.href = '#';
+      if (syncWebcalInput) syncWebcalInput.value = '';
+      if (shareIncludePrivateInput) shareIncludePrivateInput.checked = false;
+      if (shareIncludeDescriptionsInput) shareIncludeDescriptionsInput.checked = true;
+      applyFeedFilterUi({});
+      setSyncButtonsEnabled(false);
+      return;
+    }
+    selectedShareLinkId = Number(link.id);
+    if (shareLinkSelect) shareLinkSelect.value = String(link.id);
+    if (shareUrlInput) shareUrlInput.value = link.url || '';
+    if (shareLabelInput) shareLabelInput.value = link.label || '';
+    if (syncGoogle) syncGoogle.href = link.google_url || '#';
+    if (syncOutlook) syncOutlook.href = link.outlook_url || '#';
+    if (syncIcs) syncIcs.href = link.ics_url || '#';
+    if (syncIcsDownload) syncIcsDownload.href = link.ics_download_url || '#';
+    if (syncWebcalInput) syncWebcalInput.value = link.webcal_url || '';
+    if (shareIncludePrivateInput) shareIncludePrivateInput.checked = !!(link.permissions && link.permissions.include_private_events);
+    if (shareIncludeDescriptionsInput) shareIncludeDescriptionsInput.checked = !!(link.permissions && link.permissions.include_descriptions);
+    applyFeedFilterUi(link.filters || {});
+    setSyncButtonsEnabled(true);
+  }
+
   function setSyncButtonsEnabled(enabled){
-    const controls = [syncGoogle, syncOutlook, syncIcs];
+    const controls = [syncGoogle, syncOutlook, syncIcs, syncIcsDownload];
     controls.forEach(el => {
       if (!el) return;
       el.classList.toggle('pointer-events-none', !enabled);
@@ -457,6 +675,10 @@
   }
 
   function getRange(){
+    if (currentView === 'day') {
+      const start = new Date(anchorDate.getFullYear(), anchorDate.getMonth(), anchorDate.getDate());
+      return {start, end: new Date(start.getTime())};
+    }
     if (currentView === 'week') {
       const start = startOfWeek(anchorDate);
       return {start, end: addDays(start, 6)};
@@ -474,6 +696,11 @@
     const start = startOfWeek(bounds.start);
     const end = addDays(endOfWeek(bounds.end), 0);
     return {start, end};
+  }
+
+  function renderDay(){
+    const day = new Date(anchorDate.getFullYear(), anchorDate.getMonth(), anchorDate.getDate());
+    canvas.innerHTML = `<div class="grid grid-cols-1 gap-2">${dayCell(day)}</div>`;
   }
 
   function eventTouchesDay(ev, dayISO){
@@ -639,20 +866,33 @@
     const weekdays = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
     const todayIso = fmtISO(new Date());
     const visibleMember = memberFilter.value || 'All Members';
+    const upcoming = events
+      .filter(ev => String(ev.end_date || ev.start_date || '') >= todayIso)
+      .sort((a, b) => String(a.start_date || '').localeCompare(String(b.start_date || '')))
+      .slice(0, 3);
+    const birthdaysThisMonth = (birthdayRows || []).filter(row => {
+      const value = String(row.birthday_date || row.date || '');
+      return value && Number(value.slice(5, 7)) === anchorDate.getMonth() + 1;
+    }).slice(0, 3);
     let html = `
       <div class="month-shell">
         <aside class="month-sidebar space-y-3">
           <div>
-            <div class="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Mini Calendar</div>
+            <div class="month-sidebar-heading">Mini calendar</div>
             ${miniMonth(anchorDate)}
           </div>
-          <div>
-            <div class="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">View</div>
+          <div class="month-sidebar-section">
+            <div class="month-sidebar-heading">Family calendars</div>
             <div class="text-sm font-semibold">${escapeHtml(anchorDate.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }))}</div>
-            <div class="text-xs text-slate-500 mt-1">Filter: ${escapeHtml(visibleMember)}</div>
+            <div class="text-xs text-slate-500 mt-1">Showing: ${escapeHtml(visibleMember)}</div>
           </div>
-          <div class="rounded-lg border border-slate-200/70 dark:border-slate-700/80 p-2 text-xs text-slate-600 dark:text-slate-300">
-            Drag events to move dates and drag the resize handle to extend events.
+          <div class="month-sidebar-section">
+            <div class="month-sidebar-heading">Upcoming</div>
+            ${upcoming.length ? upcoming.map(ev => `<button type="button" class="month-upcoming-item w-full text-left cal-event-entry" data-event-id="${ev.id}" data-occurrence-start="${ev.occurrence_start || ev.start_date || ''}"><span class="block text-xs font-semibold truncate">${escapeHtml(ev.title)}</span><span class="block text-[11px] text-slate-500">${escapeHtml(new Date(`${ev.start_date}T12:00:00`).toLocaleDateString(undefined, { month:'short', day:'numeric' }))}${ev.start_time ? ` · ${escapeHtml(eventTimeLabel(ev))}` : ''}</span></button>`).join('') : '<p class="text-xs text-slate-500">Nothing upcoming.</p>'}
+          </div>
+          <div class="month-sidebar-section">
+            <div class="month-sidebar-heading">Birthdays</div>
+            ${birthdaysThisMonth.length ? birthdaysThisMonth.map(row => `<div class="month-upcoming-item"><span class="block text-xs font-semibold truncate">${escapeHtml(row.name || 'Birthday')}</span><span class="block text-[11px] text-slate-500">${escapeHtml(String(row.birthday_date || row.date || '').slice(5))}</span></div>`).join('') : '<p class="text-xs text-slate-500">No birthdays this month.</p>'}
           </div>
         </aside>
         <section class="month-main">
@@ -745,6 +985,10 @@
   }
 
   function updateLabel(){
+    if (currentView === 'day') {
+      label.textContent = anchorDate.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+      return;
+    }
     if (currentView === 'week' || currentView === 'two-week') {
       const r = getRange();
       label.textContent = `${r.start.toLocaleDateString()} - ${r.end.toLocaleDateString()}`;
@@ -760,16 +1004,96 @@
 
   function render(){
     updateLabel();
+    renderBirthdayTracker();
     viewButtons.forEach(btn => {
       const active = btn.dataset.view === currentView;
       btn.classList.toggle('bg-indigo-600', active);
       btn.classList.toggle('text-white', active);
     });
+    if (currentView === 'day') return renderDay();
     if (currentView === 'week') return renderWeekLike(false);
     if (currentView === 'two-week') return renderWeekLike(true);
     if (currentView === 'three-month') return renderThreeMonth();
     renderMonth();
     renderAvatarStrip();
+  }
+
+  let birthdayRows = [];
+
+  function renderBirthdayTracker(allRows){
+    if (!birthdayTrackerList) return;
+    if (Array.isArray(allRows)) birthdayRows = allRows;
+    const monthSpan = currentView === 'three-month' ? 3 : 1;
+    const visibleMonths = new Set();
+    for (let i = 0; i < monthSpan; i++) {
+      const m = new Date(anchorDate.getFullYear(), anchorDate.getMonth() + i, 1);
+      visibleMonths.add(m.getMonth());
+    }
+    const rows = birthdayRows
+      .filter((row) => {
+        const dt = parseISO(row.date);
+        return dt && visibleMonths.has(dt.getMonth());
+      })
+      .sort((a, b) => parseISO(a.date).getDate() - parseISO(b.date).getDate());
+    if (!rows.length) {
+      birthdayTrackerList.innerHTML = '<div class="text-xs text-gray-500">No birthdays this month.</div>';
+      return;
+    }
+    birthdayTrackerList.innerHTML = rows.map((row) => {
+      const dt = parseISO(row.date);
+      const when = dt ? dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : row.date;
+      const sourceBadge = row.source === 'family_member' ? 'Family Profile' : 'Tracker';
+      return `
+        <article class="rounded-lg border border-pink-200/80 dark:border-pink-800/50 bg-white/90 dark:bg-gray-900/60 px-3 py-2">
+          <div class="font-semibold text-sm text-pink-800 dark:text-pink-200">${escapeHtml(row.name || '')}</div>
+          <div class="text-xs text-pink-700/90 dark:text-pink-300/90">${escapeHtml(when || '')} • ${escapeHtml(sourceBadge)}</div>
+        </article>
+      `;
+    }).join('');
+  }
+
+  async function loadBirthdayTracker(){
+    if (sharedMode) return;
+    try {
+      const [optRes, listRes] = await Promise.all([
+        fetch('/api/calendar/birthday-optin'),
+        fetch('/api/calendar/birthdays/list'),
+      ]);
+      const optData = await optRes.json().catch(() => ({}));
+      const listData = await listRes.json().catch(() => ({}));
+      if (optRes.ok && optData.ok && birthdayOptInToggle) {
+        birthdayOptInToggle.checked = !!optData.enabled;
+      }
+      if (listRes.ok && listData.ok) {
+        renderBirthdayTracker(listData.birthdays || []);
+      }
+    } catch (_) {
+      // Ignore non-critical birthday tracker load errors.
+    }
+  }
+
+  async function checkTodayBirthdays(){
+    if (sharedMode || !birthdayTodayModal || !birthdayTodayList) return;
+    try {
+      const res = await fetch('/api/calendar/birthdays/today');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) return;
+      const rows = Array.isArray(data.birthdays) ? data.birthdays : [];
+      if (!rows.length) return;
+      const shownKey = `birthday-popup-shown-${data.date || ''}`;
+      if (localStorage.getItem(shownKey) === '1') return;
+      birthdayTodayList.innerHTML = rows.map((row) => `
+        <div class="rounded-lg border border-pink-200 dark:border-pink-800/50 bg-pink-50/60 dark:bg-pink-900/20 px-3 py-2">
+          <div class="font-semibold text-pink-800 dark:text-pink-200">${escapeHtml(row.name || '')}</div>
+          <div class="text-xs text-pink-700/90 dark:text-pink-300/90">Birthday reminder sent to opted-in family members.</div>
+        </div>
+      `).join('');
+      birthdayTodayModal.classList.remove('hidden');
+      birthdayTodayModal.classList.add('flex');
+      localStorage.setItem(shownKey, '1');
+    } catch (_) {
+      // Ignore non-critical birthday popup errors.
+    }
   }
 
   async function loadMembers(){
@@ -794,18 +1118,14 @@
   async function loadShareLink(){
     if (sharedMode) return;
     try {
-      const res = await fetch('/api/calendar/share-link');
+      const res = await fetch('/api/calendar/share-links');
       const data = await res.json();
-      if (data.ok && data.url) {
-        shareUrlInput.value = data.url;
-        if (syncGoogle) syncGoogle.href = data.google_url || '#';
-        if (syncOutlook) syncOutlook.href = data.outlook_url || '#';
-        if (syncIcs) syncIcs.href = data.ics_url || '#';
-        if (syncWebcalInput) syncWebcalInput.value = data.webcal_url || '';
-        setSyncButtonsEnabled(true);
-      } else {
-        setSyncButtonsEnabled(false);
+      shareLinks = Array.isArray(data.links) ? data.links : [];
+      if (selectedShareLinkId != null && !shareLinks.find(link => Number(link.id) === Number(selectedShareLinkId))) {
+        selectedShareLinkId = null;
       }
+      renderShareLinkOptions();
+      applyShareLinkToUi(selectedShareLink());
     } catch(_){}
   }
 
@@ -1216,7 +1536,8 @@
   });
 
   document.getElementById('cal-prev').addEventListener('click', () => {
-    if (currentView === 'week') anchorDate = addDays(anchorDate, -7);
+    if (currentView === 'day') anchorDate = addDays(anchorDate, -1);
+    else if (currentView === 'week') anchorDate = addDays(anchorDate, -7);
     else if (currentView === 'two-week') anchorDate = addDays(anchorDate, -14);
     else if (currentView === 'three-month') anchorDate = new Date(anchorDate.getFullYear(), anchorDate.getMonth()-3, 1);
     else anchorDate = new Date(anchorDate.getFullYear(), anchorDate.getMonth()-1, 1);
@@ -1224,7 +1545,8 @@
   });
 
   document.getElementById('cal-next').addEventListener('click', () => {
-    if (currentView === 'week') anchorDate = addDays(anchorDate, 7);
+    if (currentView === 'day') anchorDate = addDays(anchorDate, 1);
+    else if (currentView === 'week') anchorDate = addDays(anchorDate, 7);
     else if (currentView === 'two-week') anchorDate = addDays(anchorDate, 14);
     else if (currentView === 'three-month') anchorDate = new Date(anchorDate.getFullYear(), anchorDate.getMonth()+3, 1);
     else anchorDate = new Date(anchorDate.getFullYear(), anchorDate.getMonth()+1, 1);
@@ -1246,6 +1568,15 @@
   fabAdd?.addEventListener('click', () => {
     openModal(lastInteractionDate || fmtISO(new Date()), null);
   });
+  headerAdd?.addEventListener('click', () => {
+    openModal(lastInteractionDate || fmtISO(new Date()), null);
+  });
+  shareJumpBtn?.addEventListener('click', () => {
+    const shareDetails = document.getElementById('calendar-share-details');
+    if (!shareDetails) return;
+    shareDetails.open = true;
+    shareDetails.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
 
   fabMini?.addEventListener('click', () => {
     currentView = currentView === 'month' ? 'week' : 'month';
@@ -1262,6 +1593,62 @@
 
   memberFilter.addEventListener('change', loadEvents);
 
+  birthdayTodayClose?.addEventListener('click', () => {
+    birthdayTodayModal?.classList.add('hidden');
+    birthdayTodayModal?.classList.remove('flex');
+  });
+  birthdayTodayModal?.addEventListener('click', (event) => {
+    if (event.target === birthdayTodayModal) {
+      birthdayTodayModal.classList.add('hidden');
+      birthdayTodayModal.classList.remove('flex');
+    }
+  });
+
+  birthdayOptInToggle?.addEventListener('change', async () => {
+    try {
+      const res = await fetch('/api/calendar/birthday-optin', {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ enabled: !!birthdayOptInToggle.checked }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Unable to save birthday notification setting');
+      toast('Birthday notification preference saved', 'success');
+    } catch (err) {
+      birthdayOptInToggle.checked = !birthdayOptInToggle.checked;
+      toast(err.message || 'Failed to save setting', 'error');
+    }
+  });
+
+  birthdayTrackerForm?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const name = String(birthdayNameInput?.value || '').trim();
+    const date = String(birthdayDateInput?.value || '').trim();
+    if (!name || !date) {
+      toast('Name and birthday date are required', 'error');
+      return;
+    }
+    try {
+      const res = await fetch('/api/calendar/birthdays', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          name,
+          date,
+          relation: String(birthdayRelationInput?.value || '').trim(),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Unable to add birthday');
+      birthdayTrackerForm.reset();
+      await loadBirthdayTracker();
+      await loadEvents();
+      toast('Birthday added to Family Calendar', 'success');
+    } catch (err) {
+      toast(err.message || 'Failed to add birthday', 'error');
+    }
+  });
+
   if (showMealsToggle) {
     showMealsToggle.checked = showFamilyMeals;
     showMealsToggle.addEventListener('change', () => {
@@ -1272,23 +1659,99 @@
   }
 
   createShareBtn?.addEventListener('click', async () => {
-    const res = await fetch('/api/calendar/share-link', { method: 'POST' });
+    const payload = {
+      label: (shareLabelInput?.value || '').trim() || 'Family Calendar Share',
+      filter_title_keywords: getSelectedFeedKeywords(),
+      filter_event_types: [],
+      filter_created_by: [],
+      include_private_events: !!(shareIncludePrivateInput?.checked),
+      include_descriptions: !!(shareIncludeDescriptionsInput?.checked),
+    };
+    const res = await fetch('/api/calendar/share-link', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
     const data = await res.json();
     if (!res.ok || !data.ok) {
       toast(data.error || 'Failed to create link', 'error');
       return;
     }
-    shareUrlInput.value = data.url;
-    if (syncGoogle) syncGoogle.href = data.google_url || '#';
-    if (syncOutlook) syncOutlook.href = data.outlook_url || '#';
-    if (syncIcs) syncIcs.href = data.ics_url || '#';
-    if (syncWebcalInput) syncWebcalInput.value = data.webcal_url || '';
-    setSyncButtonsEnabled(true);
+    selectedShareLinkId = Number(data.id);
+    await loadShareLink();
     toast('Share link created', 'success');
   });
 
+  deleteShareBtn?.addEventListener('click', async () => {
+    const active = selectedShareLink();
+    if (!active) {
+      toast('No share link selected', 'error');
+      return;
+    }
+    const ok = window.uiConfirm
+      ? await window.uiConfirm(`Delete share link "${active.label || 'Family Calendar Share'}"?`, { title: 'Delete Share Link', confirmText: 'Delete', danger: true })
+      : confirm(`Delete share link "${active.label || 'Family Calendar Share'}"?`);
+    if (!ok) return;
+
+    const res = await fetch(`/api/calendar/share-link?id=${encodeURIComponent(String(active.id))}`, {
+      method: 'DELETE',
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      toast(data.error || 'Failed to delete share link', 'error');
+      return;
+    }
+    selectedShareLinkId = null;
+    await loadShareLink();
+    toast('Share link deleted', 'success');
+  });
+
+  shareLinkSelect?.addEventListener('change', () => {
+    const id = Number(shareLinkSelect.value || 0);
+    selectedShareLinkId = id || null;
+    applyShareLinkToUi(selectedShareLink());
+  });
+
+  feedPresetInput?.addEventListener('change', () => {
+    if (!feedKeywordsInput) return;
+    if ((feedPresetInput?.value || 'all') === 'all') {
+      feedKeywordsInput.value = '';
+    } else if ((feedPresetInput?.value || 'all') === 'lake-house') {
+      feedKeywordsInput.value = 'Lake House, Marblehead Lake House';
+    }
+  });
+
+  feedApplyBtn?.addEventListener('click', async () => {
+    const active = selectedShareLink();
+    if (!active) {
+      toast('Create a share link first', 'error');
+      return;
+    }
+    const payload = {
+      label: (shareLabelInput?.value || '').trim() || active.label || 'Family Calendar Share',
+      filter_title_keywords: getSelectedFeedKeywords(),
+      filter_event_types: [],
+      filter_created_by: [],
+      include_private_events: !!(shareIncludePrivateInput?.checked),
+      include_descriptions: !!(shareIncludeDescriptionsInput?.checked),
+    };
+    const res = await fetch(`/api/calendar/share-link?id=${encodeURIComponent(String(active.id))}`, {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      toast(data.error || 'Failed to update ICS filter', 'error');
+      return;
+    }
+    selectedShareLinkId = Number(data.id);
+    await loadShareLink();
+    toast('Share link updated', 'success');
+  });
+
   copyShareBtn?.addEventListener('click', async () => {
-    const val = shareUrlInput.value.trim();
+    const val = (shareUrlInput?.value || '').trim();
     if (!val) return;
     try {
       await navigator.clipboard.writeText(val);
@@ -1314,12 +1777,35 @@
     }
   });
 
+  importIcsBtn?.addEventListener('click', async () => {
+    const sourceUrl = String(importIcsUrlInput?.value || '').trim();
+    if (!sourceUrl) {
+      toast('Enter an ICS URL to import', 'error');
+      return;
+    }
+    const res = await fetch('/api/calendar/import-ics', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ source_url: sourceUrl, mode: 'upsert' }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      toast(data.error || 'ICS import failed', 'error');
+      return;
+    }
+    toast(`Imported ${Number(data.created || 0) + Number(data.updated || 0)} event(s)`, 'success');
+    if (importIcsUrlInput) importIcsUrlInput.value = '';
+    await loadEvents();
+  });
+
   function escapeHtml(text){
     return String(text || '').replace(/[&<>"']/g, (m) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
   }
 
   loadMembers().then(() => {
     loadShareLink();
+    loadBirthdayTracker();
+    checkTodayBirthdays();
     loadEvents();
   });
 })();

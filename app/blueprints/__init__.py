@@ -89,6 +89,19 @@ def service_worker():
           );
         });
 
+        self.addEventListener('notificationclick', (event) => {
+          event.notification.close();
+          const target = (event.notification.data && event.notification.data.url) || '/notifications';
+          event.waitUntil(
+            self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+              for (const c of list) {
+                if ('focus' in c) { c.navigate && c.navigate(target); return c.focus(); }
+              }
+              return self.clients.openWindow(target);
+            })
+          );
+        });
+
         self.addEventListener('fetch', (event) => {
           const req = event.request;
           const url = new URL(req.url);

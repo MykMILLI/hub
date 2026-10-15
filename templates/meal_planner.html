@@ -18,19 +18,27 @@
   .meal-card-draggable:active {
     cursor: grabbing;
   }
+  .meal-planner-shell { background:linear-gradient(135deg,#f8fbff,#f7f5ff); padding:1.5rem; border-radius:1.25rem; }
+  .meal-week-card { box-shadow:0 8px 24px rgba(71,85,105,.08); }
+  #weeklyPanel table { border-spacing:0; border:1px solid #e2e8f0; border-radius:.85rem; overflow:hidden; }
+  #weeklyPanel th, #weeklyPanel td { border-right:1px solid #e2e8f0; border-bottom:1px solid #e2e8f0; }
+  #weeklyPanel td { min-width:130px; height:88px; vertical-align:top; }
+  .meal-planner-bottom { display:grid; grid-template-columns:minmax(0,1.6fr) minmax(260px,.9fr); gap:1rem; }
+  @media(max-width:800px){.meal-planner-shell{padding:.75rem}.meal-planner-bottom{display:block}.meal-planner-bottom>*{margin-bottom:1rem}}
+  @media(max-width:767px){ #weeklyPanel .overflow-x-auto{margin:0 -.5rem;padding:0 .5rem} #weeklyPanel td{min-width:112px;height:76px}.meal-planner-shell h1{font-size:1.7rem}.planner-tab-btn{padding:.45rem .65rem}}
 </style>
-<div class="max-w-7xl mx-auto space-y-5">
-  <section class="card p-5 rounded-2xl border border-gray-200/70 dark:border-gray-700/70">
+<div class="max-w-7xl mx-auto space-y-5 meal-planner-shell">
+  <section class="p-2">
     <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
       <div>
-        <h1 class="text-3xl font-extrabold tracking-tight">Meal Planner</h1>
-        <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">Plan breakfast, lunch, dinner, and snacks with weekly and monthly visibility.</p>
+        <h1 class="text-3xl font-extrabold tracking-tight">A little planning. Better mealtimes.</h1>
+        <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">Make room for family favorites and an easier week.</p>
       </div>
       <button id="addMealBtn" type="button" class="btn btn-primary"><i class="fa-solid fa-plus mr-1"></i>Add Meal Plan</button>
     </div>
   </section>
 
-  <section class="card p-4 rounded-2xl border border-gray-200/70 dark:border-gray-700/70">
+  <section class="card p-4 rounded-2xl border border-gray-200/70 dark:border-gray-700/70 meal-week-card">
     <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
       <div class="md:col-span-4 flex items-center gap-2">
         <button id="prevMonthBtn" type="button" class="btn btn-secondary"><i class="fa-solid fa-chevron-left"></i></button>
@@ -48,7 +56,7 @@
   </section>
 
   <section id="weeklyPanel" class="space-y-4">
-    <div class="card p-4 rounded-2xl border border-gray-200/70 dark:border-gray-700/70">
+    <div class="card p-4 rounded-2xl border border-gray-200/70 dark:border-gray-700/70 meal-week-card">
       <div class="flex items-center justify-between mb-3">
         <h3 id="weeklyRangeLabel" class="text-lg font-bold"></h3>
         <div class="inline-flex items-center gap-2">
@@ -65,6 +73,10 @@
         </table>
       </div>
     </div>
+  </section>
+  <section class="meal-planner-bottom">
+    <article class="card p-5"><div class="flex justify-between"><div><h3 class="text-lg font-bold">Family favorites</h3><p class="text-sm text-gray-500">A few easy wins for your next meal.</p></div><button id="viewSavedMeals" class="text-sm text-violet-600">View all <i class="fa-solid fa-arrow-right"></i></button></div><div id="familyFavorites" class="mt-4 grid sm:grid-cols-3 gap-3"></div></article>
+    <article class="card p-5 bg-emerald-50/60 dark:bg-emerald-900/10"><div class="flex gap-3"><i class="fa-solid fa-basket-shopping text-3xl text-emerald-500"></i><div><h3 class="text-lg font-bold">From plan to pantry</h3><p class="text-sm text-gray-500 mt-1">Bring your meal ingredients into your shopping list.</p><button id="buildShoppingListBtn" class="mt-4 btn btn-primary text-sm">Build shopping list <i class="fa-solid fa-arrow-right ml-1"></i></button></div></div></article>
   </section>
 
   <section id="monthlyPanel" class="hidden space-y-4">
@@ -564,6 +576,9 @@
         link: item.link || '',
         photo_url: item.photo_url || '',
       }));
+      const favorites = document.getElementById('familyFavorites');
+      if (favorites) favorites.innerHTML = recipeLibrary.slice(0, 3).map(item => `<button type="button" class="text-left rounded-xl border border-gray-200 dark:border-gray-700 p-3 hover:border-violet-400" data-favorite-id="${item.id}"><img class="w-full h-24 object-cover rounded-lg bg-gray-100" src="${sanitize(item.photo_url || '')}" alt=""><b class="block mt-2 text-sm truncate">${sanitize(item.title)}</b><span class="text-xs text-violet-600">+ Plan</span></button>`).join('') || '<p class="text-sm text-gray-500">Save recipes to see family favorites.</p>';
+      favorites?.querySelectorAll('[data-favorite-id]').forEach(button => button.onclick = () => { const item = recipeLibrary.find(recipe => String(recipe.id) === button.dataset.favoriteId); if (item) openMealModal(null, item); });
       if (savedMealTypeahead && document.activeElement === savedMealTypeahead) {
         renderSavedMealResults(savedMealTypeahead.value);
       }
@@ -788,6 +803,9 @@
   }
 
   document.getElementById('addMealBtn').addEventListener('click', () => openMealModal());
+  document.getElementById('buildShoppingListBtn')?.addEventListener('click', () => {
+    window.location.assign('/shopping');
+  });
   document.getElementById('closeMealModal').addEventListener('click', closeMealModal);
   mealModal.addEventListener('click', (e)=> { if (e.target === mealModal) closeMealModal(); });
   mealVisibility.addEventListener('change', syncMealVisibilityUi);

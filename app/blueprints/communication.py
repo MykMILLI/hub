@@ -4,6 +4,7 @@ import base64
 import hashlib
 import secrets
 from datetime import datetime, timedelta
+from typing import Any
 
 from flask import current_app, jsonify, render_template, request, session
 from sqlalchemy import and_, not_, or_
@@ -11,6 +12,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from werkzeug.utils import secure_filename
 
 from ..models import (
+    ActivityLog,
     AppNotification,
     FamilyCallSignal,
     FamilyChatMessage,
@@ -22,6 +24,7 @@ from ..models import (
 from ..blueprints import main_bp
 from ..security import sanitize_text
 from ..services.notification_service import publish_notification
+from ..services.supabase_service import supabase_service
 
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -33,6 +36,8 @@ ALLOWED_NOTIFICATION_CHANNELS = {'in_app', 'email', 'mobile'}
 _CHAT_LEGACY_MIGRATED = False
 CALL_SIGNAL_RETENTION_HOURS = 12
 CALL_OFFER_TTL_SECONDS = 90
+_typing_presence: dict[tuple[str, str], datetime] = {}
+_TYPING_TTL_SECONDS = 10
 
 
 def _chat_cipher() -> Fernet:
@@ -72,6 +77,9 @@ def _decrypt_chat_text(value: str) -> str:
 
 def _migrate_legacy_plaintext_messages() -> None:
     global _CHAT_LEGACY_MIGRATED
+    if _chat_uses_supabase_store():
+        _CHAT_LEGACY_MIGRATED = True
+        return
     if _CHAT_LEGACY_MIGRATED:
         return
 
@@ -103,7 +111,17 @@ def _current_member_name() -> str:
 def _all_member_names() -> list[str]:
     rows = FamilyMember.query.order_by(FamilyMember.name.asc()).all()
     names = [sanitize_text((row.name or '')).strip() for row in rows]
-    return [name for name in names if name]
+    names = [name for name in names if name]
+    cfg = current_app.config.get('HOMEHUB_CONFIG', {}) or {}
+    extras = list(cfg.get('family_members', []) or [])
+    extras.append(cfg.get('admin_name', ''))
+    seen = {name.lower() for name in names}
+    for extra in extras:
+        clean = sanitize_text(str(extra or '')).strip()
+        if clean and clean.lower() not in seen:
+            names.append(clean)
+            seen.add(clean.lower())
+    return sorted(names, key=lambda n: n.lower())
 
 
 def _member_exists(member_name: str) -> bool:
@@ -124,6 +142,17 @@ def _safe_json_list(raw, fallback=None):
         except Exception:
             values = fallback
     return [sanitize_text(str(item or '')).strip() for item in values if sanitize_text(str(item or '')).strip()]
+
+
+def _cleanup_typing_presence() -> None:
+    now = datetime.utcnow()
+    stale_keys = [
+        key
+        for key, seen_at in _typing_presence.items()
+        if (now - seen_at).total_seconds() > _TYPING_TTL_SECONDS
+    ]
+    for key in stale_keys:
+        _typing_presence.pop(key, None)
 
 
 def _cleanup_old_call_signals() -> None:
@@ -177,38 +206,118 @@ def _message_to_dict(row: FamilyChatMessage) -> dict:
     }
 
 
-@main_bp.route('/messages', methods=['GET'])
-def messages_page():
-    _migrate_legacy_plaintext_messages()
-    config = current_app.config['HOMEHUB_CONFIG']
-    return render_template(
-        'messages.html',
-        config=config,
-        current_member_name=_current_member_name(),
-        webrtc_ice_servers=_webrtc_ice_servers(),
+def _chat_uses_supabase_store() -> bool:
+    return bool(supabase_service.chat_store_enabled())
+
+
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {'1', 'true', 'yes', 'on', 't'}
+    return bool(value)
+
+
+def _supabase_message_to_dict(row: dict[str, Any]) -> dict:
+    raw = row if isinstance(row, dict) else {}
+    msg = _decrypt_chat_text(raw.get('message'))
+    created_at = sanitize_text(str(raw.get('created_at') or '')).strip()
+    attachment_filename = sanitize_text(str(raw.get('attachment_filename') or '')).strip() or None
+    attachment_mime = sanitize_text(str(raw.get('attachment_mime') or '')).strip() or None
+    row_id = raw.get('id')
+    try:
+        parsed_id: Any = int(row_id)
+    except Exception:
+        parsed_id = sanitize_text(str(row_id or '')).strip()
+
+    return {
+        'id': parsed_id,
+        'sender': sanitize_text(str(raw.get('sender') or '')).strip(),
+        'recipient': sanitize_text(str(raw.get('recipient') or '')).strip(),
+        'message': msg,
+        'attachment_filename': attachment_filename,
+        'attachment_mime': attachment_mime,
+        'attachment_url': f"/uploads/preview/{attachment_filename}" if attachment_filename else None,
+        'is_read': _as_bool(raw.get('is_read')),
+        'created_at': created_at or None,
+    }
+
+
+def _chat_unread_count(member: str) -> int:
+    if _chat_uses_supabase_store():
+        result = supabase_service.chat_count_unread(member=member)
+        if result.get('ok'):
+            try:
+                return int(result.get('count') or 0)
+            except Exception:
+                return 0
+        return 0
+
+    return FamilyChatMessage.query.filter_by(recipient=member, is_read=False).count()
+
+
+def _chat_thread_messages(member: str, other: str) -> list[dict[str, Any]]:
+    if _chat_uses_supabase_store():
+        result = supabase_service.chat_fetch_thread(member=member, other_member=other, limit=300)
+        if not result.get('ok'):
+            return []
+        rows = result.get('rows') if isinstance(result.get('rows'), list) else []
+        return [_supabase_message_to_dict(row) for row in rows if isinstance(row, dict)]
+
+    rows = (
+        FamilyChatMessage.query
+        .filter(
+            or_(
+                and_(FamilyChatMessage.sender == member, FamilyChatMessage.recipient == other),
+                and_(FamilyChatMessage.sender == other, FamilyChatMessage.recipient == member),
+            )
+        )
+        .order_by(FamilyChatMessage.created_at.asc(), FamilyChatMessage.id.asc())
+        .limit(300)
+        .all()
     )
+    return [_message_to_dict(row) for row in rows]
 
 
-@main_bp.route('/polls', methods=['GET'])
-def polls_page():
-    config = current_app.config['HOMEHUB_CONFIG']
-    return render_template('polls.html', config=config, current_member_name=_current_member_name())
+def _chat_threads(member: str) -> list[dict[str, Any]]:
+    if _chat_uses_supabase_store():
+        names = [name for name in _all_member_names() if name != member]
+        result = supabase_service.chat_fetch_member_messages(member=member, limit=800)
+        if not result.get('ok'):
+            current_app.logger.warning(
+                'Unable to load Supabase chat history for member %s: %s',
+                member,
+                result.get('error') or 'unknown error',
+            )
+            rows = []
+        else:
+            rows = result.get('rows') if isinstance(result.get('rows'), list) else []
 
+        by_other: dict[str, dict[str, Any]] = {}
+        for raw in rows:
+            if not isinstance(raw, dict):
+                continue
+            sender = sanitize_text(str(raw.get('sender') or '')).strip()
+            recipient = sanitize_text(str(raw.get('recipient') or '')).strip()
+            other = recipient if sender == member else sender
+            if not other or other == member:
+                continue
+            if other not in by_other:
+                preview = _decrypt_chat_text(raw.get('message'))
+                attachment_filename = sanitize_text(str(raw.get('attachment_filename') or '')).strip()
+                by_other[other] = {
+                    'member': other,
+                    'last_message': preview or ('📎 Attachment' if attachment_filename else ''),
+                    'last_at': sanitize_text(str(raw.get('created_at') or '')).strip() or None,
+                    'unread': 0,
+                }
+            if recipient == member and not _as_bool(raw.get('is_read')):
+                by_other[other]['unread'] += 1
 
-@main_bp.route('/api/messages/unread-count', methods=['GET'])
-def api_messages_unread_count():
-    _migrate_legacy_plaintext_messages()
-    member = sanitize_text(request.args.get('member') or '').strip() or _current_member_name()
-    count = FamilyChatMessage.query.filter_by(recipient=member, is_read=False).count()
-    return jsonify({'ok': True, 'count': int(count)})
+        for name in names:
+            by_other.setdefault(name, {'member': name, 'last_message': '', 'last_at': None, 'unread': 0})
 
-
-@main_bp.route('/api/messages/threads', methods=['GET'])
-def api_message_threads():
-    _migrate_legacy_plaintext_messages()
-    member = sanitize_text(request.args.get('member') or '').strip() or _current_member_name()
-    if not member:
-        return jsonify({'ok': True, 'threads': []})
+        threads = list(by_other.values())
+        threads.sort(key=lambda item: item.get('last_at') or '', reverse=True)
+        return threads
 
     names = [name for name in _all_member_names() if name != member]
     rows = (
@@ -234,13 +343,158 @@ def api_message_threads():
         if row.recipient == member and not row.is_read:
             by_other[other]['unread'] += 1
 
-    # include empty threads for family members with no chat history yet
     for name in names:
         by_other.setdefault(name, {'member': name, 'last_message': '', 'last_at': None, 'unread': 0})
 
     threads = list(by_other.values())
     threads.sort(key=lambda item: item.get('last_at') or '', reverse=True)
+    return threads
+
+
+def _search_member_messages(member: str, query: str, limit: int = 50) -> tuple[list[dict[str, Any]], str | None]:
+    needle = query.casefold()
+    if _chat_uses_supabase_store():
+        result = supabase_service.chat_fetch_member_messages(member=member, limit=800)
+        if not result.get('ok'):
+            return [], result.get('error') or 'Unable to search messages'
+        rows = result.get('rows') if isinstance(result.get('rows'), list) else []
+        matches = []
+        for raw in rows:
+            if not isinstance(raw, dict):
+                continue
+            sender = sanitize_text(str(raw.get('sender') or '')).strip()
+            recipient = sanitize_text(str(raw.get('recipient') or '')).strip()
+            message = _decrypt_chat_text(raw.get('message'))
+            if needle not in message.casefold():
+                continue
+            other = recipient if sender == member else sender
+            if not other:
+                continue
+            matches.append({
+                'id': raw.get('id'),
+                'member': other,
+                'message': message,
+                'created_at': sanitize_text(str(raw.get('created_at') or '')).strip() or None,
+            })
+            if len(matches) >= limit:
+                break
+        return matches, None
+
+    rows = (
+        FamilyChatMessage.query
+        .filter(or_(FamilyChatMessage.sender == member, FamilyChatMessage.recipient == member))
+        .order_by(FamilyChatMessage.created_at.desc(), FamilyChatMessage.id.desc())
+        .limit(800)
+        .all()
+    )
+    matches = []
+    for row in rows:
+        message = _decrypt_chat_text(row.message)
+        if needle not in message.casefold():
+            continue
+        other = row.recipient if row.sender == member else row.sender
+        matches.append({
+            'id': row.id,
+            'member': other,
+            'message': message,
+            'created_at': row.created_at.isoformat() if row.created_at else None,
+        })
+        if len(matches) >= limit:
+            break
+    return matches, None
+
+
+def chat_latest_marker_for_member(member: str) -> int:
+    clean_member = sanitize_text(member or '').strip()
+    if not clean_member:
+        return 0
+
+    if _chat_uses_supabase_store():
+        result = supabase_service.chat_latest_member_message_id(member=clean_member)
+        if result.get('ok'):
+            try:
+                return int(result.get('latest_id') or 0)
+            except Exception:
+                return 0
+        return 0
+
+    row = (
+        FamilyChatMessage.query
+        .filter(or_(FamilyChatMessage.sender == clean_member, FamilyChatMessage.recipient == clean_member))
+        .order_by(FamilyChatMessage.id.desc())
+        .first()
+    )
+    return int(row.id) if row else 0
+
+
+def _log_chat_timeline_event(*, sender: str, recipient: str, has_text: bool, has_attachment: bool, message_id: int | None = None) -> None:
+    summary = f"sent a message to {recipient}"
+    if has_text and has_attachment:
+        summary = f"sent a message and attachment to {recipient}"
+    elif has_attachment and not has_text:
+        summary = f"shared an attachment with {recipient}"
+
+    row = ActivityLog(
+        actor=sender,
+        action='chat.message',
+        summary=summary,
+        entity_type='chat_message',
+        entity_id=message_id,
+        visibility='family',
+    )
+    db.session.add(row)
+
+
+@main_bp.route('/messages', methods=['GET'])
+def messages_page():
+    _migrate_legacy_plaintext_messages()
+    config = current_app.config['HOMEHUB_CONFIG']
+    return render_template(
+        'messages.html',
+        config=config,
+        current_member_name=_current_member_name(),
+        webrtc_ice_servers=_webrtc_ice_servers(),
+    )
+
+
+@main_bp.route('/polls', methods=['GET'])
+def polls_page():
+    config = current_app.config['HOMEHUB_CONFIG']
+    return render_template('polls.html', config=config, current_member_name=_current_member_name())
+
+
+@main_bp.route('/api/messages/unread-count', methods=['GET'])
+def api_messages_unread_count():
+    _migrate_legacy_plaintext_messages()
+    member = sanitize_text(request.args.get('member') or '').strip() or _current_member_name()
+    count = _chat_unread_count(member)
+    return jsonify({'ok': True, 'count': int(count)})
+
+
+@main_bp.route('/api/messages/threads', methods=['GET'])
+def api_message_threads():
+    _migrate_legacy_plaintext_messages()
+    member = sanitize_text(request.args.get('member') or '').strip() or _current_member_name()
+    if not member:
+        return jsonify({'ok': True, 'threads': []})
+
+    threads = _chat_threads(member)
     return jsonify({'ok': True, 'threads': threads})
+
+
+@main_bp.route('/api/messages/search', methods=['GET'])
+def api_search_messages():
+    _migrate_legacy_plaintext_messages()
+    member = _current_member_name()
+    query = sanitize_text(request.args.get('q') or '').strip()
+    if len(query) < 2:
+        return jsonify({'ok': True, 'results': []})
+
+    results, error = _search_member_messages(member, query)
+    if error:
+        current_app.logger.warning('Unable to search messages for member %s: %s', member, error)
+        return jsonify({'ok': False, 'error': error}), 503
+    return jsonify({'ok': True, 'results': results})
 
 
 @main_bp.route('/api/messages/thread/<other_member>', methods=['GET'])
@@ -251,19 +505,8 @@ def api_message_thread(other_member: str):
     if not member or not other:
         return jsonify({'ok': False, 'error': 'Missing member'}), 400
 
-    rows = (
-        FamilyChatMessage.query
-        .filter(
-            or_(
-                and_(FamilyChatMessage.sender == member, FamilyChatMessage.recipient == other),
-                and_(FamilyChatMessage.sender == other, FamilyChatMessage.recipient == member),
-            )
-        )
-        .order_by(FamilyChatMessage.created_at.asc(), FamilyChatMessage.id.asc())
-        .limit(300)
-        .all()
-    )
-    return jsonify({'ok': True, 'messages': [_message_to_dict(row) for row in rows]})
+    messages = _chat_thread_messages(member, other)
+    return jsonify({'ok': True, 'messages': messages})
 
 
 @main_bp.route('/api/messages/thread/<other_member>/read', methods=['POST'])
@@ -272,6 +515,12 @@ def api_message_thread_mark_read(other_member: str):
     other = sanitize_text(other_member or '').strip()
     if not member or not other:
         return jsonify({'ok': False, 'error': 'Missing member'}), 400
+
+    if _chat_uses_supabase_store():
+        result = supabase_service.chat_mark_thread_read(member=member, other_member=other)
+        if not result.get('ok'):
+            return jsonify({'ok': False, 'error': result.get('error') or 'Unable to mark read'}), 500
+        return jsonify({'ok': True, 'count': int(result.get('count') or 0)})
 
     rows = (
         FamilyChatMessage.query
@@ -282,6 +531,39 @@ def api_message_thread_mark_read(other_member: str):
         row.is_read = True
     db.session.commit()
     return jsonify({'ok': True, 'count': len(rows)})
+
+
+@main_bp.route('/api/messages/typing', methods=['POST'])
+def api_messages_typing():
+    data = request.get_json(silent=True) or {}
+    sender = sanitize_text(data.get('sender') or '').strip() or _current_member_name()
+    recipient = sanitize_text(data.get('recipient') or '').strip()
+    typing = bool(data.get('typing'))
+
+    if not sender or not recipient:
+        return jsonify({'ok': False, 'error': 'sender and recipient are required'}), 400
+    if sender == recipient:
+        return jsonify({'ok': True})
+
+    _cleanup_typing_presence()
+    key = (sender, recipient)
+    if typing:
+        _typing_presence[key] = datetime.utcnow()
+    else:
+        _typing_presence.pop(key, None)
+    return jsonify({'ok': True})
+
+
+@main_bp.route('/api/messages/typing/<other_member>', methods=['GET'])
+def api_messages_typing_status(other_member: str):
+    member = sanitize_text(request.args.get('member') or '').strip() or _current_member_name()
+    other = sanitize_text(other_member or '').strip()
+    if not member or not other:
+        return jsonify({'ok': False, 'error': 'Missing member'}), 400
+
+    _cleanup_typing_presence()
+    typing = (other, member) in _typing_presence
+    return jsonify({'ok': True, 'member': other, 'typing': typing})
 
 
 @main_bp.route('/api/messages/send', methods=['POST'])
@@ -314,16 +596,55 @@ def api_send_message():
         attachment.save(attachment_path)
         attachment_mime = sanitize_text(getattr(attachment, 'mimetype', '') or '').strip() or None
 
-    row = FamilyChatMessage(
-        sender=sender,
-        recipient=recipient,
-        message=_encrypt_chat_text(message),
-        attachment_filename=attachment_filename,
-        attachment_mime=attachment_mime,
-        is_read=False,
-    )
-    db.session.add(row)
-    db.session.commit()
+    encrypted_message = _encrypt_chat_text(message)
+
+    if _chat_uses_supabase_store():
+        result = supabase_service.chat_create_message(
+            sender=sender,
+            recipient=recipient,
+            message=encrypted_message,
+            attachment_filename=attachment_filename,
+            attachment_mime=attachment_mime,
+        )
+        if not result.get('ok'):
+            return jsonify({'ok': False, 'error': result.get('error') or 'Unable to send message'}), 500
+
+        row_payload = result.get('row') if isinstance(result.get('row'), dict) else {}
+        message_payload = _supabase_message_to_dict(row_payload)
+        row_id = message_payload.get('id')
+        try:
+            entity_id = int(row_id)
+        except Exception:
+            entity_id = None
+
+        _log_chat_timeline_event(
+            sender=sender,
+            recipient=recipient,
+            has_text=bool(message),
+            has_attachment=bool(attachment_filename),
+            message_id=entity_id,
+        )
+        db.session.commit()
+    else:
+        row = FamilyChatMessage(
+            sender=sender,
+            recipient=recipient,
+            message=encrypted_message,
+            attachment_filename=attachment_filename,
+            attachment_mime=attachment_mime,
+            is_read=False,
+        )
+        db.session.add(row)
+        db.session.flush()
+        _log_chat_timeline_event(
+            sender=sender,
+            recipient=recipient,
+            has_text=bool(message),
+            has_attachment=bool(attachment_filename),
+            message_id=row.id,
+        )
+        db.session.commit()
+        message_payload = _message_to_dict(row)
 
     publish_notification(
         event_type='chat_message',
@@ -331,11 +652,11 @@ def api_send_message():
         message='New secure family message',
         target_members=[recipient],
         created_by=sender,
-        payload={'chat_message_id': row.id, 'sender': sender},
-        channels=['in_app'],
+        payload={'chat_message_id': message_payload.get('id'), 'sender': sender},
+        channels=['in_app', 'mobile'],
     )
 
-    return jsonify({'ok': True, 'message': _message_to_dict(row)})
+    return jsonify({'ok': True, 'message': message_payload})
 
 
 @main_bp.route('/api/calls/session/start', methods=['POST'])

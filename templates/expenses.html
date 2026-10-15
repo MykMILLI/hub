@@ -81,6 +81,7 @@
   <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
     <h1 class="text-2xl sm:text-3xl font-bold text-gray-800 dark:text-white">Expense & Money Tracker</h1>
     <div class="grid grid-cols-1 sm:flex gap-2 w-full sm:w-auto">
+      <button id="toggle-finance-privacy" class="btn btn-secondary"><i class="fas fa-user-shield mr-2"></i>Privacy Mode</button>
       <button id="add-transaction-btn" class="btn btn-primary"><i class="fas fa-plus mr-2"></i>Add Transaction</button>
       <button id="add-income-btn" class="btn btn-primary"><i class="fas fa-plus mr-2"></i>Add Income</button>
       <button id="add-shared-recurring-bill-btn" class="btn btn-primary"><i class="fas fa-users mr-2"></i>Add Shared Recurring Bill</button>
@@ -102,6 +103,36 @@
     <div id="plaid-accounts-container" class="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
       <!-- Plaid accounts will load here -->
     </div>
+  </div>
+
+  <div class="card p-4 sm:p-5 rounded-xl border border-gray-200 dark:border-gray-700">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
+      <div>
+        <h3 class="text-lg font-bold text-gray-800 dark:text-white">Category Rules</h3>
+        <p class="text-sm text-gray-600 dark:text-gray-400">Auto-categorize future imported transactions by merchant/payee or description.</p>
+      </div>
+    </div>
+    <form id="category-rule-form" class="grid grid-cols-1 md:grid-cols-5 gap-2 mb-3">
+      <input id="rule-name" type="text" class="input" placeholder="Rule name (optional)">
+      <select id="rule-field" class="input">
+        <option value="merchant">Merchant/Payee</option>
+        <option value="description">Description</option>
+        <option value="title">Title</option>
+      </select>
+      <select id="rule-type" class="input">
+        <option value="contains">Contains</option>
+        <option value="equals">Equals</option>
+        <option value="normalized_equals">Normalized equals</option>
+        <option value="startswith">Starts with</option>
+        <option value="endswith">Ends with</option>
+      </select>
+      <input id="rule-match" type="text" class="input" placeholder="Match value">
+      <div class="flex gap-2">
+        <input id="rule-category" type="text" class="input flex-1" placeholder="Category">
+        <button id="save-category-rule" type="submit" class="btn btn-primary">Save</button>
+      </div>
+    </form>
+    <div id="category-rules-list" class="space-y-2"></div>
   </div>
 
   <!-- Calendar & Entries Grid -->
@@ -1381,6 +1412,28 @@ document.addEventListener('DOMContentLoaded', function(){
     const sel = url.searchParams.get('sel');
     if (sel) selectedDate = new Date(sel);
   } catch(err) { /* no-op */ }
+  const privacyMode = (() => {
+    try {
+      const u = new URL(window.location.href);
+      return u.searchParams.get('privacy') === '1';
+    } catch (err) {
+      return false;
+    }
+  })();
+
+  function withPrivacy(urlString){
+    if (!privacyMode) return urlString;
+    try {
+      const url = new URL(urlString, window.location.origin);
+      url.searchParams.set('privacy', '1');
+      if (url.origin === window.location.origin) {
+        return `${url.pathname}${url.search}`;
+      }
+      return url.toString();
+    } catch (err) {
+      return urlString;
+    }
+  }
 
   // Elements
   const grid = document.getElementById('calendar-grid');
@@ -1403,6 +1456,7 @@ document.addEventListener('DOMContentLoaded', function(){
   const billSummaryYear = document.getElementById('bill-summary-year');
   const debtDueItems = document.getElementById('debt-due-items');
   const debtAccountsList = document.getElementById('debt-accounts-list');
+  const toggleFinancePrivacyBtn = document.getElementById('toggle-finance-privacy');
   const bulkForm = document.getElementById('bulk-delete-form');
   const bulkBtn = document.getElementById('bulk-delete-btn');
   const selectAllLabel = document.getElementById('select-all-label');
@@ -1422,6 +1476,23 @@ document.addEventListener('DOMContentLoaded', function(){
   settings.currency = '$';
   const CURRENCY_SYMBOL = '$';
   function fmt(amount){ return CURRENCY_SYMBOL + (Number(amount)||0).toFixed(2); }
+
+  if (toggleFinancePrivacyBtn) {
+    if (privacyMode) {
+      toggleFinancePrivacyBtn.classList.remove('btn-secondary');
+      toggleFinancePrivacyBtn.classList.add('btn-primary');
+      toggleFinancePrivacyBtn.innerHTML = '<i class="fas fa-user-shield mr-2"></i>Privacy On';
+    }
+    toggleFinancePrivacyBtn.addEventListener('click', ()=>{
+      const url = new URL(window.location.href);
+      if (privacyMode) {
+        url.searchParams.delete('privacy');
+      } else {
+        url.searchParams.set('privacy', '1');
+      }
+      window.location.assign(`${url.pathname}?${url.searchParams.toString()}`);
+    });
+  }
 
   function updateSummaryCards(){
     document.getElementById('total-this-month').textContent = fmt(summary.total_this_month||0);
@@ -1480,7 +1551,7 @@ document.addEventListener('DOMContentLoaded', function(){
     financeFetchTimer = setTimeout(async ()=>{
       try{
         const member = encodeURIComponent(currentUser());
-        const res = await fetch(`/api/expenses/finance/summary?year=${year}&month=${month}&member=${member}`);
+        const res = await fetch(withPrivacy(`/api/expenses/finance/summary?year=${year}&month=${month}&member=${member}`));
         const data = await res.json();
         if (!res.ok) throw new Error(data?.error || 'Failed to load finance summary');
 
@@ -1624,7 +1695,7 @@ document.addEventListener('DOMContentLoaded', function(){
   async function loadDebtWorkflow(){
     if (!debtDueItems || !debtAccountsList) return;
     try {
-      const res = await fetch(`/api/expenses/debt-workflow?year=${year}&month=${month}&window_days=${dueWindowDays}`);
+      const res = await fetch(withPrivacy(`/api/expenses/debt-workflow?year=${year}&month=${month}&window_days=${dueWindowDays}`));
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'Failed to load debt workflow');
       latestDebtWorkflowData = data;
@@ -1817,7 +1888,7 @@ document.addEventListener('DOMContentLoaded', function(){
 
   async function loadCollaborationInsights(){
     try {
-      const res = await fetch(`/api/expenses/collaboration?year=${year}&month=${month}&months=6`);
+      const res = await fetch(withPrivacy(`/api/expenses/collaboration?year=${year}&month=${month}&months=6`));
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'Failed to load collaboration data');
       latestCollabData = data;
@@ -1949,7 +2020,7 @@ document.addEventListener('DOMContentLoaded', function(){
       params.set('include_future', allExpensesIncludeFuture?.checked ? '1' : '0');
       params.set('limit', '500');
 
-      const res = await fetch(`/api/expenses/all?${params.toString()}`);
+      const res = await fetch(withPrivacy(`/api/expenses/all?${params.toString()}`));
       const data = await res.json();
       if (!res.ok || !data?.ok) throw new Error(data?.error || 'Failed to load expenses');
 
@@ -2421,7 +2492,7 @@ document.addEventListener('DOMContentLoaded', function(){
   }
 
   async function fetchMonth(y, m){
-    const res = await fetch(`/api/expenses/month?year=${y}&month=${m}`);
+    const res = await fetch(withPrivacy(`/api/expenses/month?year=${y}&month=${m}`));
     const data = await res.json();
     year = data.year; month = data.month; byDate = data.by_date || {}; summary = data.summary || summary; settings = data.settings || settings;
     settings.currency = '$';
@@ -2431,7 +2502,7 @@ document.addEventListener('DOMContentLoaded', function(){
   }
 
   async function fetchHistoryMonth(y, m){
-    const res = await fetch(`/api/expenses/month?year=${y}&month=${m}`);
+    const res = await fetch(withPrivacy(`/api/expenses/month?year=${y}&month=${m}`));
     const data = await res.json();
     if (!res.ok) throw new Error(data?.error || 'Failed to load month history');
     historyYear = data.year;
@@ -2448,7 +2519,7 @@ document.addEventListener('DOMContentLoaded', function(){
   async function findNearestMonthWithData(baseYear, baseMonth){
     async function loadMonthData(y, m){
       try {
-        const res = await fetch(`/api/expenses/month?year=${y}&month=${m}`);
+        const res = await fetch(withPrivacy(`/api/expenses/month?year=${y}&month=${m}`));
         const data = await res.json();
         if (!res.ok) return null;
         return data;
@@ -3542,7 +3613,7 @@ document.addEventListener('DOMContentLoaded', function(){
     if (!member || !paydayConfirmList) return;
     try {
       const localToday = isoLocalFromDate(new Date());
-      const res = await fetch(`/api/expenses/income/pending-confirmations?member=${encodeURIComponent(member)}&as_of=${encodeURIComponent(localToday)}`);
+      const res = await fetch(withPrivacy(`/api/expenses/income/pending-confirmations?member=${encodeURIComponent(member)}&as_of=${encodeURIComponent(localToday)}`));
       const data = await res.json();
       if (!res.ok || !data.ok) return;
 
@@ -4942,6 +5013,16 @@ document.addEventListener('DOMContentLoaded', function(){
         linkBankBtn.innerHTML = originalBtnHtml;
       }
     });
+
+    try {
+      const url = new URL(window.location.href);
+      const plaidAutostart = url.searchParams.get('plaid') === '1';
+      if (plaidAutostart) {
+        setTimeout(() => linkBankBtn.click(), 350);
+      }
+    } catch (err) {
+      // no-op
+    }
   } else {
     console.warn('Plaid link button not found on page');
   }
@@ -4987,7 +5068,7 @@ document.addEventListener('DOMContentLoaded', function(){
   // Load linked Plaid accounts
   async function loadPlaidAccounts(){
     try {
-      const response = await fetch('/expenses/plaid/accounts');
+      const response = await fetch(withPrivacy('/expenses/plaid/accounts'));
       const data = await response.json();
       const container = document.getElementById('plaid-accounts-container');
       if (!data.accounts || data.accounts.length === 0){
@@ -5018,6 +5099,90 @@ document.addEventListener('DOMContentLoaded', function(){
     }
   }
 
+  async function loadCategoryRules(){
+    const container = document.getElementById('category-rules-list');
+    if (!container) return;
+    try {
+      const response = await fetch('/api/expenses/category-rules');
+      const data = await response.json();
+      const items = Array.isArray(data.items) ? data.items : [];
+      if (!items.length) {
+        container.innerHTML = '<div class="text-sm text-gray-500">No category rules yet.</div>';
+        return;
+      }
+      container.innerHTML = items.map(rule => `
+        <div class="flex items-center justify-between rounded-lg border border-gray-200 dark:border-gray-700 p-2">
+          <div class="min-w-0">
+            <div class="font-medium text-sm text-gray-800 dark:text-gray-100 truncate">${escapeHtml(rule.rule_name || 'Rule')}</div>
+            <div class="text-xs text-gray-500 truncate">${escapeHtml(rule.match_field || '')} ${escapeHtml(rule.match_type || '')} \"${escapeHtml(rule.match_value || '')}\" → ${escapeHtml(rule.category || '')}</div>
+          </div>
+          <button type="button" class="btn btn-secondary text-xs" data-rule-delete="${rule.id}">Delete</button>
+        </div>
+      `).join('');
+    } catch (err) {
+      container.innerHTML = '<div class="text-sm text-red-500">Failed to load category rules.</div>';
+    }
+  }
+
+  const categoryRuleForm = document.getElementById('category-rule-form');
+  if (categoryRuleForm) {
+    categoryRuleForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const ruleName = (document.getElementById('rule-name')?.value || '').trim();
+      const matchField = (document.getElementById('rule-field')?.value || 'merchant').trim();
+      const matchType = (document.getElementById('rule-type')?.value || 'contains').trim();
+      const matchValue = (document.getElementById('rule-match')?.value || '').trim();
+      const category = (document.getElementById('rule-category')?.value || '').trim();
+      if (!matchValue || !category) {
+        notifyPlaid('Rule match value and category are required', 'error');
+        return;
+      }
+      try {
+        const response = await fetch('/api/expenses/category-rules', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            rule_name: ruleName || `Rule ${new Date().toLocaleTimeString()}`,
+            match_field: matchField,
+            match_type: matchType,
+            match_value: matchValue,
+            category,
+            created_by: currentUser() || 'Administrator',
+          }),
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) {
+          throw new Error(data.error || 'Failed to save category rule');
+        }
+        categoryRuleForm.reset();
+        notifyPlaid('Category rule saved', 'success');
+        await loadCategoryRules();
+      } catch (err) {
+        notifyPlaid('Error: ' + err.message, 'error');
+      }
+    });
+  }
+
+  document.addEventListener('click', async (e) => {
+    const target = e.target.closest('[data-rule-delete]');
+    if (!target) return;
+    const ruleId = Number(target.getAttribute('data-rule-delete') || 0);
+    if (!ruleId) return;
+    try {
+      const response = await fetch(`/api/expenses/category-rules/${ruleId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error || 'Failed to delete category rule');
+      }
+      await loadCategoryRules();
+    } catch (err) {
+      notifyPlaid('Error: ' + err.message, 'error');
+    }
+  });
+
   window.syncPlaidAccount = async (accountId) => {
     try {
       const response = await fetch(`/expenses/plaid/accounts/${accountId}/sync`, {
@@ -5047,6 +5212,7 @@ document.addEventListener('DOMContentLoaded', function(){
 
   // Load accounts on page load
   loadPlaidAccounts();
+  loadCategoryRules();
 
   // ============= END PLAID INTEGRATION =============
 });

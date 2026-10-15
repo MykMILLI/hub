@@ -21,9 +21,11 @@ APP_MODULES = [
     'qr_generator',
     'expense_tracker',
     'shared_calendar',
+    'daily_agenda',
     'meal_planner',
     'notifications',
     'photos',
+    'home_assistant',
     'settings',
 ]
 
@@ -55,6 +57,12 @@ def is_admin_name(name: str | None) -> bool:
     member_name = sanitize_text(name or '').strip()
     if not member_name:
         return False
+
+    current_member = sanitize_text(session.get('current_member') or '').strip()
+    supabase_role = sanitize_text(session.get('supabase_role') or '').strip().lower()
+    if supabase_role == 'admin' and current_member and member_name == current_member:
+        return True
+
     admin_name = sanitize_text(current_app.config['HOMEHUB_CONFIG'].get('admin_name', 'Administrator'))
     if member_name in {admin_name, 'Administrator', 'admin'}:
         return True

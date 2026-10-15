@@ -4,12 +4,24 @@ import hashlib
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 CONFIG_PATH = os.path.join(BASE_DIR, 'config.yml')
+DEFAULT_HOME_ASSISTANT_URL = 'https://home.millitop.net'
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = (os.getenv(name) or '').strip().lower()
+    if raw in {'1', 'true', 'yes', 'on'}:
+        return True
+    if raw in {'0', 'false', 'no', 'off'}:
+        return False
+    return bool(default)
 
 def load_config():
-    if not os.path.exists(CONFIG_PATH):
-        raise FileNotFoundError(f'config.yml not found at {CONFIG_PATH}.')
-    with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
-        config = yaml.safe_load(f) or {}
+    if os.path.exists(CONFIG_PATH):
+        with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f) or {}
+    else:
+        # Allow app startup with sensible defaults when config.yml is not present yet.
+        config = {}
     # Hash password if present
     if 'password' in config and config['password']:
         config['password_hash'] = hashlib.sha256(config['password'].encode()).hexdigest()
@@ -21,9 +33,11 @@ def load_config():
     # Personal status feature toggle (new)
     config['feature_toggles'].setdefault('personal_status', True)
     config['feature_toggles'].setdefault('shared_calendar', True)
+    config['feature_toggles'].setdefault('daily_agenda', True)
     config['feature_toggles'].setdefault('meal_planner', True)
     config['feature_toggles'].setdefault('notifications', True)
     config['feature_toggles'].setdefault('photos', True)
+    config['feature_toggles'].setdefault('home_assistant', True)
     # Reminders defaults & calendar start day (supports sunday..saturday or 0-6)
     rem = config.setdefault('reminders', {})
     # Do not overwrite existing user value
@@ -75,6 +89,54 @@ def load_config():
         'shared_cloud_add': True,
         'calendar_new_event': True,
     })
+
+    supabase = config.setdefault('supabase', {})
+    supabase.setdefault('enabled', False)
+    supabase.setdefault('auth_enabled', False)
+    supabase.setdefault('url', '')
+    supabase.setdefault('anon_key', '')
+    supabase.setdefault('service_role_key', '')
+    supabase.setdefault('schema', 'public')
+    supabase.setdefault('chat_enabled', True)
+    supabase.setdefault('chat_table', 'homehub_chat_messages')
+
+    supabase_auth_env_raw = (os.getenv('SUPABASE_AUTH_ENABLED') or '').strip()
+    supabase_auth_env_set = bool(supabase_auth_env_raw)
+
+    # Environment overrides for secure deployment flow.
+    if (os.getenv('SUPABASE_ENABLED') or '').strip():
+        supabase['enabled'] = _env_bool(
+            'SUPABASE_ENABLED',
+            bool(supabase.get('enabled', False)),
+        )
+    if supabase_auth_env_set:
+        supabase['auth_enabled'] = _env_bool(
+            'SUPABASE_AUTH_ENABLED',
+            bool(supabase.get('auth_enabled', False)),
+        )
+    supabase['url'] = (os.getenv('SUPABASE_URL') or supabase.get('url') or '').strip()
+    supabase['anon_key'] = (os.getenv('SUPABASE_ANON_KEY') or supabase.get('anon_key') or '').strip()
+    supabase['service_role_key'] = (
+        os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+        or supabase.get('service_role_key')
+        or ''
+    ).strip()
+    supabase['schema'] = (os.getenv('SUPABASE_SCHEMA') or supabase.get('schema') or 'public').strip() or 'public'
+    supabase['chat_enabled'] = _env_bool('SUPABASE_CHAT_ENABLED', bool(supabase.get('chat_enabled', True)))
+    supabase['chat_table'] = (os.getenv('SUPABASE_CHAT_TABLE') or supabase.get('chat_table') or 'homehub_chat_messages').strip() or 'homehub_chat_messages'
+
+    # Auto-enable when credentials are present, even if enabled flag is omitted.
+    if (not bool(supabase.get('enabled', False))) and supabase['url'] and supabase['anon_key']:
+        supabase['enabled'] = True
+
+    # Default to Supabase auth when Supabase is configured.
+    if (not bool(supabase.get('auth_enabled', False))) and supabase['url'] and supabase['anon_key'] and (not supabase_auth_env_set):
+        supabase['auth_enabled'] = True
+
+    # Home Assistant integration defaults
+    home_assistant = config.setdefault('home_assistant', {})
+    home_assistant.setdefault('url', DEFAULT_HOME_ASSISTANT_URL)
+    home_assistant.setdefault('auto_login_url', '')
     # Menu visibility defaults - all visible by default
     menu = config.setdefault('menu_visibility', {})
     menu.setdefault('welcome', True)
@@ -90,8 +152,10 @@ def load_config():
     menu.setdefault('qr_generator', True)
     menu.setdefault('expense_tracker', True)
     menu.setdefault('shared_calendar', True)
+    menu.setdefault('daily_agenda', True)
     menu.setdefault('meal_planner', True)
     menu.setdefault('notifications', True)
     menu.setdefault('photos', True)
+    menu.setdefault('home_assistant', True)
     menu.setdefault('settings', True)
     return config

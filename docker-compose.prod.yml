@@ -24,6 +24,12 @@ services:
       - SMTP_USER=${SMTP_USER:-}
       - SMTP_PASS=${SMTP_PASS:-}
       - SMTP_FROM=${SMTP_FROM:-}
+      - SUPABASE_ENABLED=${SUPABASE_ENABLED:-false}
+      - SUPABASE_AUTH_ENABLED=${SUPABASE_AUTH_ENABLED:-}
+      - SUPABASE_URL=${SUPABASE_URL:-}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:-}
+      - SUPABASE_SCHEMA=${SUPABASE_SCHEMA:-public}
       - TZ=${TZ:-UTC}
     volumes:
       - ./uploads:/app/uploads

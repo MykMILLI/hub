@@ -1,10 +1,34 @@
 from flask import render_template, request, redirect, url_for, flash, jsonify, current_app, session
-from datetime import datetime, date, timedelta
-from ..models import db, HomeStatus, MemberStatus, Notice, Reminder, RecurringReminder, FamilyMember, ActivityLog, FamilyNotice, FamilyNoticeAcknowledgement, HouseholdRoutineState
+from datetime import datetime, date, timedelta, time, timezone
+from zoneinfo import ZoneInfo
+from ..models import db, HomeStatus, MemberStatus, Notice, Reminder, RecurringReminder, FamilyMember, ActivityLog, FamilyNotice, FamilyNoticeAcknowledgement, HouseholdRoutineState, LibraryBookLoan, PhotoAsset, FamilyCalendarEvent, FamilyChatMessage, Chore, AppNotification
 from ..blueprints import main_bp
 from ..security import sanitize_html, sanitize_text
 from ..services.notification_service import publish_notification
 import json
+
+
+_FINANCE_ACTION_PREFIXES = (
+    'money.',
+    'expense.',
+    'income.',
+    'budget.',
+    'debt.',
+    'shared_expense.',
+)
+_FINANCE_ENTITY_TYPES = {
+    'expense_entry',
+    'income_entry',
+    'family_budget',
+    'budget_category',
+    'shared_expense',
+    'debt_account',
+    'debt_payment',
+    'financial_goal',
+    'recurring_income',
+    'recurring_expense',
+    'shared_recurring_bill',
+}
 
 
 def _parse_date_param(value, default=None):
@@ -54,6 +78,9 @@ def _build_routine_payload(state: HouseholdRoutineState) -> dict:
     completed_at = None
     if state.updated_at:
         completed_at = state.updated_at.replace(microsecond=0).isoformat() + 'Z'
+    last_completed_date = state.updated_at.date() if state.updated_at else None
+    next_bath_date = (last_completed_date + timedelta(days=2)) if last_completed_date else today
+    overdue_days = max(0, (today - next_bath_date).days)
 
     return {
         'bedtime': {
@@ -69,8 +96,80 @@ def _build_routine_payload(state: HouseholdRoutineState) -> dict:
             'harley': bath_assignment['harley'],
             'completed_by': state.updated_by or '',
             'completed_at': completed_at,
+            'next_due_date': next_bath_date.isoformat(),
+            'overdue_days': overdue_days,
         }
     }
+
+
+def emit_due_bedtime_reader_notification_for_member(member_name: str) -> int:
+    eastern = ZoneInfo('America/New_York')
+    now_utc = datetime.now(timezone.utc)
+    now_eastern = now_utc.astimezone(eastern)
+    scheduled_utc = datetime.combine(now_eastern.date(), time(20, 15), tzinfo=eastern).astimezone(timezone.utc)
+    if not (scheduled_utc <= now_utc <= scheduled_utc + timedelta(minutes=25)):
+        return 0
+    state = _get_or_create_household_routine_state(member_name)
+    reader = _bedtime_reader_for_date(state.bedtime_anchor_date or now_eastern.date(), state.bedtime_anchor_reader or 'Rachel', now_eastern.date())
+    if reader.lower() != member_name.lower():
+        return 0
+    key = f'bedtime-reader:{now_eastern.date().isoformat()}:{reader.lower()}'
+    if AppNotification.query.filter(AppNotification.event_type == 'bedtime_reader').filter(AppNotification.target_member == member_name).filter(AppNotification.payload_json.contains(key)).first():
+        return 0
+    publish_notification(event_type='bedtime_reader', title='Bedtime Reader', message='It is time for your bedtime reading assignment.', target_members=[member_name], created_by='HomeHub', payload={'reminder_key': key}, channels=['in_app', 'mobile'])
+    db.session.commit()
+    return 1
+
+
+def _is_finance_timeline_row(row: ActivityLog) -> bool:
+    action = sanitize_text(getattr(row, 'action', '') or '').strip().lower()
+    entity_type = sanitize_text(getattr(row, 'entity_type', '') or '').strip().lower()
+    if any(action.startswith(prefix) for prefix in _FINANCE_ACTION_PREFIXES):
+        return True
+    if entity_type in _FINANCE_ENTITY_TYPES:
+        return True
+    return False
+
+
+def _parse_iso_datetime(value: str | None) -> datetime | None:
+    text = sanitize_text(str(value or '')).strip()
+    if not text:
+        return None
+    normalized = text.replace('Z', '+00:00')
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except Exception:
+        return None
+    if parsed.tzinfo is not None:
+        try:
+            parsed = parsed.astimezone(tz=None).replace(tzinfo=None)
+        except Exception:
+            parsed = parsed.replace(tzinfo=None)
+    return parsed
+
+
+def _task_mentions_member(chore: Chore, member_name: str) -> bool:
+    name_key = sanitize_text(member_name or '').strip().lower()
+    if not name_key:
+        return False
+    try:
+        mentions = json.loads(chore.mentions_json or '[]')
+    except Exception:
+        mentions = []
+    if not isinstance(mentions, list):
+        return False
+    for item in mentions:
+        mention = sanitize_text(str(item or '')).strip().lower()
+        if mention == name_key:
+            return True
+    return False
+
+
+def _coalesce_timestamp(*values):
+    for value in values:
+        if isinstance(value, datetime):
+            return value
+    return None
 
 
 @main_bp.route('/')
@@ -83,6 +182,10 @@ def index():
     current_member_status_text = ''
     if current_member_row and (current_member_row.status or '').strip():
         current_member_status_text = current_member_row.status
+    assigned_open_tasks = (Chore.query.filter(Chore.done.is_(False))
+                          .filter(db.func.lower(Chore.assignee) == current_member_name.lower())
+                          .filter(db.func.lower(Chore.task_type) != 'chore')
+                          .order_by(Chore.due_date.asc(), Chore.updated_at.desc()).all())
     notice = Notice.query.order_by(Notice.updated_at.desc()).first()
     # Calendar: gather reminders grouped by date
     try:
@@ -149,15 +252,45 @@ def index():
     # Pass Python object; template will use |tojson safely
     timeline_posts = []
     try:
-        timeline_posts = (
+        timeline_rows = (
             ActivityLog.query
             .filter(ActivityLog.visibility == 'family')
             .order_by(ActivityLog.timestamp.desc(), ActivityLog.id.desc())
-            .limit(5)
+            .limit(40)
             .all()
         )
+        timeline_posts = [row for row in timeline_rows if not _is_finance_timeline_row(row)][:5]
     except Exception:
         timeline_posts = []
+
+    timeline_media_items = []
+    try:
+        media_rows = (
+            PhotoAsset.query
+            .filter(PhotoAsset.visibility == 'family')
+            .order_by(PhotoAsset.uploaded_at.desc(), PhotoAsset.id.desc())
+            .limit(10)
+            .all()
+        )
+        timeline_media_items = [
+            {
+                'id': row.id,
+                'filename': row.filename,
+                'original_filename': row.original_filename or row.filename,
+                'uploader': row.uploader or '',
+                'is_video': bool(row.is_video),
+                'preview_url': f"/uploads/photos/preview/{row.filename}",
+                'uploaded_at': row.uploaded_at.isoformat() if row.uploaded_at else None,
+                'uploaded_at_display': row.uploaded_at.strftime('%b %d, %I:%M %p') if row.uploaded_at else '',
+            }
+            for row in media_rows
+            if (row.filename or '').strip()
+        ]
+    except Exception:
+        timeline_media_items = []
+
+    # Disabled per request: remove photos/videos from Timeline surfaces.
+    timeline_media_items = []
 
     recent_notice_rows = FamilyNotice.query.filter_by(sender=current_member_name).order_by(FamilyNotice.created_at.desc()).limit(5).all()
     family_notice_summary = []
@@ -198,11 +331,214 @@ def index():
         family_status_times=family_status_times,
         family_avatars=family_avatars,
         family_members_data=family_members_data,
+        assigned_open_tasks=assigned_open_tasks,
         current_member_name=current_member_name,
         current_member_status_text=current_member_status_text,
+        welcome_modal_pending=bool(session.get('show_welcome_modal')),
+        current_member_mini_slideshow_enabled=bool(getattr(current_member_row, 'mini_slideshow_enabled', False)),
         family_notice_summary=family_notice_summary,
         routines=routines,
+        timeline_media_items=timeline_media_items,
     )
+
+
+@main_bp.route('/api/dashboard/missed-updates', methods=['GET'])
+def api_dashboard_missed_updates():
+    member_name = sanitize_text(session.get('current_member') or '').strip()
+    if not member_name:
+        return jsonify({'ok': False, 'error': 'Authentication required'}), 401
+
+    member = FamilyMember.query.filter_by(name=member_name).first()
+    from_session = _parse_iso_datetime(session.get('welcome_last_seen_at'))
+    since_dt = from_session or (member.last_hub_seen_at if member else None) or (datetime.utcnow() - timedelta(days=14))
+    since_dt = min(since_dt, datetime.utcnow())
+
+    calendar_rows = (
+        FamilyCalendarEvent.query
+        .filter(FamilyCalendarEvent.visibility == 'family')
+        .filter(FamilyCalendarEvent.created_at >= since_dt)
+        .filter(FamilyCalendarEvent.created_by != member_name)
+        .order_by(FamilyCalendarEvent.created_at.desc(), FamilyCalendarEvent.id.desc())
+        .limit(8)
+        .all()
+    )
+
+    message_rows = (
+        FamilyChatMessage.query
+        .filter(FamilyChatMessage.recipient == member_name)
+        .filter(FamilyChatMessage.created_at >= since_dt)
+        .order_by(FamilyChatMessage.created_at.desc(), FamilyChatMessage.id.desc())
+        .limit(8)
+        .all()
+    )
+
+    chore_candidates = (
+        Chore.query
+        .filter((Chore.timestamp >= since_dt) | (Chore.updated_at >= since_dt))
+        .order_by(Chore.updated_at.desc(), Chore.timestamp.desc(), Chore.id.desc())
+        .limit(80)
+        .all()
+    )
+    task_rows = []
+    for row in chore_candidates:
+        assignee = sanitize_text(row.assignee or '').strip().lower()
+        is_assigned = bool(assignee and assignee == member_name.lower())
+        is_mentioned = _task_mentions_member(row, member_name)
+        if not (is_assigned or is_mentioned):
+            continue
+        if sanitize_text(row.creator or '').strip().lower() == member_name.lower() and not is_mentioned:
+            continue
+        task_rows.append(row)
+        if len(task_rows) >= 8:
+            break
+
+    calendar_items = [
+        {
+            'title': sanitize_text(row.title or 'Calendar event').strip() or 'Calendar event',
+            'subtitle': f"Added by {sanitize_text(row.created_by or 'Family').strip() or 'Family'}",
+            'timestamp': row.created_at.isoformat() if row.created_at else None,
+        }
+        for row in calendar_rows
+    ]
+    message_items = [
+        {
+            'title': f"New message from {sanitize_text(row.sender or 'Family').strip() or 'Family'}",
+            'subtitle': 'Message received',
+            'timestamp': row.created_at.isoformat() if row.created_at else None,
+        }
+        for row in message_rows
+    ]
+    task_items = [
+        {
+            'title': sanitize_text(row.description or 'Task update').strip() or 'Task update',
+            'subtitle': f"From {sanitize_text(row.creator or 'Family').strip() or 'Family'}",
+            'timestamp': _coalesce_timestamp(row.updated_at, row.timestamp).isoformat() if _coalesce_timestamp(row.updated_at, row.timestamp) else None,
+        }
+        for row in task_rows
+        if (sanitize_text(getattr(row, 'task_type', '') or '').strip().lower() != 'chore')
+    ]
+
+    # Open chores assigned to this member always show, regardless of when they were created.
+    assigned_chores = (
+        Chore.query
+        .filter(Chore.done.is_(False))
+        .filter(db.func.lower(Chore.assignee) == member_name.lower())
+        .filter(db.func.lower(Chore.task_type) == 'chore')
+        .order_by(Chore.due_date.asc(), Chore.id.desc())
+        .limit(12)
+        .all()
+    )
+    chore_items = [
+        {
+            'title': sanitize_text(row.description or 'Chore').strip() or 'Chore',
+            'subtitle': ('Due ' + row.due_date.isoformat()) if row.due_date else 'No due date',
+            'timestamp': None,
+        }
+        for row in assigned_chores
+    ]
+
+    today = date.today()
+    birthday_items = []
+    seen_birthdays = set()
+    for m in FamilyMember.query.filter(FamilyMember.birthday.isnot(None)).all():
+        if m.birthday.month != today.month:
+            continue
+        nm = sanitize_text(m.name or '').strip()
+        seen_birthdays.add(nm.lower())
+        birthday_items.append((m.birthday.day, nm, m.birthday))
+    for ev in FamilyCalendarEvent.query.filter(FamilyCalendarEvent.event_type == 'birthday').all():
+        if not ev.start_date or ev.start_date.month != today.month:
+            continue
+        nm = sanitize_text(ev.title or '').strip()
+        if nm.lower().startswith('birthday:'):
+            nm = nm.split(':', 1)[1].strip()
+        if not nm or nm.lower() in seen_birthdays:
+            continue
+        seen_birthdays.add(nm.lower())
+        birthday_items.append((ev.start_date.day, nm, ev.start_date))
+    birthday_items.sort(key=lambda t: (t[0], t[1].lower()))
+    birthday_items = [
+        {
+            'title': f"{nm}'s birthday" + (' — today!' if day == today.day else ''),
+            'subtitle': bd.strftime('%B %d'),
+            'timestamp': None,
+        }
+        for day, nm, bd in birthday_items
+    ]
+    birthday_modal_eligible = session.get('welcome_last_birthday_modal_date') != today.isoformat()
+
+    sections = [
+        {
+            'key': 'birthdays',
+            'title': 'Birthdays this month',
+            'icon': 'fa-cake-candles',
+            'href': '/calendar',
+            'count': len(birthday_items) if birthday_modal_eligible else 0,
+            'items': birthday_items if birthday_modal_eligible else [],
+        },
+        {
+            'key': 'chores',
+            'title': 'Chores assigned to you',
+            'icon': 'fa-broom',
+            'href': '/chores?tab=chores',
+            'count': len(chore_items),
+            'items': chore_items,
+        },
+        {
+            'key': 'calendar',
+            'title': 'Calendar updates',
+            'icon': 'fa-calendar-days',
+            'href': '/calendar',
+            'count': len(calendar_items),
+            'items': calendar_items,
+        },
+        {
+            'key': 'messages',
+            'title': 'Messages you missed',
+            'icon': 'fa-comments',
+            'href': '/messages',
+            'count': len(message_items),
+            'items': message_items,
+        },
+        {
+            'key': 'tasks',
+            'title': 'Task updates for you',
+            'icon': 'fa-list-check',
+            'href': '/chores?tab=todo',
+            'count': len(task_items),
+            'items': task_items,
+        },
+    ]
+    sections = [s for s in sections if s['count'] > 0]
+
+    total_updates = sum(section['count'] for section in sections)
+    return jsonify({
+        'ok': True,
+        'should_show': total_updates > 0,
+        'since': since_dt.isoformat() if since_dt else None,
+        'no_updates': total_updates == 0,
+        'total_updates': total_updates,
+        'sections': sections,
+    })
+
+
+@main_bp.route('/api/dashboard/missed-updates/ack', methods=['POST'])
+def api_dashboard_missed_updates_ack():
+    member_name = sanitize_text(session.get('current_member') or '').strip()
+    if not member_name:
+        return jsonify({'ok': False, 'error': 'Authentication required'}), 401
+
+    now = datetime.utcnow()
+    member = FamilyMember.query.filter_by(name=member_name).first()
+    if member:
+        member.last_hub_seen_at = now
+        db.session.add(member)
+        db.session.commit()
+
+    session['show_welcome_modal'] = False
+    session['welcome_last_seen_at'] = now.isoformat()
+    session['welcome_last_birthday_modal_date'] = now.date().isoformat()
+    return jsonify({'ok': True, 'seen_at': now.isoformat()})
 
 
 @main_bp.route('/api/routines/bath/complete', methods=['POST'])
@@ -222,6 +558,104 @@ def api_routine_snapshot():
     actor = sanitize_text(session.get('current_member') or '').strip() or sanitize_text(current_app.config.get('HOMEHUB_CONFIG', {}).get('admin_name', 'Administrator'))
     row = _get_or_create_household_routine_state(actor)
     return jsonify({'ok': True, 'routines': _build_routine_payload(row)})
+
+
+def _serialize_library_book(row: LibraryBookLoan) -> dict:
+    return {
+        'id': row.id,
+        'child_name': row.child_name,
+        'title': row.title,
+        'due_date': row.due_date.isoformat() if row.due_date else None,
+        'reminder_date': row.reminder_date.isoformat() if row.reminder_date else None,
+        'reminder_time': row.reminder_time or '08:00',
+        'calendar_event_id': row.calendar_event_id,
+    }
+
+
+def _parse_library_date(value, fallback=None):
+    if not value:
+        return fallback
+    return datetime.strptime(str(value), '%Y-%m-%d').date()
+
+
+def _sync_library_book_reminder(row: LibraryBookLoan, actor: str) -> None:
+    reminder_date = row.reminder_date or (date.today() + timedelta(days=1))
+    try:
+        reminder_time = datetime.strptime(row.reminder_time or '08:00', '%H:%M').time()
+    except ValueError:
+        reminder_time = datetime.strptime('08:00', '%H:%M').time()
+        row.reminder_time = '08:00'
+    event = db.session.get(FamilyCalendarEvent, row.calendar_event_id) if row.calendar_event_id else None
+    if not event:
+        event = FamilyCalendarEvent(
+            created_by=actor,
+            title=f'Return library book: {row.title}'[:256],
+            start_date=reminder_date,
+            end_date=reminder_date,
+        )
+        db.session.add(event)
+        db.session.flush()
+        row.calendar_event_id = event.id
+    event.event_type = 'reminder'
+    event.title = f'Return library book: {row.title}'[:256]
+    event.description_html = f'{row.child_name} has this library book checked out. Please return it.'
+    event.color = '#8b5cf6'
+    event.start_date = reminder_date
+    event.end_date = reminder_date
+    event.start_time = row.reminder_time
+    event.end_time = None
+    event.reminder_at = datetime.combine(reminder_date, reminder_time)
+    event.is_all_day = False
+    event.visibility = 'family'
+    event.is_recurring = False
+    event.recurrence_frequency = None
+    event.recurrence_until = None
+    event.recurrence_count = None
+    event.invited_members_json = json.dumps([row.child_name])
+
+
+@main_bp.route('/api/routines/library-books', methods=['GET'])
+def api_library_books_list():
+    rows = LibraryBookLoan.query.order_by(LibraryBookLoan.reminder_date.asc(), LibraryBookLoan.id.asc()).all()
+    return jsonify({'ok': True, 'books': [_serialize_library_book(row) for row in rows]})
+
+
+@main_bp.route('/api/routines/library-books', methods=['POST'])
+def api_library_books_create():
+    data = request.get_json(silent=True) or {}
+    child_name = sanitize_text(data.get('child_name') or '').strip()
+    title = sanitize_text(data.get('title') or '').strip()
+    if child_name not in {'Avery', 'Harley'}:
+        return jsonify({'ok': False, 'error': 'Select Avery or Harley'}), 400
+    if not title:
+        return jsonify({'ok': False, 'error': 'Book title is required'}), 400
+    try:
+        reminder_date = _parse_library_date(data.get('reminder_date'), date.today() + timedelta(days=1))
+        due_date = _parse_library_date(data.get('due_date'))
+        reminder_time = datetime.strptime(str(data.get('reminder_time') or '08:00'), '%H:%M').strftime('%H:%M')
+    except ValueError:
+        return jsonify({'ok': False, 'error': 'Use valid dates and a valid reminder time'}), 400
+    actor = sanitize_text(session.get('current_member') or '').strip() or 'system'
+    row = LibraryBookLoan(child_name=child_name, title=title[:256], due_date=due_date, reminder_date=reminder_date, reminder_time=reminder_time, created_by=actor)
+    db.session.add(row)
+    db.session.flush()
+    _sync_library_book_reminder(row, actor)
+    db.session.commit()
+    return jsonify({'ok': True, 'book': _serialize_library_book(row)}), 201
+
+
+@main_bp.route('/api/routines/library-books/<int:book_id>', methods=['DELETE'])
+def api_library_books_delete(book_id):
+    row = LibraryBookLoan.query.get_or_404(book_id)
+    actor = sanitize_text(session.get('current_member') or '').strip()
+    if row.created_by != actor and actor != sanitize_text(current_app.config['HOMEHUB_CONFIG'].get('admin_name', '')).strip():
+        return jsonify({'ok': False, 'error': 'Not allowed'}), 403
+    event = db.session.get(FamilyCalendarEvent, row.calendar_event_id) if row.calendar_event_id else None
+    if event:
+        db.session.delete(event)
+    db.session.delete(row)
+    db.session.commit()
+    return jsonify({'ok': True})
 
 
 def _serialize_reminder(r: Reminder):
@@ -740,6 +1174,7 @@ def api_send_family_notice():
             payload={'family_notice_id': notice.id, 'sender': sender},
             channels=normalized_channels,
         )
+        db.session.commit()
 
         return jsonify({
             'ok': True,

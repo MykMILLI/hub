@@ -6,6 +6,13 @@ import hashlib
 import bleach
 
 
+def _supabase_auth_enabled(cfg: dict) -> bool:
+    supa = cfg.get('supabase') if isinstance(cfg, dict) else {}
+    if not isinstance(supa, dict):
+        return False
+    return bool(supa.get('auth_enabled', False))
+
+
 @main_bp.before_app_request
 def reload_config_and_auth():
     try:
@@ -13,6 +20,7 @@ def reload_config_and_auth():
     except Exception:
         pass
     cfg = current_app.config.get('HOMEHUB_CONFIG', {})
+    supabase_auth = _supabase_auth_enabled(cfg)
     
     # Load hub settings and make available to all templates
     try:
@@ -37,38 +45,54 @@ def reload_config_and_auth():
         cfg['family_members'] = cfg.get('family_members', [])
     
     endpoint = request.endpoint or ''
+    path = (request.path or '').strip()
 
-    shared_guest_mode = bool(session.get('shared_guest_mode'))
-    shared_calendar_token = str(session.get('shared_calendar_token') or '').strip()
-    if shared_guest_mode and shared_calendar_token:
-        allowed_shared_endpoints = {
-            'main.calendar_shared',
-            'main.api_calendar_shared_events',
-            'main.api_calendar_ics_feed',
-            'main.uploaded_calendar_photo',
-            'main.api_auth_status',
-            'main.api_auth_login',
-            'main.api_member_login',
-            'main.api_member_set_pin',
-            'main.login',
+    # Keep authenticated/member sessions alive with sliding expiration.
+    if session.get('authed') or session.get('current_member'):
+        session.permanent = True
+
+    if path.startswith('/api/'):
+        if not supabase_auth:
+            return None
+
+        public_api_paths = {
+            '/api/auth/status',
+            '/api/auth/login',
+            '/api/auth/logout',
+            '/api/member-login',
+            '/api/member-logout',
+            '/api/current-member',
+            '/api/member/set-pin',
+            '/api/supabase/auth/login',
+            '/api/supabase/auth/me',
+            '/api/supabase/auth/logout',
+            '/api/supabase/client-config',
         }
-        is_static = endpoint.startswith('static')
-        if not is_static and endpoint not in allowed_shared_endpoints:
-            if endpoint.startswith('main.api_'):
-                return jsonify({'ok': False, 'error': 'Shared calendar links only allow calendar access'}), 403
-            return redirect(url_for('main.calendar_shared', token=shared_calendar_token))
-
-    if endpoint.startswith('main.api_'):
+        if path in public_api_paths:
+            return None
+        if not session.get('current_member'):
+            return jsonify({'ok': False, 'error': 'Authentication required'}), 401
         return None
+
     public_endpoints = {
         'main.login',
-        'main.calendar_shared',
-        'main.api_calendar_shared_events',
         'main.api_auth_status',
         'main.api_auth_login',
         'main.api_member_login',
         'main.api_member_set_pin',
+        'main.api_supabase_auth_login',
+        'main.api_supabase_auth_me',
+        'main.api_supabase_auth_logout',
+        'main.api_supabase_client_config',
     }
+
+    if supabase_auth:
+        if endpoint == 'main.login' and session.get('current_member'):
+            return redirect(url_for('main.index'))
+        if not session.get('current_member') and not endpoint.startswith('static') and endpoint not in public_endpoints:
+            return redirect(url_for('main.login'))
+        return None
+
     if cfg.get('password_hash'):
         if not session.get('authed') and not endpoint.startswith('static') and endpoint not in public_endpoints:
             return redirect(url_for('main.login'))
@@ -80,23 +104,37 @@ def reload_config_and_auth():
 @main_bp.route('/login', methods=['GET', 'POST'])
 def login():
     config = current_app.config['HOMEHUB_CONFIG']
+    if _supabase_auth_enabled(config):
+        if session.get('current_member'):
+            return redirect(url_for('main.index'))
+        return render_template('login.html', config=config, hide_user_ui=True, supabase_auth_enabled=True)
+
     if not config.get('password_hash'):
         return redirect(url_for('main.index'))
     if request.method == 'POST':
         supplied = bleach.clean(request.form.get('password', ''))
         if hashlib.sha256(supplied.encode()).hexdigest() == config.get('password_hash'):
             session['authed'] = True
+            session.permanent = True
             flash('Logged in successfully.', 'success')
             return redirect(url_for('main.index'))
         flash('Invalid password', 'error')
-    return render_template('login.html', config=config, hide_user_ui=True)
+    return render_template('login.html', config=config, hide_user_ui=True, supabase_auth_enabled=False)
 
 
 @main_bp.route('/logout')
 def logout():
     session.pop('authed', None)
-    session.pop('shared_guest_mode', None)
-    session.pop('shared_calendar_token', None)
+    session.pop('current_member', None)
+    session.pop('supabase_account', None)
+    session.pop('supabase_user', None)
+    session.pop('supabase_user_id', None)
+    session.pop('supabase_email', None)
+    session.pop('supabase_role', None)
+    session.pop('supabase_access_token', None)
+    session.pop('supabase_refresh_token', None)
+    session.pop('show_welcome_modal', None)
+    session.pop('welcome_last_seen_at', None)
     flash('Logged out.', 'info')
     return redirect(url_for('main.login'))
 
@@ -104,8 +142,15 @@ def logout():
 @main_bp.route('/api/auth/status', methods=['GET'])
 def api_auth_status():
     config = current_app.config.get('HOMEHUB_CONFIG', {})
-    requires_password = bool(config.get('password_hash'))
-    authed = bool(session.get('authed')) if requires_password else True
+    supabase_auth = _supabase_auth_enabled(config)
+    requires_password = bool(config.get('password_hash')) and not supabase_auth
+    supabase_authenticated = bool(session.get('supabase_user_id') or session.get('supabase_user'))
+    has_member = bool((session.get('current_member') or '').strip())
+    if supabase_auth:
+        authed = supabase_authenticated and has_member
+    else:
+        base_authed = bool(session.get('authed')) if requires_password else True
+        authed = base_authed and has_member
 
     members_payload = []
     try:
@@ -135,6 +180,10 @@ def api_auth_status():
 
     return jsonify({
         'ok': True,
+        'auth_mode': 'supabase' if supabase_auth else 'password_pin',
+        'supabase_auth_enabled': supabase_auth,
+        'supabase_authenticated': supabase_authenticated,
+        'account': session.get('supabase_account') if isinstance(session.get('supabase_account'), dict) else None,
         'requires_password': requires_password,
         'authed': authed,
         'current_member': session.get('current_member'),
@@ -145,8 +194,12 @@ def api_auth_status():
 @main_bp.route('/api/auth/login', methods=['POST'])
 def api_auth_login():
     config = current_app.config.get('HOMEHUB_CONFIG', {})
+    if _supabase_auth_enabled(config):
+        return jsonify({'ok': False, 'error': 'Use Supabase login for this hub'}), 403
+
     if not config.get('password_hash'):
         session['authed'] = True
+        session.permanent = True
         return jsonify({'ok': True, 'message': 'Password disabled'})
 
     data = request.get_json(silent=True) or {}
@@ -155,8 +208,7 @@ def api_auth_login():
         return jsonify({'ok': False, 'error': 'Invalid password'}), 403
 
     session['authed'] = True
-    session.pop('shared_guest_mode', None)
-    session.pop('shared_calendar_token', None)
+    session.permanent = True
     return jsonify({'ok': True, 'message': 'Authenticated'})
 
 
@@ -164,6 +216,13 @@ def api_auth_login():
 def api_auth_logout():
     session.pop('authed', None)
     session.pop('current_member', None)
-    session.pop('shared_guest_mode', None)
-    session.pop('shared_calendar_token', None)
+    session.pop('supabase_account', None)
+    session.pop('supabase_user', None)
+    session.pop('supabase_user_id', None)
+    session.pop('supabase_email', None)
+    session.pop('supabase_role', None)
+    session.pop('supabase_access_token', None)
+    session.pop('supabase_refresh_token', None)
+    session.pop('show_welcome_modal', None)
+    session.pop('welcome_last_seen_at', None)
     return jsonify({'ok': True, 'message': 'Logged out'})

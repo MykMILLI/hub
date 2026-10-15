@@ -34,13 +34,58 @@ window.REMINDERS_TIME_FORMAT = "{{ (config.reminders.time_format if config.remin
 		border-color: var(--primary-color);
 		box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
 	}
+	.date-square { width: 13rem; aspect-ratio: 1; background: #fdfcf9; color: #111; box-shadow: 0 5px 14px rgba(0,0,0,.22); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+	.date-square-month { font-size: 1.45rem; font-weight: 900; letter-spacing: -.08em; }
+	.date-square-day { font-size: 5.5rem; font-weight: 900; line-height: .85; }
+	.date-square-weekday { margin-top: 1rem; font-size: .65rem; font-weight: 700; letter-spacing: .22em; color: #7b8190; }
+	.weather-widget #forecast-section { display: block !important; }
+	.weather-widget .weather-header { margin-bottom: .65rem; padding-bottom: .5rem; }
+	.weather-widget .current-weather { margin-bottom: 0; }
+	.weather-widget .current-weather > div { margin-bottom: 0; align-items: center; }
+	.weather-widget #weather-icon { font-size: 2.5rem; }
+	.weather-widget #temperature { font-size: 2rem; }
+	.weather-widget #forecast-container { display:flex; gap:.45rem; overflow-x:auto; padding-bottom:.15rem; }
+	.weather-widget #forecast-container > * { flex:0 0 auto; }
+	#welcomeOverviewLayout { display:grid; grid-template-columns:minmax(0,2fr) minmax(250px,.9fr); gap:1rem; }
+	#welcomeTopRow { display:grid; grid-template-columns:minmax(0,1.5fr) minmax(250px,.85fr); gap:1rem; grid-column:1 / -1; }
+	#welcomeCalendar { grid-column:1; }
+	#familyNoticeCard { grid-column:2; }
+	@media (max-width: 900px) { #welcomeOverviewLayout,#welcomeTopRow { display:block; } #welcomeOverviewLayout > *,#welcomeTopRow > * { margin-bottom:1rem; } }
 </style>
 {% endblock %}
 
 {% block content %}
 <!-- Legacy reminders bootstrap (used by client calendar + security tests) -->
 <script id="legacyRemindersData" type="application/json">{{ reminders_data|tojson|safe }}</script>
+{# Disabled per request: interactive/mini slideshow bootstrap data #}
+{# <script id="miniSlideshowData" type="application/json">{{ (timeline_media_items or [])|tojson|safe }}</script> #}
 <div class="max-w-screen-2xl mx-auto space-y-6">
+	<div id="welcomeModalState" class="hidden" data-pending="{{ '1' if welcome_modal_pending else '0' }}"></div>
+	<div id="missedUpdatesModal" class="hidden fixed inset-0 bg-black/70 z-[80] items-center justify-center p-4 sm:p-6">
+		<div class="glass-lg w-full max-w-3xl max-h-[calc(100vh-3rem)] overflow-y-auto rounded-3xl border border-white/20 shadow-2xl p-5 sm:p-6">
+			<div class="flex items-start justify-between gap-3 mb-3">
+				<div>
+					<h2 class="text-xl sm:text-2xl font-bold text-m3-on-surface">Welcome Back</h2>
+					<p id="missedUpdatesSummary" class="text-sm text-m3-on-surface-variant mt-1">Checking what you missed...</p>
+				</div>
+				<button id="missedUpdatesClose" type="button" class="btn btn-secondary text-xs">Skip</button>
+			</div>
+
+			<div id="missedUpdatesEmpty" class="hidden rounded-xl border border-emerald-200 dark:border-emerald-700 bg-emerald-50/80 dark:bg-emerald-900/20 p-4 text-sm text-emerald-800 dark:text-emerald-200">
+				No updates since your last login. You are all caught up.
+			</div>
+
+			<div id="missedUpdatesSections" class="space-y-3"></div>
+
+			<div class="mt-5 flex flex-wrap justify-end gap-2">
+				<button id="missedUpdatesMuteHour" type="button" class="btn btn-secondary">Mute for 1 hour</button>
+				<button id="missedUpdatesMuteDay" type="button" class="btn btn-secondary">Mute for today</button>
+				<a href="/daily-agenda" class="btn btn-primary"><i class="fa-solid fa-route mr-1"></i>Go to Daily Agenda</a>
+				<button id="missedUpdatesSkip" type="button" class="btn btn-secondary">Go To Dashboard</button>
+			</div>
+		</div>
+	</div>
+
 	<!-- Header (screenshot-style) -->
 	<div class="card p-6">
 		<div class="flex flex-wrap items-start justify-between gap-3">
@@ -55,21 +100,22 @@ window.REMINDERS_TIME_FORMAT = "{{ (config.reminders.time_format if config.remin
 				<i class="fa-solid fa-bullhorn mr-1"></i>Send Family Notice
 			</button>
 		</div>
-		{% if config.feature_toggles.personal_status %}
-		<form id="memberForm" method="POST" action="/personal-status" onsubmit="return false" class="mt-4 grid grid-cols-1 md:grid-cols-12 gap-2">
-			<input type="hidden" name="name" id="memberStatusName" value="">
-			<textarea name="text" rows="2" class="md:col-span-10 w-full border rounded-lg p-3 text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="Update my status..."></textarea>
-			<div class="md:col-span-2 flex md:flex-col gap-2">
-				<button type="submit" class="btn btn-primary flex-1 text-sm">Save</button>
-				<button type="button" id="memberStatusDeleteBtn" class="btn flex-1 text-sm">Clear</button>
-			</div>
-		</form>
-		{% endif %}
+	</div>
+
+	<!-- Compact family stats directly under the notice action -->
+	<div class="card p-4">
+		<div class="flex flex-wrap items-center gap-2">
+			<button id="openFamilyMembers" type="button" class="px-4 py-2 rounded-full font-bold text-indigo-800 dark:text-indigo-100 bg-indigo-100 dark:bg-indigo-900/40 hover:ring-2 hover:ring-indigo-400"><b class="text-xl">{{ family_members|length if family_members else 0 }}</b> Members</button>
+			<button id="openAssignedTasks" type="button" class="px-4 py-2 rounded-full font-bold text-orange-800 dark:text-orange-100 bg-orange-100 dark:bg-orange-900/40 hover:ring-2 hover:ring-orange-400"><b class="text-xl">{{ assigned_open_tasks|length }}</b> Tasks</button>
+			<span class="ml-auto text-xs text-gray-500 dark:text-gray-400"><i class="fa-solid fa-circle-info mr-1"></i>Change your location from your profile avatar.</span>
+		</div>
+		<div id="welcomeOverviewLayout"><div id="welcomeTopRow"></div></div>
+		<div id="assignedTasksModal" class="hidden fixed inset-0 z-[70] bg-black/60 p-4 sm:p-6 items-center justify-center"><div class="card w-full max-w-xl max-h-[calc(100vh-2rem)] overflow-y-auto p-5 rounded-2xl"><div class="flex justify-between gap-3"><h3 class="text-xl font-bold">Tasks assigned to you</h3><button id="closeAssignedTasks" class="btn btn-secondary">Close</button></div><div class="mt-4 space-y-2">{% for task in assigned_open_tasks %}<a href="/chores?tab=todo" class="block rounded-lg border border-gray-200 dark:border-gray-700 p-3 hover:border-violet-400"><b>{{ task.description }}</b>{% if task.due_date %}<span class="block text-xs text-gray-500 mt-1">Due {{ task.due_date.strftime('%b %d') }}</span>{% endif %}</a>{% else %}<p class="text-sm text-gray-500">No open tasks are assigned to you.</p>{% endfor %}</div></div></div>
 	</div>
 
 	<!-- Weather Widget (if enabled) -->
 	{% if config.weather and config.weather.enabled %}
-	<div class="weather-widget card p-6 md:p-8">
+	<div class="weather-widget card p-3 md:p-4">
 		<!-- Loading State -->
 		<div id="weather-loading" class="text-center text-gray-500 py-6">
 			<i class="fa-solid fa-spinner fa-spin text-3xl mb-3" style="color: var(--primary-color);"></i>
@@ -158,24 +204,12 @@ window.REMINDERS_TIME_FORMAT = "{{ (config.reminders.time_format if config.remin
 	</div>
 	{% endif %}
 
-	<!-- Family Stats (screenshot-style) -->
-	<div class="card p-6">
-		<h2 class="text-lg font-bold mb-4">Family Stats</h2>
-		<div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-			<div class="card p-4">
-				<div class="text-xs text-gray-500 dark:text-gray-400">Members</div>
-				<div class="text-2xl font-bold text-gray-800 dark:text-white">{{ family_members|length if family_members else 0 }}</div>
-			</div>
-			<div class="card p-4">
-				<div class="text-xs text-gray-500 dark:text-gray-400">Tasks</div>
-				<div class="text-2xl font-bold text-gray-800 dark:text-white">0</div>
-			</div>
-			<div class="card p-4">
-				<div class="text-xs text-gray-500 dark:text-gray-400">Photos</div>
-				<div class="text-2xl font-bold text-gray-800 dark:text-white">0</div>
-			</div>
-		</div>
-		<div class="mt-5 pt-4 border-t border-gray-200 dark:border-gray-700">
+	<!-- Family members -->
+	<div id="familyMembersModal" class="hidden fixed inset-0 z-[70] bg-black/60 p-4 sm:p-6 items-center justify-center">
+	<div class="card w-full max-w-2xl max-h-[calc(100vh-2rem)] overflow-y-auto p-6 rounded-2xl">
+	<div>
+		<div class="flex items-center justify-between gap-3"><div class="text-lg font-bold text-gray-700 dark:text-gray-200 mb-3">Family Members</div><button id="closeFamilyMembers" type="button" class="btn btn-secondary text-sm">Close</button></div>
+		<div>
 			<div class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">Family Members</div>
 			{% if family_members and family_statuses %}
 			<div class="flex flex-wrap gap-3">
@@ -200,25 +234,29 @@ window.REMINDERS_TIME_FORMAT = "{{ (config.reminders.time_format if config.remin
 					</button>
 				{% endfor %}
 			</div>
+			</div>
+			</div>
 			{% else %}
 			<p class="text-gray-500 text-sm">No family members yet. Add some in Settings!</p>
 			{% endif %}
 		</div>
 	</div>
 
-	<div class="card p-6">
+	<div id="routinesCard" class="card p-6">
 		<div class="flex items-center justify-between gap-2 mb-4">
-			<h2 class="text-lg font-bold">Bath Time &amp; Bedtime</h2>
-			<span class="text-xs text-gray-500 dark:text-gray-400">Assignments</span>
+			<h2 class="text-lg font-bold">Routines</h2>
 		</div>
-		<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-			<div class="rounded-lg border border-gray-200 dark:border-gray-700 p-4 bg-white/80 dark:bg-gray-900/40">
-				<div class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Bedtime Reader (Tonight)</div>
-				<div id="bedtimeReaderLabel" class="mt-1 text-xl font-bold text-gray-900 dark:text-white">{{ routines.bedtime.reader if routines and routines.bedtime else 'Rachel' }}</div>
-				<div id="bedtimeReaderMeta" class="mt-1 text-sm text-gray-600 dark:text-gray-300">Switches nightly between Rachel and Mykal.</div>
+		<div class="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-4">
+			<div class="rounded-2xl border border-gray-200 dark:border-gray-700 p-4 bg-white/80 dark:bg-gray-900/40 flex items-center justify-center">
+				<div class="date-square">
+					<div id="bedtimeMonth" class="date-square-month">OCTOBER</div>
+					<div id="bedtimeDay" class="date-square-day">14</div>
+					<div class="date-square-weekday">WEDNESDAY · 2026</div>
+				</div>
 			</div>
-			<div class="rounded-lg border border-gray-200 dark:border-gray-700 p-4 bg-white/80 dark:bg-gray-900/40">
-				<div class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Bath Time Pairings</div>
+			<div class="space-y-3"><div class="rounded-2xl border border-gray-200 dark:border-gray-700 p-5 bg-white/80 dark:bg-gray-900/40"><div class="flex gap-4 items-center"><span class="w-12 h-12 rounded-xl bg-violet-100 text-violet-600 inline-flex items-center justify-center text-2xl"><i class="fa-solid fa-moon"></i></span><div><div class="text-xs uppercase tracking-wide text-gray-500">Bedtime Reader</div><div id="bedtimeReaderLabel" class="text-2xl font-bold">{{ routines.bedtime.reader if routines and routines.bedtime else 'Rachel' }}</div><div id="bedtimeReaderMeta" class="text-sm text-gray-500">Story time.</div></div></div></div>
+			<div class="rounded-2xl border border-gray-200 dark:border-gray-700 p-5 bg-white/80 dark:bg-gray-900/40">
+				<div class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Bath Time</div>
 				<div class="mt-2 space-y-1 text-sm">
 					<div><span class="font-semibold text-gray-700 dark:text-gray-200">Avery:</span> <span id="bathAveryLabel">{{ routines.bath.avery if routines and routines.bath else 'Avery & Mommy' }}</span></div>
 					<div><span class="font-semibold text-gray-700 dark:text-gray-200">Harley:</span> <span id="bathHarleyLabel">{{ routines.bath.harley if routines and routines.bath else 'Harley & Daddy' }}</span></div>
@@ -230,17 +268,167 @@ window.REMINDERS_TIME_FORMAT = "{{ (config.reminders.time_format if config.remin
 					Not completed yet today.
 					{% endif %}
 				</div>
-				<button id="bathCompleteBtn" type="button" class="btn btn-primary text-sm mt-3">Completed</button>
+				<div id="bathNextMeta" class="mt-1 text-xs text-gray-600 dark:text-gray-300"></div>
+				<div id="bathOverdueMeta" class="mt-1 text-xs font-semibold text-red-600 dark:text-red-400"></div>
+				<button id="bathCompleteBtn" type="button" class="btn btn-primary text-sm mt-3">Completed</button></div></div>
+		</div>
+		<div class="mt-4 rounded-xl border border-gray-200 dark:border-gray-700 p-4 bg-white/80 dark:bg-gray-900/40">
+			<div class="flex flex-wrap items-center justify-between gap-2">
+				<div>
+					<div class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Library books</div>
+					<p class="text-sm text-gray-600 dark:text-gray-300">Set an 8:00 AM web and mobile reminder when Avery or Harley has a book to return.</p>
+				</div>
+				<button id="addLibraryBookBtn" type="button" class="btn btn-secondary text-sm"><i class="fa-solid fa-book mr-1"></i>Add library book</button>
 			</div>
+			<div id="libraryBookList" class="mt-3 space-y-2"></div>
 		</div>
 	</div>
 
-	<!-- Timeline Preview -->
-	<div class="card p-6">
+	<div id="libraryBookModal" class="hidden fixed inset-0 z-[70] bg-black/60 p-4 sm:p-6 items-center justify-center">
+		<div class="card w-full max-w-lg max-h-[calc(100vh-2rem)] overflow-y-auto p-5 rounded-2xl">
+			<div class="flex items-start justify-between gap-3 mb-4"><div><h3 class="text-xl font-bold">Library book reminder</h3><p class="text-sm text-gray-500">A Family Calendar reminder will notify the family on web and mobile.</p></div><button id="closeLibraryBookModal" type="button" class="btn btn-secondary">Close</button></div>
+			<form id="libraryBookForm" class="space-y-3">
+				<label class="block text-sm font-medium">Checked out by<select id="libraryBookChild" class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600"><option>Avery</option><option>Harley</option></select></label>
+				<label class="block text-sm font-medium">Book title<input id="libraryBookTitle" required maxlength="256" class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600" placeholder="Book title"></label>
+				<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+					<label class="block text-sm font-medium">Return reminder date<input id="libraryBookReminderDate" type="date" required class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600"></label>
+					<label class="block text-sm font-medium">Morning reminder time<input id="libraryBookReminderTime" type="time" value="08:00" required class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600"></label>
+				</div>
+				<label class="block text-sm font-medium">Due date <span class="font-normal text-gray-500">(optional)</span><input id="libraryBookDueDate" type="date" class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600"></label>
+				<div class="flex justify-end gap-2 pt-2"><button id="cancelLibraryBookModal" type="button" class="btn btn-secondary">Cancel</button><button class="btn btn-primary">Set reminder</button></div>
+			</form>
+		</div>
+	</div>
+
+	<div id="welcomeCalendarDayModal" class="hidden fixed inset-0 z-[70] bg-black/60 p-4 sm:p-6 items-center justify-center">
+		<div class="card w-full max-w-2xl max-h-[calc(100vh-2rem)] overflow-y-auto p-5 rounded-2xl">
+			<div class="flex items-start justify-between gap-3 mb-4">
+				<div>
+					<h3 id="welcomeCalendarDayTitle" class="text-xl font-bold">Calendar day</h3>
+					<p class="text-sm text-gray-500">Events are shared with the Family Calendar.</p>
+				</div>
+				<button id="closeWelcomeCalendarDayModal" type="button" class="btn btn-secondary">Close</button>
+			</div>
+			<div id="welcomeCalendarDayEvents" class="space-y-2 mb-5"></div>
+			<form id="welcomeCalendarEventForm" class="space-y-3 border-t border-gray-200 dark:border-gray-700 pt-4">
+				<div class="flex items-center justify-between gap-2">
+					<h4 id="welcomeCalendarEventFormTitle" class="font-semibold">Add an event</h4>
+					<button id="welcomeCalendarEventDelete" type="button" class="hidden btn btn-danger text-sm">Delete</button>
+				</div>
+				<input id="welcomeCalendarEventId" type="hidden">
+				<label class="block text-sm font-medium">Title
+					<input id="welcomeCalendarEventTitle" type="text" required maxlength="256" class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600" placeholder="Event title">
+				</label>
+				<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+					<label class="block text-sm font-medium">Start date
+						<input id="welcomeCalendarEventStartDate" type="date" required class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
+					</label>
+					<label class="block text-sm font-medium">End date
+						<input id="welcomeCalendarEventEndDate" type="date" required class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
+					</label>
+				</div>
+				<div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+					<label class="block text-sm font-medium">Start time
+						<input id="welcomeCalendarEventStartTime" type="time" class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
+					</label>
+					<label class="block text-sm font-medium">End time
+						<input id="welcomeCalendarEventEndTime" type="time" class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
+					</label>
+					<label class="flex items-center gap-2 text-sm font-medium sm:pt-7">
+						<input id="welcomeCalendarEventAllDay" type="checkbox" class="rounded" checked>
+						All day
+					</label>
+				</div>
+				<label class="block text-sm font-medium">Details
+					<textarea id="welcomeCalendarEventDescription" rows="2" maxlength="2000" class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600" placeholder="Optional details"></textarea>
+				</label>
+				<label class="block text-sm font-medium">Color
+					<input id="welcomeCalendarEventColor" type="color" value="#3b82f6" class="mt-1 w-full h-10 p-1 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
+				</label>
+				<div class="flex justify-end">
+					<button id="welcomeCalendarEventSubmit" type="submit" class="btn btn-primary"><i class="fa-solid fa-plus mr-1"></i>Add event</button>
+				</div>
+			</form>
+		</div>
+	</div>
+
+	{# Disabled per request: interactive/mini slideshow #}
+	{#
+	{% if current_member_mini_slideshow_enabled and timeline_media_items and timeline_media_items|length > 0 %}
+	<div class="card p-5" id="welcomeMiniSlideshowCard">
+		<div class="flex items-center justify-between gap-2 mb-3">
+			<h2 class="text-lg font-bold">Mini Slideshow</h2>
+			<div class="flex items-center gap-2">
+				<button id="miniSlideshowPrev" class="btn btn-secondary text-xs" type="button"><i class="fa-solid fa-backward"></i></button>
+				<button id="miniSlideshowToggle" class="btn btn-primary text-xs" type="button"><i class="fa-solid fa-pause"></i> Pause</button>
+				<button id="miniSlideshowNext" class="btn btn-secondary text-xs" type="button"><i class="fa-solid fa-forward"></i></button>
+				<a href="/photos/slideshow" class="btn btn-secondary text-xs">Open Interactive Slideshow</a>
+			</div>
+		</div>
+		<div class="rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 bg-black relative h-72">
+			<img id="miniSlideImage" class="hidden w-full h-full object-contain" alt="Mini slideshow image">
+			<video id="miniSlideVideo" class="hidden w-full h-full object-contain" muted playsinline preload="metadata"></video>
+			<div class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent px-3 py-2 text-xs text-white">
+				<span id="miniSlideMeta">Loading...</span>
+			</div>
+		</div>
+	</div>
+	{% endif %}
+	#}
+
+	<!-- Shared Family Calendar on Welcome (the full calendar remains available at /calendar) -->
+	<section id="welcomeCalendar" class="card p-4 sm:p-6">
+		<div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+			<div class="flex items-center gap-3">
+				<button id="welcomeCalendarPrev" type="button" class="btn btn-secondary" aria-label="Previous month"><i class="fa-solid fa-chevron-left"></i></button>
+				<h2 id="welcomeCalendarLabel" class="text-lg sm:text-xl font-bold">Family Calendar</h2>
+				<button id="welcomeCalendarNext" type="button" class="btn btn-secondary" aria-label="Next month"><i class="fa-solid fa-chevron-right"></i></button>
+			</div>
+			<div class="flex items-center gap-2">
+				<button id="welcomeCalendarToday" type="button" class="btn btn-secondary text-sm">Today</button>
+				<a href="/calendar" class="btn btn-primary text-sm"><i class="fa-solid fa-calendar-days mr-1"></i>Open calendar</a>
+			</div>
+		</div>
+		<div class="grid grid-cols-7 border-t border-l border-gray-200 dark:border-gray-700 text-center text-xs font-bold text-gray-500 dark:text-gray-400">
+			<div class="p-2 border-r border-b border-gray-200 dark:border-gray-700">Sun</div><div class="p-2 border-r border-b border-gray-200 dark:border-gray-700">Mon</div><div class="p-2 border-r border-b border-gray-200 dark:border-gray-700">Tue</div><div class="p-2 border-r border-b border-gray-200 dark:border-gray-700">Wed</div><div class="p-2 border-r border-b border-gray-200 dark:border-gray-700">Thu</div><div class="p-2 border-r border-b border-gray-200 dark:border-gray-700">Fri</div><div class="p-2 border-r border-b border-gray-200 dark:border-gray-700">Sat</div>
+		</div>
+		<div id="welcomeCalendarGrid" class="grid grid-cols-7 border-l border-gray-200 dark:border-gray-700"></div>
+	</section>
+
+	<!-- Timeline is retained on its own page, not duplicated on Welcome. -->
+	<div id="welcomeTimelinePreview" class="hidden card p-6">
 		<div class="flex items-center justify-between mb-4">
 			<h2 class="text-lg font-bold">Timeline</h2>
 			<a href="/timeline" class="text-sm text-blue-600 hover:underline font-semibold">View all</a>
 		</div>
+		{# Disabled per request: remove photos/videos from timeline preview #}
+		{#
+		{% if timeline_media_items and timeline_media_items|length > 0 %}
+		<div class="space-y-4 mb-5">
+			{% for m in timeline_media_items %}
+			<article class="rounded-2xl border border-gray-200/80 dark:border-gray-700 bg-white/90 dark:bg-gray-900/75 overflow-hidden">
+				<div class="px-4 pt-4 pb-2 flex items-center justify-between gap-2">
+					<div class="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{{ m.uploader or 'Family' }}</div>
+					<div class="text-xs text-gray-500 dark:text-gray-400">{{ m.uploaded_at_display or '' }}</div>
+				</div>
+				<div class="bg-black">
+					{% if m.is_video %}
+					<video class="timeline-media-video w-full h-80 object-contain" src="{{ m.preview_url }}" muted playsinline controls preload="metadata"></video>
+					{% else %}
+					<img class="w-full h-80 object-contain" src="{{ m.preview_url }}" alt="{{ m.original_filename }}">
+					{% endif %}
+				</div>
+				<div class="px-4 py-3">
+					<div class="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{{ m.original_filename }}</div>
+					{% if m.is_video %}
+					<button type="button" class="timeline-media-unmute mt-2 btn btn-secondary text-xs"><i class="fa-solid fa-volume-high"></i> Unmute</button>
+					{% endif %}
+				</div>
+			</article>
+			{% endfor %}
+		</div>
+		{% endif %}
+		#}
 		{% if timeline_posts %}
 		<div class="space-y-4">
 			{% for p in timeline_posts %}
@@ -320,7 +508,7 @@ window.REMINDERS_TIME_FORMAT = "{{ (config.reminders.time_format if config.remin
 	</div>
 
 	<!-- Family Notice Status -->
-	<div class="family-card rounded-xl p-6">
+	<div id="familyNoticeCard" class="family-card rounded-xl p-6">
 		<div class="flex items-center justify-between gap-2 mb-4">
 			<h2 class="text-lg font-bold flex items-center gap-2">
 				<i class="fa-solid fa-bullhorn text-xl" style="color: #f59e0b;"></i>
@@ -334,15 +522,27 @@ window.REMINDERS_TIME_FORMAT = "{{ (config.reminders.time_format if config.remin
 				<div class="border border-gray-200 dark:border-gray-700 rounded-lg p-3">
 					<div class="text-sm font-semibold">{{ n.created_at.strftime('%b %d, %I:%M %p') if n.created_at else 'Notice' }}</div>
 					<div class="text-sm text-gray-700 dark:text-gray-200 mt-1 whitespace-pre-wrap">{{ n.message }}</div>
-					<div class="text-xs text-gray-500 mt-2">Acknowledged {{ n.acked_count }}/{{ n.total_recipients }}</div>
-					{% if n.pending and n.pending|length > 0 %}
-					<div class="text-xs text-amber-600 dark:text-amber-400 mt-1">Pending: {{ n.pending|join(', ') }}</div>
-					{% endif %}
+					<div class="mt-3 flex flex-wrap items-center gap-2">
+						<span class="px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 dark:bg-emerald-900/35 text-emerald-800 dark:text-emerald-200"><i class="fa-solid fa-check mr-1"></i>{{ n.acked_count }} acknowledged</span>
+						<span class="px-3 py-1 rounded-full text-xs font-bold bg-amber-100 dark:bg-amber-900/35 text-amber-800 dark:text-amber-200"><i class="fa-regular fa-clock mr-1"></i>{{ n.total_recipients - n.acked_count }} pending</span>
+					</div>
+					<div class="mt-3 flex flex-wrap gap-2">
+						{% for member in n.recipients %}
+						{% set was_acked = member in n.acked %}
+						<span class="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs border {{ 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-200' if was_acked else 'border-gray-200 bg-gray-50 text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300' }}">
+							<i class="fa-solid {{ 'fa-circle-check text-emerald-500' if was_acked else 'fa-circle text-gray-400' }}"></i>{{ member }}
+						</span>
+						{% endfor %}
+					</div>
 				</div>
 				{% endfor %}
 			{% else %}
 			<div class="text-sm text-gray-500 dark:text-gray-400">No notices sent yet.</div>
 			{% endif %}
+		</div>
+		<div class="mt-5 pt-4 border-t border-gray-300 dark:border-gray-600">
+			<div class="flex items-center justify-between gap-2"><div><h3 class="font-bold">Shared Family Album</h3><p id="immichSlideshowStatus" class="text-xs text-gray-500">Loading slideshow…</p></div><div class="flex gap-1"><select id="immichSlideDuration" class="text-xs border rounded-lg px-1 dark:bg-gray-800"><option value="5">5s</option><option value="8" selected>8s</option><option value="12">12s</option><option value="20">20s</option></select><button id="immichPrevious" class="btn btn-secondary text-xs" aria-label="Previous photo"><i class="fa-solid fa-chevron-left"></i></button><button id="immichPlayPause" class="btn btn-secondary text-xs" aria-label="Pause slideshow"><i class="fa-solid fa-pause"></i></button><button id="immichNext" class="btn btn-secondary text-xs" aria-label="Next photo"><i class="fa-solid fa-chevron-right"></i></button><button id="immichFullscreen" class="btn btn-primary text-xs" aria-label="View slideshow fullscreen"><i class="fa-solid fa-expand"></i></button></div></div>
+			<div id="immichSlideshowFrame" class="mt-3 relative aspect-[4/3] rounded-xl overflow-hidden bg-black"><img id="immichSlideshowImage" class="w-full h-full object-contain" alt="Shared Family Album slideshow"><div id="immichSlideshowCaption" class="absolute bottom-0 inset-x-0 bg-black/60 text-white text-xs p-2"></div></div>
 		</div>
 	</div>
 
@@ -373,7 +573,225 @@ window.REMINDERS_TIME_FORMAT = "{{ (config.reminders.time_format if config.remin
 
 <script>
 (function() {
+	const overviewLayout = document.getElementById('welcomeOverviewLayout');
+	const overviewTopRow = document.getElementById('welcomeTopRow');
+	const weatherWidget = document.querySelector('.weather-widget');
+	const routinesCard = document.getElementById('routinesCard');
+	const welcomeCalendar = document.getElementById('welcomeCalendar');
+	const familyNoticeCard = document.getElementById('familyNoticeCard');
+	if (overviewLayout && overviewTopRow) {
+		if (routinesCard) overviewTopRow.appendChild(routinesCard);
+		if (weatherWidget) overviewTopRow.appendChild(weatherWidget);
+		if (welcomeCalendar) overviewLayout.appendChild(welcomeCalendar);
+		if (familyNoticeCard) overviewLayout.appendChild(familyNoticeCard);
+	}
+	let slideshowAssets = [], slideshowIndex = 0, slideshowTimer = null, slideshowPlaying = true;
+	const slideshowImage = document.getElementById('immichSlideshowImage');
+	const slideshowCaption = document.getElementById('immichSlideshowCaption');
+	const slideshowStatus = document.getElementById('immichSlideshowStatus');
+	function renderSlideshow() {
+		if (!slideshowAssets.length) return;
+		const asset = slideshowAssets[slideshowIndex];
+		const next = slideshowAssets[(slideshowIndex + 1) % slideshowAssets.length];
+		const preload = new Image();
+		preload.onload = () => { slideshowImage.src = preload.src; };
+		preload.src = `/api/immich/assets/${encodeURIComponent(asset.id)}/thumbnail`;
+		if (next?.type !== 'VIDEO') { const nextPreload = new Image(); nextPreload.src = `/api/immich/assets/${encodeURIComponent(next.id)}/thumbnail`; }
+		slideshowCaption.textContent = asset.filename || 'Shared Family Album';
+		slideshowStatus.textContent = `${slideshowIndex + 1} of ${slideshowAssets.length}`;
+	}
+	function advanceSlideshow(direction = 1) { slideshowIndex = (slideshowIndex + direction + slideshowAssets.length) % slideshowAssets.length; renderSlideshow(); }
+	function setSlideshowPlaying(playing) {
+		slideshowPlaying = playing; clearInterval(slideshowTimer);
+		document.getElementById('immichPlayPause')?.querySelector('i')?.classList.replace(playing ? 'fa-play' : 'fa-pause', playing ? 'fa-pause' : 'fa-play');
+		if (playing && slideshowAssets.length > 1) slideshowTimer = setInterval(() => advanceSlideshow(), Number(document.getElementById('immichSlideDuration')?.value || 8) * 1000);
+	}
+	fetch('/api/immich/shared-family-album').then(response => response.json()).then(data => {
+		if (!data.ok) throw new Error(data.error || 'Unable to load Shared Family Album');
+		slideshowAssets = data.assets || [];
+		if (!slideshowAssets.length) throw new Error('The Shared Family Album has no photos yet.');
+		renderSlideshow(); setSlideshowPlaying(true);
+	}).catch(error => { if (slideshowStatus) slideshowStatus.textContent = error.message; });
+	document.getElementById('immichPrevious')?.addEventListener('click', () => advanceSlideshow(-1));
+	document.getElementById('immichNext')?.addEventListener('click', () => advanceSlideshow(1));
+	document.getElementById('immichPlayPause')?.addEventListener('click', () => setSlideshowPlaying(!slideshowPlaying));
+	document.getElementById('immichSlideDuration')?.addEventListener('change', () => setSlideshowPlaying(slideshowPlaying));
+	document.getElementById('immichFullscreen')?.addEventListener('click', () => document.getElementById('immichSlideshowFrame')?.requestFullscreen?.());
 	const currentUser = () => String(localStorage.getItem('username') || '').trim();
+	const welcomeModalPending = document.getElementById('welcomeModalState')?.dataset.pending === '1';
+	const missedModal = document.getElementById('missedUpdatesModal');
+	const missedSummary = document.getElementById('missedUpdatesSummary');
+	const missedSections = document.getElementById('missedUpdatesSections');
+	const missedEmpty = document.getElementById('missedUpdatesEmpty');
+	const missedCloseBtn = document.getElementById('missedUpdatesClose');
+	const missedSkipBtn = document.getElementById('missedUpdatesSkip');
+	const missedMuteHourBtn = document.getElementById('missedUpdatesMuteHour');
+	const missedMuteDayBtn = document.getElementById('missedUpdatesMuteDay');
+	const missedMuteKey = () => `homehub-missed-updates-muted-until-${currentUser() || 'anonymous'}`;
+
+	function formatMissedTimestamp(value) {
+		if (!value) return '';
+		const dt = new Date(value);
+		if (Number.isNaN(dt.getTime())) return '';
+		return dt.toLocaleString([], {
+			year: 'numeric',
+			month: 'short',
+			day: 'numeric',
+			hour: 'numeric',
+			minute: '2-digit',
+		});
+	}
+
+	function openMissedModal() {
+		if (!missedModal) return;
+		missedModal.classList.remove('hidden');
+		missedModal.classList.add('flex');
+		document.body.classList.add('overflow-hidden');
+	}
+
+	function closeMissedModal() {
+		if (!missedModal) return;
+		missedModal.classList.add('hidden');
+		missedModal.classList.remove('flex');
+		document.body.classList.remove('overflow-hidden');
+	}
+
+	async function acknowledgeMissedUpdates() {
+		try {
+			await fetch('/api/dashboard/missed-updates/ack', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ seen: true }),
+			});
+			localStorage.setItem(`homehub-missed-updates-${currentUser()}`, 'acknowledged');
+		} catch (_) {}
+	}
+
+	function renderMissedSections(data) {
+		if (!missedSections || !missedSummary || !missedEmpty) return;
+		const sections = Array.isArray(data?.sections) ? data.sections : [];
+		const total = Number(data?.total_updates || 0);
+		const noUpdates = !!data?.no_updates || total <= 0;
+
+		missedSummary.textContent = noUpdates
+			? 'No updates since your last login.'
+			: `${total} update${total === 1 ? '' : 's'} since your last login.`;
+		missedEmpty.classList.toggle('hidden', !noUpdates);
+
+		missedSections.innerHTML = '';
+		if (noUpdates) return;
+
+		sections.forEach((section) => {
+			const count = Number(section?.count || 0);
+			const title = String(section?.title || 'Updates');
+			const icon = String(section?.icon || 'fa-circle-info');
+			const href = String(section?.href || '/');
+			const items = Array.isArray(section?.items) ? section.items : [];
+
+			const itemHtml = items.length
+				? items.map((item) => {
+					const when = formatMissedTimestamp(item?.timestamp);
+					const subtitle = String(item?.subtitle || '');
+					const titleText = String(item?.title || 'Update');
+					return `
+						<li class="rounded-lg border border-gray-200/80 dark:border-gray-700 bg-white/70 dark:bg-gray-900/50 px-3 py-2">
+							<div class="text-sm font-semibold text-gray-900 dark:text-gray-100">${titleText}</div>
+							<div class="text-xs text-gray-600 dark:text-gray-300">${subtitle}</div>
+							<div class="text-[11px] text-gray-500 dark:text-gray-400 mt-1">${when}</div>
+						</li>
+					`;
+				}).join('')
+				: '<li class="text-xs text-gray-500 dark:text-gray-400">No new activity in this section.</li>';
+
+			const block = document.createElement('article');
+			block.className = 'rounded-2xl border border-gray-200/80 dark:border-gray-700 bg-white/85 dark:bg-gray-900/60 p-3';
+			block.innerHTML = `
+				<div class="flex items-center justify-between gap-2 mb-2">
+					<div class="inline-flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
+						<i class="fa-solid ${icon}"></i>
+						<span>${title}</span>
+						<span class="text-xs text-gray-500 dark:text-gray-400">(${count})</span>
+					</div>
+					<button type="button" class="btn btn-secondary text-xs" data-open-module="${href}">Open</button>
+				</div>
+				<ul class="space-y-2">${itemHtml}</ul>
+			`;
+			missedSections.appendChild(block);
+		});
+	}
+
+	async function maybeShowMissedUpdatesModal() {
+		if (!missedModal) return;
+		const mutedUntil = Number(localStorage.getItem(missedMuteKey()) || 0);
+		if (mutedUntil > Date.now()) {
+			closeMissedModal();
+			return;
+		}
+		if (mutedUntil) localStorage.removeItem(missedMuteKey());
+		try {
+			const response = await fetch('/api/dashboard/missed-updates');
+			const data = await response.json().catch(() => ({}));
+			if (!response.ok || !data?.ok || !data?.should_show) {
+				closeMissedModal();
+				return;
+			}
+			localStorage.removeItem(`homehub-missed-updates-${currentUser()}`);
+			renderMissedSections(data);
+			openMissedModal();
+		} catch (_) {
+			// Do not block dashboard if summary fails.
+		}
+	}
+
+	missedCloseBtn?.addEventListener('click', async () => {
+		await muteMissedUpdates(Date.now() + (60 * 60 * 1000));
+	});
+	document.getElementById('openFamilyMembers')?.addEventListener('click', () => {
+		const modal = document.getElementById('familyMembersModal');
+		modal?.classList.remove('hidden'); modal?.classList.add('flex');
+	});
+	document.getElementById('closeFamilyMembers')?.addEventListener('click', () => {
+		const modal = document.getElementById('familyMembersModal');
+		modal?.classList.add('hidden'); modal?.classList.remove('flex');
+	});
+	document.getElementById('openAssignedTasks')?.addEventListener('click', () => {
+		const modal = document.getElementById('assignedTasksModal');
+		modal?.classList.remove('hidden'); modal?.classList.add('flex');
+	});
+	document.getElementById('closeAssignedTasks')?.addEventListener('click', () => {
+		const modal = document.getElementById('assignedTasksModal');
+		modal?.classList.add('hidden'); modal?.classList.remove('flex');
+	});
+
+	missedSkipBtn?.addEventListener('click', async () => {
+		await muteMissedUpdates(Date.now() + (60 * 60 * 1000));
+	});
+	async function muteMissedUpdates(until) {
+		localStorage.setItem(missedMuteKey(), String(until));
+		await acknowledgeMissedUpdates();
+		closeMissedModal();
+	}
+	missedMuteHourBtn?.addEventListener('click', () => muteMissedUpdates(Date.now() + (60 * 60 * 1000)));
+	missedMuteDayBtn?.addEventListener('click', () => {
+		const tomorrow = new Date();
+		tomorrow.setHours(24, 0, 0, 0);
+		muteMissedUpdates(tomorrow.getTime());
+	});
+
+	missedModal?.addEventListener('click', async (event) => {
+		if (event.target === missedModal) {
+			await muteMissedUpdates(Date.now() + (60 * 60 * 1000));
+		}
+	});
+
+	missedSections?.addEventListener('click', async (event) => {
+		const openBtn = event.target.closest('[data-open-module]');
+		if (!openBtn) return;
+		event.preventDefault();
+		const href = String(openBtn.getAttribute('data-open-module') || '/').trim() || '/';
+		await acknowledgeMissedUpdates();
+		window.location.href = href;
+	});
 
 	// Time and date display
 	function updateTime() {
@@ -558,6 +976,8 @@ window.REMINDERS_TIME_FORMAT = "{{ (config.reminders.time_format if config.remin
 	const bathAveryLabel = document.getElementById('bathAveryLabel');
 	const bathHarleyLabel = document.getElementById('bathHarleyLabel');
 	const bathCompletedMeta = document.getElementById('bathCompletedMeta');
+	const bathNextMeta = document.getElementById('bathNextMeta');
+	const bathOverdueMeta = document.getElementById('bathOverdueMeta');
 
 	function formatRoutineTimestamp(value) {
 		if (!value) return '';
@@ -576,9 +996,23 @@ window.REMINDERS_TIME_FORMAT = "{{ (config.reminders.time_format if config.remin
 		const bedtime = routines?.bedtime || {};
 		const bath = routines?.bath || {};
 		if (bedtimeReaderLabel) bedtimeReaderLabel.textContent = (bedtime.reader || 'Rachel').toString().trim() || 'Rachel';
+		const bedtimeDate = new Date(`${String(bedtime.for_date || '').trim()}T12:00:00`);
+		if (!Number.isNaN(bedtimeDate.getTime())) {
+			document.getElementById('bedtimeMonth').textContent = bedtimeDate.toLocaleDateString(undefined, { month: 'long' }).toUpperCase();
+			document.getElementById('bedtimeDay').textContent = bedtimeDate.getDate();
+		}
 		if (bedtimeReaderMeta) {
 			const forDate = String(bedtime.for_date || '').trim();
-			bedtimeReaderMeta.textContent = forDate ? `From shared API schedule for ${forDate}.` : 'Switches nightly between Rachel and Mykal.';
+			if (forDate) {
+				const displayDate = new Date(`${forDate}T12:00:00`).toLocaleDateString(undefined, {
+					month: 'short',
+					day: 'numeric',
+					weekday: 'long',
+				});
+				bedtimeReaderMeta.textContent = displayDate;
+			} else {
+				bedtimeReaderMeta.textContent = 'Switches nightly between Rachel and Mykal.';
+			}
 		}
 		if (bathAveryLabel) bathAveryLabel.textContent = bath.avery || 'Avery & Mommy';
 		if (bathHarleyLabel) bathHarleyLabel.textContent = bath.harley || 'Harley & Daddy';
@@ -588,6 +1022,14 @@ window.REMINDERS_TIME_FORMAT = "{{ (config.reminders.time_format if config.remin
 			bathCompletedMeta.textContent = by && at
 				? `Last completed by ${by} at ${at}`
 				: 'Not completed yet today.';
+		}
+		if (bathNextMeta) {
+			const due = new Date(`${String(bath.next_due_date || '').trim()}T12:00:00`);
+			bathNextMeta.textContent = Number.isNaN(due.getTime()) ? '' : `Next bath time: ${due.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}`;
+		}
+		if (bathOverdueMeta) {
+			const missed = Number(bath.overdue_days || 0);
+			bathOverdueMeta.textContent = missed > 0 ? `Missed bath day${missed === 1 ? '' : 's'}: ${missed}` : '';
 		}
 	}
 
@@ -601,6 +1043,77 @@ window.REMINDERS_TIME_FORMAT = "{{ (config.reminders.time_format if config.remin
 	}
 
 	refreshRoutineLabels();
+
+	const libraryBookModal = document.getElementById('libraryBookModal');
+	const libraryBookList = document.getElementById('libraryBookList');
+	const libraryBookForm = document.getElementById('libraryBookForm');
+	const libraryBookReminderDate = document.getElementById('libraryBookReminderDate');
+
+	function setLibraryBookModal(open) {
+		libraryBookModal?.classList.toggle('hidden', !open);
+		libraryBookModal?.classList.toggle('flex', open);
+		if (open && libraryBookReminderDate && !libraryBookReminderDate.value) {
+			const tomorrow = new Date();
+			tomorrow.setDate(tomorrow.getDate() + 1);
+			libraryBookReminderDate.value = tomorrow.toISOString().slice(0, 10);
+		}
+	}
+
+	async function loadLibraryBooks() {
+		if (!libraryBookList) return;
+		try {
+			const response = await fetch('/api/routines/library-books');
+			const data = await response.json();
+			if (!response.ok || !data.ok) throw new Error(data.error || 'Unable to load library books');
+			const books = Array.isArray(data.books) ? data.books : [];
+			libraryBookList.innerHTML = books.length ? books.map(book => `
+				<div class="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-violet-50 dark:bg-violet-900/20 px-3 py-2">
+					<div><span class="font-semibold text-sm">${escapeCalendarText(book.title)}</span><span class="ml-2 text-xs text-gray-500">${escapeCalendarText(book.child_name)} · ${escapeCalendarText(book.reminder_date)} at ${escapeCalendarText(book.reminder_time)}</span></div>
+					<button type="button" class="text-xs text-red-600 dark:text-red-300 library-book-return" data-id="${book.id}"><i class="fa-solid fa-check mr-1"></i>Returned</button>
+				</div>`).join('') : '<p class="text-sm text-gray-500">No library books checked out.</p>';
+		} catch (error) {
+			libraryBookList.innerHTML = `<p class="text-sm text-red-600 dark:text-red-300">${escapeCalendarText(error.message || 'Unable to load library books.')}</p>`;
+		}
+	}
+
+	document.getElementById('addLibraryBookBtn')?.addEventListener('click', () => setLibraryBookModal(true));
+	['closeLibraryBookModal', 'cancelLibraryBookModal'].forEach(id => document.getElementById(id)?.addEventListener('click', () => setLibraryBookModal(false)));
+	libraryBookModal?.addEventListener('click', event => { if (event.target === libraryBookModal) setLibraryBookModal(false); });
+	libraryBookForm?.addEventListener('submit', async event => {
+		event.preventDefault();
+		const payload = {
+			child_name: document.getElementById('libraryBookChild').value,
+			title: document.getElementById('libraryBookTitle').value.trim(),
+			reminder_date: libraryBookReminderDate.value,
+			reminder_time: document.getElementById('libraryBookReminderTime').value,
+			due_date: document.getElementById('libraryBookDueDate').value || null,
+		};
+		try {
+			const response = await fetch('/api/routines/library-books', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+			const data = await response.json();
+			if (!response.ok || !data.ok) throw new Error(data.error || 'Unable to set reminder');
+			libraryBookForm.reset();
+			setLibraryBookModal(false);
+			await loadLibraryBooks();
+			globalToast('Library return reminder added to the Family Calendar', 'success');
+		} catch (error) {
+			globalToast(error.message || 'Unable to set reminder', 'error');
+		}
+	});
+	libraryBookList?.addEventListener('click', async event => {
+		const button = event.target.closest('.library-book-return');
+		if (!button) return;
+		try {
+			const response = await fetch(`/api/routines/library-books/${button.dataset.id}`, { method: 'DELETE' });
+			const data = await response.json();
+			if (!response.ok || !data.ok) throw new Error(data.error || 'Unable to mark returned');
+			await loadLibraryBooks();
+			globalToast('Library book marked returned', 'success');
+		} catch (error) {
+			globalToast(error.message || 'Unable to mark returned', 'error');
+		}
+	});
+	loadLibraryBooks();
 
 	bathCompleteBtn?.addEventListener('click', async () => {
 		bathCompleteBtn.disabled = true;
@@ -623,6 +1136,229 @@ window.REMINDERS_TIME_FORMAT = "{{ (config.reminders.time_format if config.remin
 			bathCompleteBtn.disabled = false;
 		}
 	});
+
+	// Welcome uses the same Family Calendar events API as the dedicated calendar page.
+	const welcomeCalendarGrid = document.getElementById('welcomeCalendarGrid');
+	const welcomeCalendarLabel = document.getElementById('welcomeCalendarLabel');
+	const welcomeCalendarDayModal = document.getElementById('welcomeCalendarDayModal');
+	const welcomeCalendarDayTitle = document.getElementById('welcomeCalendarDayTitle');
+	const welcomeCalendarDayEvents = document.getElementById('welcomeCalendarDayEvents');
+	const welcomeCalendarEventForm = document.getElementById('welcomeCalendarEventForm');
+	const welcomeCalendarEventId = document.getElementById('welcomeCalendarEventId');
+	const welcomeCalendarEventFormTitle = document.getElementById('welcomeCalendarEventFormTitle');
+	const welcomeCalendarEventStartDate = document.getElementById('welcomeCalendarEventStartDate');
+	const welcomeCalendarEventEndDate = document.getElementById('welcomeCalendarEventEndDate');
+	const welcomeCalendarEventTitle = document.getElementById('welcomeCalendarEventTitle');
+	const welcomeCalendarEventStartTime = document.getElementById('welcomeCalendarEventStartTime');
+	const welcomeCalendarEventEndTime = document.getElementById('welcomeCalendarEventEndTime');
+	const welcomeCalendarEventAllDay = document.getElementById('welcomeCalendarEventAllDay');
+	const welcomeCalendarEventDescription = document.getElementById('welcomeCalendarEventDescription');
+	const welcomeCalendarEventColor = document.getElementById('welcomeCalendarEventColor');
+	const welcomeCalendarEventDelete = document.getElementById('welcomeCalendarEventDelete');
+	const welcomeCalendarEventSubmit = document.getElementById('welcomeCalendarEventSubmit');
+	let welcomeCalendarAnchor = new Date();
+
+	function isoDate(value) {
+		const year = value.getFullYear();
+		const month = String(value.getMonth() + 1).padStart(2, '0');
+		const day = String(value.getDate()).padStart(2, '0');
+		return `${year}-${month}-${day}`;
+	}
+
+	function escapeCalendarText(value) {
+		return String(value || '').replace(/[&<>"']/g, char => ({
+			'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+		}[char]));
+	}
+
+	function setWelcomeCalendarDayModal(open) {
+		welcomeCalendarDayModal?.classList.toggle('hidden', !open);
+		welcomeCalendarDayModal?.classList.toggle('flex', open);
+	}
+
+	function renderWelcomeCalendarDayEvents(events, dateISO) {
+		if (!welcomeCalendarDayEvents) return;
+		if (!events.length) {
+			welcomeCalendarDayEvents.innerHTML = '<p class="rounded-lg border border-dashed p-4 text-sm text-gray-500">No events scheduled for this day.</p>';
+			return;
+		}
+		welcomeCalendarDayEvents.innerHTML = events.map(event => {
+			const time = event.is_all_day ? 'All day' : [event.start_time, event.end_time].filter(Boolean).join(' - ');
+			return `<button type="button" class="welcome-calendar-event w-full text-left rounded-lg border border-gray-200 dark:border-gray-700 p-3 hover:border-violet-400" data-event-id="${escapeCalendarText(event.id)}">
+				<div class="flex items-start justify-between gap-3">
+					<div><div class="font-semibold">${escapeCalendarText(event.title)}</div>
+					<div class="text-xs text-gray-500">${escapeCalendarText(time || 'Scheduled')} · ${escapeCalendarText(event.created_by || 'Family')}</div></div>
+					<span class="h-3 w-3 rounded-full shrink-0" style="background:${escapeCalendarText(event.color || '#6366f1')}"></span>
+				</div>
+				${event.description_html ? `<div class="mt-2 text-sm text-gray-600 dark:text-gray-300">${event.description_html}</div>` : ''}
+			</button>`;
+		}).join('');
+	}
+
+	function setWelcomeCalendarEventForm(event, dateISO) {
+		if (!welcomeCalendarEventForm) return;
+		welcomeCalendarEventForm.reset();
+		const editing = !!event;
+		if (welcomeCalendarEventFormTitle) welcomeCalendarEventFormTitle.textContent = editing ? 'Edit event' : 'Add an event';
+		if (welcomeCalendarEventSubmit) welcomeCalendarEventSubmit.innerHTML = `<i class="fa-solid fa-${editing ? 'check' : 'plus'} mr-1"></i>${editing ? 'Save changes' : 'Add event'}`;
+		welcomeCalendarEventId.value = event?.id || '';
+		welcomeCalendarEventTitle.value = event?.title || '';
+		welcomeCalendarEventStartDate.value = event?.start_date || dateISO;
+		welcomeCalendarEventEndDate.value = event?.end_date || event?.start_date || dateISO;
+		welcomeCalendarEventStartTime.value = event?.start_time || '';
+		welcomeCalendarEventEndTime.value = event?.end_time || '';
+		welcomeCalendarEventAllDay.checked = event ? !!event.is_all_day : true;
+		welcomeCalendarEventDescription.value = String(event?.description_html || '').replace(/<[^>]*>/g, '');
+		welcomeCalendarEventColor.value = event?.color || '#3b82f6';
+		welcomeCalendarEventDelete?.classList.toggle('hidden', !editing);
+		welcomeCalendarEventStartTime.disabled = welcomeCalendarEventAllDay.checked;
+		welcomeCalendarEventEndTime.disabled = welcomeCalendarEventAllDay.checked;
+	}
+
+	function openWelcomeCalendarDay(dateISO, events, selectedEvent = null) {
+		if (!welcomeCalendarDayModal) return;
+		welcomeCalendarDayModal.dataset.date = dateISO;
+		const selectedDate = new Date(`${dateISO}T12:00:00`);
+		if (welcomeCalendarDayTitle) {
+			welcomeCalendarDayTitle.textContent = selectedDate.toLocaleDateString(undefined, {
+				weekday: 'long', month: 'long', day: 'numeric', year: 'numeric'
+			});
+		}
+		renderWelcomeCalendarDayEvents(events, dateISO);
+		setWelcomeCalendarEventForm(selectedEvent, dateISO);
+		setWelcomeCalendarDayModal(true);
+	}
+
+	async function renderWelcomeCalendar() {
+		if (!welcomeCalendarGrid || !welcomeCalendarLabel) return;
+		const year = welcomeCalendarAnchor.getFullYear();
+		const month = welcomeCalendarAnchor.getMonth();
+		const monthStart = new Date(year, month, 1);
+		const monthEnd = new Date(year, month + 1, 0);
+		const gridStart = new Date(year, month, 1 - monthStart.getDay());
+		const gridEnd = new Date(year, month + 1, 6 - monthEnd.getDay());
+		welcomeCalendarLabel.textContent = monthStart.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+		welcomeCalendarGrid.innerHTML = '<div class="col-span-7 p-6 text-center text-sm text-gray-500">Loading calendar…</div>';
+		try {
+			const response = await fetch(`/api/calendar/events?start=${isoDate(gridStart)}&end=${isoDate(gridEnd)}`);
+			const data = await response.json();
+			if (!response.ok || !data.ok) throw new Error(data.error || 'Unable to load calendar');
+			const byDate = new Map();
+			(data.events || []).forEach(event => {
+				const start = String(event.start_date || '');
+				if (!start) return;
+				const end = String(event.end_date || start);
+				for (let cursor = new Date(`${start}T12:00:00`); cursor <= new Date(`${end}T12:00:00`); cursor.setDate(cursor.getDate() + 1)) {
+					const key = isoDate(cursor);
+					const events = byDate.get(key) || [];
+					events.push(event);
+					byDate.set(key, events);
+				}
+			});
+			const today = isoDate(new Date());
+			const cells = [];
+			for (let cursor = new Date(gridStart); cursor <= gridEnd; cursor.setDate(cursor.getDate() + 1)) {
+				const key = isoDate(cursor);
+				const events = byDate.get(key) || [];
+				const outside = cursor.getMonth() !== month;
+				const todayClass = key === today ? 'bg-violet-50 dark:bg-violet-900/20' : '';
+				const eventRows = events.slice(0, 2).map(event => `<div class="mt-1 truncate rounded px-1.5 py-0.5 text-[10px] font-semibold text-white" style="background:${escapeCalendarText(event.color || 'var(--primary-color)')}">${escapeCalendarText(event.start_time ? `${event.start_time} ${event.title}` : event.title)}</div>`).join('');
+				const more = events.length > 2 ? `<div class="mt-1 text-[10px] text-violet-600 dark:text-violet-300">+${events.length - 2} more</div>` : '';
+				cells.push(`<div class="welcome-calendar-day min-h-[90px] sm:min-h-[112px] border-r border-b border-gray-200 dark:border-gray-700 p-1.5 cursor-pointer hover:bg-violet-50 dark:hover:bg-violet-900/20 ${outside ? 'bg-gray-50/60 dark:bg-gray-900/20 text-gray-400' : ''} ${todayClass}" data-date="${key}" role="button" tabindex="0" aria-label="Open events for ${escapeCalendarText(key)}"><span class="inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${key === today ? 'bg-violet-600 text-white' : ''}">${cursor.getDate()}</span>${eventRows}${more}</div>`);
+			}
+			welcomeCalendarGrid.innerHTML = cells.join('');
+			welcomeCalendarGrid.querySelectorAll('.welcome-calendar-day').forEach(cell => {
+				const open = () => openWelcomeCalendarDay(cell.dataset.date, byDate.get(cell.dataset.date) || []);
+				cell.addEventListener('click', open);
+				cell.addEventListener('keydown', event => {
+					if (event.key === 'Enter' || event.key === ' ') {
+						event.preventDefault();
+						open();
+					}
+				});
+				welcomeCalendarDayEvents.onclick = event => {
+					const eventButton = event.target.closest('.welcome-calendar-event');
+					if (!eventButton) return;
+					const dayEvents = byDate.get(welcomeCalendarDayModal.dataset.date) || [];
+					const selected = dayEvents.find(item => String(item.id) === String(eventButton.dataset.eventId));
+					if (selected) openWelcomeCalendarDay(welcomeCalendarDayModal.dataset.date, dayEvents, selected);
+				};
+			});
+		} catch (error) {
+			welcomeCalendarGrid.innerHTML = `<div class="col-span-7 p-6 text-center text-sm text-red-600 dark:text-red-300">${escapeCalendarText(error.message || 'Unable to load calendar.')}</div>`;
+		}
+	}
+
+	document.getElementById('closeWelcomeCalendarDayModal')?.addEventListener('click', () => setWelcomeCalendarDayModal(false));
+	welcomeCalendarDayModal?.addEventListener('click', event => {
+		if (event.target === welcomeCalendarDayModal) setWelcomeCalendarDayModal(false);
+	});
+	welcomeCalendarEventAllDay?.addEventListener('change', () => {
+		const disabled = welcomeCalendarEventAllDay.checked;
+		welcomeCalendarEventStartTime.disabled = disabled;
+		welcomeCalendarEventEndTime.disabled = disabled;
+	});
+	welcomeCalendarEventForm?.addEventListener('submit', async event => {
+		event.preventDefault();
+		const allDay = welcomeCalendarEventAllDay?.checked !== false;
+		const eventId = welcomeCalendarEventId.value;
+		try {
+			const response = await fetch(eventId ? `/api/calendar/events/${encodeURIComponent(eventId)}` : '/api/calendar/events', {
+				method: eventId ? 'PUT' : 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					title: welcomeCalendarEventTitle.value.trim(),
+					event_type: 'event',
+					start_date: welcomeCalendarEventStartDate.value,
+					end_date: welcomeCalendarEventEndDate.value,
+					start_time: allDay ? '' : welcomeCalendarEventStartTime.value,
+					end_time: allDay ? '' : welcomeCalendarEventEndTime.value,
+					is_all_day: allDay,
+					description_html: welcomeCalendarEventDescription.value.trim(),
+					color: welcomeCalendarEventColor.value,
+					visibility: 'family',
+				}),
+			});
+			const data = await response.json();
+			if (!response.ok || !data.ok) throw new Error(data.error || 'Unable to add calendar event');
+			setWelcomeCalendarDayModal(false);
+			await renderWelcomeCalendar();
+			globalToast(welcomeCalendarEventId.value ? 'Calendar event updated' : 'Calendar event added', 'success');
+		} catch (error) {
+			globalToast(error.message || 'Unable to add calendar event', 'error');
+		}
+	});
+	welcomeCalendarEventDelete?.addEventListener('click', async () => {
+		const id = welcomeCalendarEventId.value;
+		if (!id) return;
+		const confirmed = window.uiConfirm
+			? await window.uiConfirm('Delete this calendar event?', { title: 'Delete Calendar Event', confirmText: 'Delete', danger: true })
+			: window.confirm('Delete this calendar event?');
+		if (!confirmed) return;
+		try {
+			const response = await fetch(`/api/calendar/events/${encodeURIComponent(id)}`, { method: 'DELETE' });
+			const data = await response.json();
+			if (!response.ok || !data.ok) throw new Error(data.error || 'Unable to delete calendar event');
+			setWelcomeCalendarDayModal(false);
+			await renderWelcomeCalendar();
+			globalToast('Calendar event deleted', 'success');
+		} catch (error) {
+			globalToast(error.message || 'Unable to delete calendar event', 'error');
+		}
+	});
+	document.getElementById('welcomeCalendarPrev')?.addEventListener('click', () => {
+		welcomeCalendarAnchor.setMonth(welcomeCalendarAnchor.getMonth() - 1);
+		renderWelcomeCalendar();
+	});
+	document.getElementById('welcomeCalendarNext')?.addEventListener('click', () => {
+		welcomeCalendarAnchor.setMonth(welcomeCalendarAnchor.getMonth() + 1);
+		renderWelcomeCalendar();
+	});
+	document.getElementById('welcomeCalendarToday')?.addEventListener('click', () => {
+		welcomeCalendarAnchor = new Date();
+		renderWelcomeCalendar();
+	});
+	renderWelcomeCalendar();
 
 	// (Stats placeholders removed in screenshot-style layout)
 
@@ -655,6 +1391,76 @@ window.REMINDERS_TIME_FORMAT = "{{ (config.reminders.time_format if config.remin
 		}
 	}
 
+	const miniSlideshowItems = JSON.parse(document.getElementById('miniSlideshowData')?.textContent || '[]');
+	const miniSlideImage = document.getElementById('miniSlideImage');
+	const miniSlideVideo = document.getElementById('miniSlideVideo');
+	const miniSlideMeta = document.getElementById('miniSlideMeta');
+	const miniSlideshowPrev = document.getElementById('miniSlideshowPrev');
+	const miniSlideshowNext = document.getElementById('miniSlideshowNext');
+	const miniSlideshowToggle = document.getElementById('miniSlideshowToggle');
+	let miniIndex = 0;
+	let miniTimer = null;
+	let miniPlaying = true;
+
+	function renderMiniSlide() {
+		if (!miniSlideImage || !miniSlideVideo || !miniSlideshowItems.length) return;
+		const item = miniSlideshowItems[miniIndex % miniSlideshowItems.length];
+		if (!item) return;
+
+		if (item.is_video) {
+			miniSlideImage.classList.add('hidden');
+			miniSlideVideo.classList.remove('hidden');
+			miniSlideVideo.src = item.preview_url;
+			miniSlideVideo.muted = true;
+			miniSlideVideo.play().catch(() => {});
+		} else {
+			miniSlideVideo.pause();
+			miniSlideVideo.removeAttribute('src');
+			miniSlideVideo.load();
+			miniSlideVideo.classList.add('hidden');
+			miniSlideImage.classList.remove('hidden');
+			miniSlideImage.src = item.preview_url;
+		}
+		if (miniSlideMeta) {
+			miniSlideMeta.textContent = `${item.original_filename || item.filename || 'Media'} • ${item.uploader || 'Family'}`;
+		}
+	}
+
+	function scheduleMiniAdvance() {
+		if (miniTimer) clearTimeout(miniTimer);
+		if (!miniPlaying || !miniSlideshowItems.length) return;
+		miniTimer = setTimeout(() => {
+			miniIndex = (miniIndex + 1) % miniSlideshowItems.length;
+			renderMiniSlide();
+			scheduleMiniAdvance();
+		}, 5000);
+	}
+
+	miniSlideshowPrev?.addEventListener('click', () => {
+		miniIndex = (miniIndex - 1 + miniSlideshowItems.length) % miniSlideshowItems.length;
+		renderMiniSlide();
+		scheduleMiniAdvance();
+	});
+
+	miniSlideshowNext?.addEventListener('click', () => {
+		miniIndex = (miniIndex + 1) % miniSlideshowItems.length;
+		renderMiniSlide();
+		scheduleMiniAdvance();
+	});
+
+	miniSlideshowToggle?.addEventListener('click', () => {
+		miniPlaying = !miniPlaying;
+		miniSlideshowToggle.innerHTML = miniPlaying
+			? '<i class="fa-solid fa-pause"></i> Pause'
+			: '<i class="fa-solid fa-play"></i> Play';
+		scheduleMiniAdvance();
+	});
+
+	if (miniSlideshowItems.length && miniSlideImage && miniSlideVideo) {
+		renderMiniSlide();
+		scheduleMiniAdvance();
+	}
+
 	async function postPreviewInteraction(postId, action, payload) {
 		const response = await fetch(`/api/timeline/${postId}/${action}`, {
 			method: 'POST',
@@ -683,6 +1489,19 @@ window.REMINDERS_TIME_FORMAT = "{{ (config.reminders.time_format if config.remin
 	}
 
 	document.addEventListener('click', async (e) => {
+		const unmuteBtn = e.target.closest('.timeline-media-unmute');
+		if (unmuteBtn) {
+			const card = unmuteBtn.closest('article');
+			const video = card?.querySelector('.timeline-media-video');
+			if (video) {
+				video.muted = !video.muted;
+				unmuteBtn.innerHTML = video.muted
+					? '<i class="fa-solid fa-volume-high"></i> Unmute'
+					: '<i class="fa-solid fa-volume-xmark"></i> Mute';
+			}
+			return;
+		}
+
 		const likeBtn = e.target.closest('.hh-preview-like');
 		if (likeBtn) {
 			const postId = likeBtn.getAttribute('data-id');
@@ -741,6 +1560,7 @@ window.REMINDERS_TIME_FORMAT = "{{ (config.reminders.time_format if config.remin
 	});
 
 	hydratePreviewInteractions();
+	maybeShowMissedUpdatesModal();
 })();
 </script>
 {% endblock %}
