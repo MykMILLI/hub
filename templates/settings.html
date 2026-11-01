@@ -127,10 +127,12 @@
         <!-- Add new family member -->
         <div class="mb-6 pb-6 border-b border-gray-200 dark:border-gray-700">
             <label class="block text-sm text-gray-600 dark:text-gray-300 mb-2">Add New Member</label>
-            <form id="addMemberForm" class="flex gap-2 items-center">
-                <input type="text" id="newMemberInput" class="flex-1 p-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-white" placeholder="Family member name" required>
+            <form id="addMemberForm" class="flex flex-wrap gap-2 items-center">
+                <input type="text" id="newMemberInput" class="flex-1 min-w-[10rem] p-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-white" placeholder="Family member name" required>
+                <input type="email" id="newMemberEmail" class="flex-1 min-w-[12rem] p-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-white" placeholder="Email (sends login instructions; optional for kids)">
                 <select id="newMemberRole" class="p-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-white">
                     <option value="standard" selected>Standard</option>
+                    <option value="child">Child</option>
                     <option value="admin">Admin</option>
                 </select>
                 <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition">
@@ -148,7 +150,7 @@
                         <span class="font-medium text-gray-800 dark:text-gray-200 member-name">{{ member.name }}</span>
                         {% set member_role = member.role if member.role else 'standard' %}
                         <span class="member-role-badge px-2 py-0.5 rounded text-xs font-semibold {% if member_role == 'admin' %}bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300{% else %}bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300{% endif %}">
-                            {{ 'Admin' if member_role == 'admin' else 'Standard' }}
+                            {{ 'Admin' if member_role == 'admin' else ('Child' if member_role == 'child' else 'Standard') }}
                         </span>
                     </div>
                     {% if current_is_admin %}
@@ -217,6 +219,7 @@
                     <label class="block text-xs text-gray-500 mb-1">Role</label>
                     <select id="permissionSubjectRole" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-800 dark:text-white">
                         <option value="standard">Standard</option>
+                        <option value="child">Child</option>
                         <option value="admin">Admin</option>
                     </select>
                 </div>
@@ -557,20 +560,31 @@ document.addEventListener('DOMContentLoaded', () => {
         e.preventDefault();
         const name = newMemberInput.value.trim();
         const role = newMemberRole.value;
+        const email = document.getElementById('newMemberEmail').value.trim();
         if (!name) return;
         
         try {
             const response = await fetch('/api/family-members', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, role })
+                body: JSON.stringify({ name, role, email })
             });
             const data = await response.json();
             
             if (data.ok) {
                 newMemberInput.value = '';
+                document.getElementById('newMemberEmail').value = '';
                 renderMembers();
-                toast('Family member added successfully', 'success');
+                const sync = data.supabase_sync || {};
+                if (data.welcome_email_sent) {
+                    toast('Member added. Welcome email with login instructions sent.', 'success');
+                } else if (email && sync.temporary_password) {
+                    toast(`Member added, but the welcome email could not be sent. Temporary password: ${sync.temporary_password}`, 'warning');
+                } else if (email && !sync.ok) {
+                    toast('Member added, but no login account was created (check Supabase settings).', 'warning');
+                } else {
+                    toast('Family member added successfully', 'success');
+                }
             } else {
                 toast(data.error || 'Failed to add family member', 'error');
             }
@@ -682,7 +696,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         const div = document.createElement('div');
                         div.className = 'p-4 bg-gray-50 dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 member-item';
                         div.dataset.memberId = member.id;
-                        const roleLabel = member.role === 'admin' ? 'Admin' : 'Standard';
+                        const roleLabel = member.role === 'admin' ? 'Admin' : (member.role === 'child' ? 'Child' : 'Standard');
                         const roleBadgeClass = member.role === 'admin'
                             ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
                             : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300';
@@ -871,8 +885,8 @@ document.addEventListener('DOMContentLoaded', () => {
             .join('');
 
         const selected = details.find(d => d.name === permissionSubject) || details[0];
-        permissionSubjectRole.value = selected.role === 'admin' ? 'admin' : 'standard';
-        permissionSubjectBadge.textContent = `Editing ${selected.name} (${selected.role === 'admin' ? 'Admin' : 'Standard'})`;
+        permissionSubjectRole.value = ['admin', 'child'].includes(selected.role) ? selected.role : 'standard';
+        permissionSubjectBadge.textContent = `Editing ${selected.name} (${selected.role === 'admin' ? 'Admin' : (selected.role === 'child' ? 'Child' : 'Standard')})`;
         permissionSubjectBadge.className = selected.role === 'admin'
             ? 'px-2 py-2 text-xs rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 text-center'
             : 'px-2 py-2 text-xs rounded bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-center';

@@ -493,6 +493,7 @@ class Chore(db.Model):
     chart_data_json = db.Column(db.Text, default='[]')
     table_data_json = db.Column(db.Text, default='{"headers":[],"rows":[]}')
     completed_at = db.Column(db.DateTime)
+    reward = db.Column(db.String(200))
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     weekly_completions = db.relationship(
         'ChoreWeeklyCompletion',
@@ -500,6 +501,16 @@ class Chore(db.Model):
         cascade='all, delete-orphan',
         lazy=True,
     )
+
+
+class ChoreRewardAward(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    chore_id = db.Column(db.Integer, index=True)
+    chore_title = db.Column(db.String(300))
+    member_name = db.Column(db.String(128), index=True)
+    reward = db.Column(db.String(200), nullable=False)
+    awarded_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    redeemed = db.Column(db.Boolean, default=False)
 
 
 class ChoreWeeklyCompletion(db.Model):

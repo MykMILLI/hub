@@ -43,7 +43,7 @@ def _current_account_payload() -> dict:
 
 def _normalize_member_role(value: str | None) -> str:
     role = sanitize_text((value or 'standard').strip().lower())
-    return 'admin' if role == 'admin' else 'standard'
+    return role if role in {'admin', 'child'} else 'standard'
 
 
 def _find_member_by_email(email: str) -> FamilyMember | None:

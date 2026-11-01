@@ -86,6 +86,11 @@
                     <input id="newTaskWatchers" type="text" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded" placeholder="People to notify when this is finished" autocomplete="off">
                     <p class="mt-1 text-xs text-gray-500">Collaborators are notified automatically. Add other family members who should follow progress.</p>
                 </div>
+                <div>
+                    <label class="block text-xs text-gray-600 dark:text-gray-300 mb-1">Reward (optional)</label>
+                    <input id="newTaskReward" type="text" maxlength="200" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded" placeholder="e.g. 30 minutes of screen time">
+                    <p class="mt-1 text-xs text-gray-500">Shown with a celebration when this is completed.</p>
+                </div>
                 <div class="pt-1 flex justify-end gap-2">
                     <button id="cancelTaskModalBtn" type="button" class="btn btn-secondary">Cancel</button>
                     <button id="createTaskModalBtn" type="submit" class="btn btn-primary">Create</button>
@@ -115,6 +120,10 @@
                     <div>
                         <label class="block text-xs mb-1">Due date</label>
                         <input id="editTaskDueDate" type="date" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded">
+                    </div>
+                    <div>
+                        <label class="block text-xs mb-1">Reward</label>
+                        <input id="editTaskReward" maxlength="200" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded" placeholder="e.g. 30 minutes of screen time">
                     </div>
                     <div>
                         <label class="block text-xs mb-1">Status</label>
@@ -468,9 +477,12 @@
         }
     }
 
-    function showChoreCompletionModal(task) {
+    function showChoreCompletionModal(task, award) {
         const modal = $('completionCelebrationModal');
-        $('completionCelebrationMessage').textContent = `Nice work, ${currentUser || 'you'}! You completed “${task.description || 'this chore'}”.`;
+        const title = task.description || 'this chore';
+        $('completionCelebrationMessage').textContent = award && award.reward
+            ? `Good job, ${currentUser || 'you'}! Because you completed “${title}” you win: ${award.reward}!`
+            : `Nice work, ${currentUser || 'you'}! You completed “${title}”.`;
         const stampEl = $('completionCelebrationStamp');
         if (stampEl) {
             const state = taskCompletionState(task);
@@ -503,7 +515,7 @@
         document.querySelectorAll(selector).forEach(input => { input.checked = wanted.has(input.value); });
     }
 
-    async function createTask(description, type, assigneeInput, dueDate, watchersInput = '', daysOfWeek = []) {
+    async function createTask(description, type, assigneeInput, dueDate, watchersInput = '', daysOfWeek = [], reward = '') {
         const assignees = parseAssignees(assigneeInput, type);
         const watchers = parseAssignees(watchersInput);
         const res = await fetch('/api/chores', {
@@ -511,6 +523,7 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 description, creator: currentUser, assignee: assignees[0] || null, assignees, due_date: dueDate || null,
+                reward,
                 watchers, days_of_week: type === 'chore' ? daysOfWeek : [],
                 task_type: type, status: 'todo', status_options: availableStatuses,
             }),
@@ -552,7 +565,7 @@
         await load();
         if (done) {
             launchConfetti();
-            if (task.task_type === 'chore') showChoreCompletionModal(data.item || task);
+            showChoreCompletionModal(data.item || task, data.award);
         }
     }
 
@@ -697,6 +710,7 @@
         $('newTaskAssigneeHint').textContent = 'Choose one or more family members who will work together.';
         $('newTaskDueDate').value = '';
         $('newTaskWatchers').value = '';
+        $('newTaskReward').value = '';
         $('newTaskChoreDays').classList.toggle('hidden', type !== 'chore');
         setSelectedDays('.new-task-day', []);
         $('newTaskModal').classList.remove('hidden');
@@ -842,6 +856,7 @@
         $('editTaskAssignee').value = taskAssignees(task).join(', ');
         $('editTaskDueDate').value = task.due_date || '';
         $('editTaskWatchers').value = (task.watchers || []).join(', ');
+        $('editTaskReward').value = task.reward || '';
         $('editTaskChoreDays').classList.toggle('hidden', task.task_type !== 'chore');
         setSelectedDays('.edit-task-day', task.days_of_week || []);
         $('editTaskMentions').value = (task.mentions || []).map(m => '@' + m).join(', ');
@@ -876,6 +891,7 @@
                 watchers: parseAssignees($('editTaskWatchers').value),
                 days_of_week: task.task_type === 'chore' ? selectedDays('.edit-task-day') : [],
                 due_date: $('editTaskDueDate').value || null,
+                reward: $('editTaskReward').value.trim(),
                 status: $('editTaskStatus').value,
                 mentions,
                 details_html: $('editTaskDetailsHtml').value,
@@ -929,6 +945,7 @@
                 $('newTaskDueDate').value,
                 $('newTaskWatchers').value.trim(),
                 selectedDays('.new-task-day'),
+                $('newTaskReward').value.trim(),
             );
             $('quickAddInput').value = '';
             closeNewModal();

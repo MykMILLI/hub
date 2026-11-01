@@ -5,7 +5,7 @@ import re
 import bleach
 from flask import render_template, request, redirect, url_for, current_app, jsonify
 
-from ..models import ActivityLog, db, Chore, ChoreWeeklyCompletion, FamilyMember
+from ..models import ActivityLog, db, Chore, ChoreRewardAward, ChoreWeeklyCompletion, FamilyMember
 from ..blueprints import main_bp
 from ..security import sanitize_text
 from ..services.chore_recurrence import (
@@ -396,6 +396,7 @@ def _serialize_task(item: Chore, reference_date: date | None = None) -> dict:
         ) if checklist else '',
         'chart_data': chart_data,
         'table_data': table_data,
+        'reward': sanitize_text(getattr(item, 'reward', '') or '').strip(),
     }
 
 
@@ -680,6 +681,7 @@ def api_create_chore():
             chart_data_json=json.dumps(chart_data),
             table_data_json=json.dumps(table_data),
             completed_at=datetime.utcnow() if done else None,
+            reward=sanitize_text(str(data.get('reward') or '')).strip()[:200] or None,
             updated_at=datetime.utcnow(),
         )
         db.session.add(chore)
@@ -775,6 +777,9 @@ def api_update_chore(chore_id):
         if 'table_data' in data:
             chore.table_data_json = json.dumps(_parse_table_data(data.get('table_data')))
 
+        if 'reward' in data:
+            chore.reward = sanitize_text(str(data.get('reward') or '')).strip()[:200] or None
+
         chore.status_options_json = json.dumps(current_options)
         chore.updated_at = datetime.utcnow()
         _log_task_timeline_event(
@@ -857,6 +862,16 @@ def api_set_chore_done(chore_id):
             )
 
         chore.updated_at = datetime.utcnow()
+        award = None
+        reward_text = sanitize_text(getattr(chore, 'reward', '') or '').strip()
+        if requested_done and reward_text and not before.get('done'):
+            award = ChoreRewardAward(
+                chore_id=chore.id,
+                chore_title=(chore.description or '')[:300],
+                member_name=actor,
+                reward=reward_text,
+            )
+            db.session.add(award)
         _log_task_timeline_event(
             task_id=chore.id,
             actor=actor,
@@ -866,7 +881,10 @@ def api_set_chore_done(chore_id):
         db.session.commit()
         payload = _serialize_task(chore, occurrence_date)
         _emit_task_notifications(before=before, after=payload, actor=actor)
-        return jsonify({'ok': True, 'item': payload})
+        response = {'ok': True, 'item': payload}
+        if award:
+            response['award'] = {'reward': award.reward, 'member': award.member_name, 'chore': award.chore_title}
+        return jsonify(response)
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 400
 

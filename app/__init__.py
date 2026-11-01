@@ -256,6 +256,7 @@ def create_app(test_config: dict | None = None):
                 ensure_column('chore', 'table_data_json', 'TEXT', '{"headers":[],"rows":[]}')
                 ensure_column('chore', 'completed_at', 'TIMESTAMP', None)
                 ensure_column('chore', 'updated_at', 'TIMESTAMP', None)
+                ensure_column('chore', 'reward', 'TEXT', None)
                 ensure_column('chore_weekly_completion', 'completed_on', 'DATE', None)
                 ensure_column('media', 'status', 'TEXT', 'done')
                 ensure_column('media', 'progress', 'TEXT', None)

@@ -117,11 +117,11 @@ def is_event_enabled_for_member(member_name: str, event_type: str) -> bool:
     return True
 
 
-def _send_smtp_email(to_email: str, subject: str, body: str) -> bool:
+def _send_smtp_email(to_email: str, subject: str, body: str, *, force: bool = False) -> bool:
     smtp = _smtp_cfg()
     if not smtp.get('enabled'):
         return False
-    if not _notifications_cfg().get('email_enabled'):
+    if not force and not _notifications_cfg().get('email_enabled'):
         return False
 
     host = str(smtp.get('host') or '').strip()
@@ -152,6 +152,45 @@ def _send_smtp_email(to_email: str, subject: str, body: str) -> bool:
         return True
     except Exception:
         return False
+
+
+def send_welcome_email(
+    to_email: str,
+    member_name: str,
+    *,
+    login_url: str,
+    temporary_password: str | None = None,
+    existing_account: bool = False,
+) -> bool:
+    target = sanitize_text(to_email or '').strip()
+    if not target:
+        return False
+    name = sanitize_text(member_name or '').strip() or 'there'
+    lines = [
+        f"Hi {name},",
+        "",
+        "Welcome to HomeHub, your family's shared home for chores, calendar, photos, shopping lists and more!",
+        "",
+        "How to log in:",
+        f"  1. Open HomeHub: {login_url}",
+        f"  2. Enter your email: {target}",
+    ]
+    if temporary_password:
+        lines += [
+            f"  3. Enter this temporary password: {temporary_password}",
+            "  4. After signing in, change your password from your profile settings.",
+        ]
+    else:
+        lines += ["  3. Enter the password you already use for your HomeHub account."]
+    lines += [
+        "",
+        "Once you're in you can optionally set a 4-digit PIN from your profile for quick sign-in on shared devices.",
+        "",
+        "If you weren't expecting this email, please let your family admin know.",
+        "",
+        "- HomeHub",
+    ]
+    return _send_smtp_email(target, 'Welcome to HomeHub - how to log in', "\n".join(lines), force=True)
 
 
 def send_test_email(to_email: str, member_name: str | None = None) -> tuple[bool, str]:

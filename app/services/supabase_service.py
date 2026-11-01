@@ -635,7 +635,7 @@ class SupabaseService:
             display_name = 'HomeHub User'
 
         role = str(user_meta.get('role') or app_meta.get('role') or 'standard').strip().lower()
-        if role not in {'admin', 'standard'}:
+        if role not in {'admin', 'standard', 'child'}:
             role = 'standard'
 
         homehub_access_raw = user_meta.get('homehub_access', app_meta.get('homehub_access', False))
@@ -675,7 +675,7 @@ class SupabaseService:
         clean_prev_email = str(previous_email or '').strip().lower()
         clean_member_name = str(member_name or '').strip()
         clean_role = str(role or 'standard').strip().lower()
-        if clean_role not in {'admin', 'standard'}:
+        if clean_role not in {'admin', 'standard', 'child'}:
             clean_role = 'standard'
         if not clean_email or not clean_member_name:
             return {'ok': False, 'synced': False, 'reason': 'missing_email_or_member_name'}

@@ -14,7 +14,7 @@ from ..models import (
 from ..blueprints import main_bp
 from ..security import is_http_url, sanitize_text
 from ..permissions import APP_MODULES, get_visible_app_modules, parse_allowed_members, sanitize_visibility
-from ..services.notification_service import send_test_email
+from ..services.notification_service import send_test_email, send_welcome_email
 from ..services.supabase_service import supabase_service
 from datetime import datetime
 import yaml
@@ -24,7 +24,7 @@ import json
 
 def _normalize_role(value: str | None) -> str:
     role = sanitize_text((value or 'standard').strip().lower())
-    return 'admin' if role == 'admin' else 'standard'
+    return role if role in {'admin', 'child'} else 'standard'
 
 
 def _is_config_admin_name(name: str | None) -> bool:
@@ -69,6 +69,25 @@ def _sync_member_revoke_in_supabase(*, member_email: str | None) -> dict | None:
         return None
     actor = sanitize_text((session.get('current_member') or '').strip())
     return supabase_service.revoke_member_user_access(email=clean_email, actor=actor)
+
+
+def _send_welcome_if_needed(member_name: str, email: str | None, sync: dict | None) -> bool:
+    if not email or not sync or not sync.get('ok'):
+        return False
+    if not sync.get('created') and not sync.get('announce'):
+        return False
+    try:
+        sent = send_welcome_email(
+            email,
+            member_name,
+            login_url=request.host_url.rstrip('/') + '/login',
+            temporary_password=sync.get('temporary_password'),
+        )
+    except Exception:
+        sent = False
+    if sent:
+        sync.pop('temporary_password', None)
+    return sent
 
 
 def _mark_member_login_welcome_state(member: FamilyMember | None) -> None:
@@ -307,9 +326,11 @@ def api_add_family_member():
             member_email=member.email,
             member_role=member.role,
         )
+        welcome_email_sent = _send_welcome_if_needed(member.name, member.email, supabase_sync)
         
         return jsonify({
             "ok": True,
+            "welcome_email_sent": welcome_email_sent,
             "member": {
                 "id": member.id,
                 "name": member.name,
@@ -374,9 +395,11 @@ def api_update_family_member(member_id):
             )
         elif previous_email:
             supabase_sync = _sync_member_revoke_in_supabase(member_email=previous_email)
+        welcome_email_sent = _send_welcome_if_needed(member.name, member.email, supabase_sync)
         
         return jsonify({
             "ok": True,
+            "welcome_email_sent": welcome_email_sent,
             "member": {
                 "id": member.id,
                 "name": member.name,
