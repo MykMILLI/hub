@@ -480,16 +480,50 @@ class Chore(db.Model):
     tags = db.Column(db.Text, default='[]')
     task_type = db.Column(db.String(24), default='chore')  # chore|todo|task
     assignee = db.Column(db.String(128), index=True)
+    assignees_json = db.Column(db.Text, default='[]')
+    watchers_json = db.Column(db.Text, default='[]')
+    days_of_week_json = db.Column(db.Text, default='[]')
     due_date = db.Column(db.Date, index=True)
     status = db.Column(db.String(32), default='todo', index=True)
     status_options_json = db.Column(db.Text, default='["todo","in_progress","completed"]')
     mentions_json = db.Column(db.Text, default='[]')
     details_html = db.Column(db.Text)
     checklist_json = db.Column(db.Text, default='[]')
+    checklist_meta_json = db.Column(db.Text, default='{}')
     chart_data_json = db.Column(db.Text, default='[]')
     table_data_json = db.Column(db.Text, default='{"headers":[],"rows":[]}')
     completed_at = db.Column(db.DateTime)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    weekly_completions = db.relationship(
+        'ChoreWeeklyCompletion',
+        backref='chore',
+        cascade='all, delete-orphan',
+        lazy=True,
+    )
+
+
+class ChoreWeeklyCompletion(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    chore_id = db.Column(
+        db.Integer,
+        db.ForeignKey('chore.id', ondelete='CASCADE'),
+        nullable=False,
+        index=True,
+    )
+    week_start = db.Column(db.Date, nullable=False, index=True)
+    scheduled_day = db.Column(db.String(3), nullable=False)
+    completed_by = db.Column(db.String(128))
+    completed_on = db.Column(db.Date)
+    completed_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            'chore_id',
+            'week_start',
+            'scheduled_day',
+            name='uq_chore_weekly_completion_occurrence',
+        ),
+    )
 
 class Recipe(db.Model):
     id = db.Column(db.Integer, primary_key=True)

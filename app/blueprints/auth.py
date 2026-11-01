@@ -15,10 +15,11 @@ def _supabase_auth_enabled(cfg: dict) -> bool:
 
 @main_bp.before_app_request
 def reload_config_and_auth():
-    try:
-        current_app.config['HOMEHUB_CONFIG'] = load_config()
-    except Exception:
-        pass
+    if not current_app.config.get('TESTING'):
+        try:
+            current_app.config['HOMEHUB_CONFIG'] = load_config()
+        except Exception:
+            pass
     cfg = current_app.config.get('HOMEHUB_CONFIG', {})
     supabase_auth = _supabase_auth_enabled(cfg)
     
@@ -63,6 +64,7 @@ def reload_config_and_auth():
             '/api/member-logout',
             '/api/current-member',
             '/api/member/set-pin',
+            '/api/notifications/mobile/poll',
             '/api/supabase/auth/login',
             '/api/supabase/auth/me',
             '/api/supabase/auth/logout',

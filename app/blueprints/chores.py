@@ -5,9 +5,18 @@ import re
 import bleach
 from flask import render_template, request, redirect, url_for, current_app, jsonify
 
-from ..models import ActivityLog, db, Chore, FamilyMember
+from ..models import ActivityLog, db, Chore, ChoreWeeklyCompletion, FamilyMember
 from ..blueprints import main_bp
 from ..security import sanitize_text
+from ..services.chore_recurrence import (
+    WEEKDAY_LABELS as _WEEKDAY_LABELS,
+    day_label as _day_label,
+    parse_reference_date as _parse_reference_date,
+    resolve_completion_day as _resolve_completion_day,
+    resolve_reopen_day as _resolve_reopen_day,
+    sunday_week_start as _sunday_week_start,
+    weekly_progress as _weekly_progress,
+)
 from ..services.notification_service import publish_notification
 
 
@@ -83,6 +92,79 @@ def _parse_mentions(description: str, details_html: str, explicit_mentions) -> l
     return sorted(parsed, key=lambda n: n.lower())
 
 
+_DAY_NAMES = {
+    'sun': 0, 'sunday': 0, '0': 0,
+    'mon': 1, 'monday': 1, '1': 1,
+    'tue': 2, 'tues': 2, 'tuesday': 2, '2': 2,
+    'wed': 3, 'wednesday': 3, '3': 3,
+    'thu': 4, 'thur': 4, 'thurs': 4, 'thursday': 4, '4': 4,
+    'fri': 5, 'friday': 5, '5': 5,
+    'sat': 6, 'saturday': 6, '6': 6,
+}
+def _parse_name_list(raw_items, *, fallback=None) -> list[str]:
+    items = _parse_json(raw_items, raw_items)
+    if isinstance(items, str):
+        items = [items]
+    if not isinstance(items, list):
+        items = []
+    if not items and fallback:
+        items = [fallback]
+
+    members = {name.lower(): name for name in _family_members()}
+    cleaned = []
+    seen = set()
+    for item in items:
+        if isinstance(item, (list, tuple, set)):
+            nested = item
+        else:
+            nested = [item]
+        for value in nested:
+            clean = sanitize_text(str(value or '')).strip()
+            if not clean:
+                continue
+            parts = [part.strip() for part in clean.split(',') if part.strip()]
+            for part in parts:
+                canonical = members.get(part.lower(), part)
+                key = canonical.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                cleaned.append(canonical)
+    return cleaned
+
+
+def _parse_assignees(raw_assignees, fallback_assignee=None, *, task_type='todo') -> list[str]:
+    return _parse_name_list(raw_assignees, fallback=fallback_assignee)
+
+
+def _parse_days_of_week(raw_days) -> list[str]:
+    data = _parse_json(raw_days, raw_days)
+    if isinstance(data, str):
+        data = [segment.strip() for segment in data.split(',') if segment.strip()]
+    if not isinstance(data, list):
+        return []
+
+    days = []
+    seen = set()
+    for item in data:
+        value = sanitize_text(str(item or '')).strip().lower()
+        if not value:
+            continue
+        if value.isdigit():
+            day_index = int(value)
+        else:
+            day_index = _DAY_NAMES.get(value.replace('-', '').replace('_', '').replace('.', ''), None)
+            if day_index is None and len(value) > 3 and value.endswith('day'):
+                day_index = _DAY_NAMES.get(value[:-3], None)
+        if day_index is None or day_index not in range(7):
+            continue
+        if day_index in seen:
+            continue
+        seen.add(day_index)
+        days.append(_WEEKDAY_LABELS[day_index])
+    return sorted(days, key=lambda label: _WEEKDAY_LABELS.index(label))
+
+
 def _sanitize_details_html(value) -> str:
     return bleach.clean(
         str(value or ''),
@@ -143,12 +225,66 @@ def _parse_checklist(raw_value):
             text = sanitize_text(str(item.get('text') or '')).strip()
             if not text:
                 continue
-            rows.append({'text': text, 'done': bool(item.get('done'))})
+            note = sanitize_text(str(item.get('note') or '')).strip()[:500]
+            rows.append({'text': text, 'done': bool(item.get('done')), 'note': note})
         elif isinstance(item, str):
             text = sanitize_text(item).strip()
             if text:
-                rows.append({'text': text, 'done': False})
+                rows.append({'text': text, 'done': False, 'note': ''})
     return rows
+
+
+_DEFAULT_CHECKLIST_META = {'item_label': 'step', 'item_label_plural': 'steps', 'progress_verb': ''}
+
+
+def _pluralize(word: str) -> str:
+    lowered = word.lower()
+    if lowered.endswith('y') and len(word) > 1 and lowered[-2] not in 'aeiou':
+        return word[:-1] + 'ies'
+    if lowered.endswith(('s', 'x', 'z', 'ch', 'sh')):
+        return word + 'es'
+    return word + 's'
+
+
+def _singularize(word: str) -> str:
+    lowered = word.lower()
+    if lowered.endswith('ies') and len(word) > 3:
+        return word[:-3] + 'y'
+    if lowered.endswith('es') and lowered[:-2].endswith(('ss', 'x', 'z', 'ch', 'sh')):
+        return word[:-2]
+    if lowered.endswith('s') and len(word) > 1:
+        return word[:-1]
+    return word
+
+
+def _parse_checklist_meta(raw_value):
+    """Per-task checklist vocabulary so a list can track houses, books, places, etc."""
+    data = _parse_json(raw_value, {})
+    meta = dict(_DEFAULT_CHECKLIST_META)
+    if not isinstance(data, dict):
+        return meta
+
+    singular = sanitize_text(str(data.get('item_label') or '')).strip()[:40]
+    plural = sanitize_text(str(data.get('item_label_plural') or '')).strip()[:40]
+    verb = sanitize_text(str(data.get('progress_verb') or '')).strip()[:40]
+
+    if not singular and not plural:
+        return meta
+    if not plural:
+        plural = _pluralize(singular)
+    if not singular:
+        singular = _singularize(plural)
+
+    meta['item_label'] = singular
+    meta['item_label_plural'] = plural
+    meta['progress_verb'] = verb
+    return meta
+
+
+def _checklist_progress_label(meta: dict, done: int, total: int) -> str:
+    noun = (meta.get('item_label_plural') if total != 1 else meta.get('item_label')) or 'steps'
+    verb = (meta.get('progress_verb') or '').strip()
+    return f"{done} of {total} {noun}{' ' + verb if verb else ''}"
 
 
 def _parse_chart_data(raw_value):
@@ -191,7 +327,7 @@ def _parse_table_data(raw_value):
     return {'headers': headers, 'rows': rows}
 
 
-def _serialize_task(item: Chore) -> dict:
+def _serialize_task(item: Chore, reference_date: date | None = None) -> dict:
     tags = _parse_tags(item.tags)
     status_options = _normalize_status_options(getattr(item, 'status_options_json', '[]'))
     status = _normalize_status_token(getattr(item, 'status', 'todo'))
@@ -203,42 +339,84 @@ def _serialize_task(item: Chore) -> dict:
     mentions = [sanitize_text(str(m or '')).strip() for m in mentions if sanitize_text(str(m or '')).strip()]
 
     checklist = _parse_checklist(getattr(item, 'checklist_json', '[]'))
+    checklist_meta = _parse_checklist_meta(getattr(item, 'checklist_meta_json', '{}'))
     chart_data = _parse_chart_data(getattr(item, 'chart_data_json', '[]'))
     table_data = _parse_table_data(getattr(item, 'table_data_json', '{}'))
+    task_type = sanitize_text(getattr(item, 'task_type', 'chore') or 'chore').strip().lower() or 'chore'
+    assignees = _parse_assignees(
+        getattr(item, 'assignees_json', '[]'),
+        getattr(item, 'assignee', None),
+        task_type=task_type,
+    )
+    watchers = _parse_name_list(getattr(item, 'watchers_json', '[]'))
+    if not watchers and assignees:
+        watchers = assignees[:]
+    days_of_week = _parse_days_of_week(getattr(item, 'days_of_week_json', '[]'))
+    progress = (
+        _weekly_progress(item, days_of_week, reference_date or date.today())
+        if task_type == 'chore'
+        else None
+    )
+    effective_done = bool(progress['complete']) if progress else bool(item.done)
+    effective_status = 'completed' if effective_done else status
+    if progress and not effective_done and effective_status == 'completed':
+        effective_status = 'todo'
 
     return {
         'id': item.id,
         'description': item.description,
         'title': item.description,
-        'done': bool(item.done),
+        'done': effective_done,
         'creator': item.creator,
         'timestamp': item.timestamp.isoformat() if item.timestamp else None,
         'updated_at': item.updated_at.isoformat() if getattr(item, 'updated_at', None) else None,
-        'completed_at': item.completed_at.isoformat() if getattr(item, 'completed_at', None) else None,
+        'completed_at': (
+            item.completed_at.isoformat()
+            if effective_done and getattr(item, 'completed_at', None)
+            else (progress.get('last_completed_at') if progress else None)
+        ),
         'tags': tags,
-        'task_type': sanitize_text(getattr(item, 'task_type', 'chore') or 'chore').strip().lower() or 'chore',
-        'assignee': sanitize_text(getattr(item, 'assignee', '') or '').strip() or None,
+        'task_type': task_type,
+        'assignee': assignees[0] if assignees else None,
+        'assignees': assignees,
+        'watchers': watchers,
+        'days_of_week': days_of_week,
+        'weekly_progress': progress,
         'due_date': item.due_date.isoformat() if getattr(item, 'due_date', None) else None,
-        'status': status,
+        'status': effective_status,
         'status_options': status_options,
         'mentions': sorted(set(mentions), key=lambda n: n.lower()),
         'details_html': getattr(item, 'details_html', '') or '',
         'checklist': checklist,
+        'checklist_meta': checklist_meta,
+        'checklist_progress_label': _checklist_progress_label(
+            checklist_meta,
+            sum(1 for row in checklist if row.get('done')),
+            len(checklist),
+        ) if checklist else '',
         'chart_data': chart_data,
         'table_data': table_data,
     }
 
 
-def _emit_task_notifications(*, before: dict | None, after: dict, actor: str):
-    before_assignee = (before or {}).get('assignee')
-    after_assignee = after.get('assignee')
+def _task_recipients(task: dict | None) -> list[str]:
+    assignees = set((task or {}).get('assignees') or ([(task or {}).get('assignee')] if (task or {}).get('assignee') else []))
+    watchers = set((task or {}).get('watchers') or [])
+    merged = sorted(assignees | watchers, key=lambda name: name.lower())
+    return [name for name in merged if name]
 
-    if after_assignee and after_assignee != before_assignee:
+
+def _emit_task_notifications(*, before: dict | None, after: dict, actor: str):
+    before_assignees = set((before or {}).get('assignees') or ([before.get('assignee')] if before and before.get('assignee') else []))
+    after_assignees = set(after.get('assignees') or ([after.get('assignee')] if after.get('assignee') else []))
+    new_assignees = sorted(after_assignees - before_assignees, key=lambda name: name.lower())
+
+    if new_assignees:
         publish_notification(
             event_type='task_assigned',
             title='New task assigned',
             message=f"{actor or 'A family member'} assigned you: {after.get('description') or 'Task'}",
-            target_members=[after_assignee],
+            target_members=new_assignees,
             created_by=actor,
             payload={'task_id': after.get('id'), 'status': after.get('status'), 'due_date': after.get('due_date')},
             channels=['in_app', 'mobile'],
@@ -246,13 +424,34 @@ def _emit_task_notifications(*, before: dict | None, after: dict, actor: str):
 
     before_mentions = set((before or {}).get('mentions') or [])
     after_mentions = set(after.get('mentions') or [])
-    new_mentions = sorted(after_mentions - before_mentions - ({after_assignee} if after_assignee else set()), key=lambda n: n.lower())
+    new_mentions = sorted(after_mentions - before_mentions - after_assignees, key=lambda n: n.lower())
     if new_mentions:
         publish_notification(
             event_type='task_mention',
             title='You were mentioned in a task',
             message=f"{actor or 'A family member'} mentioned you in: {after.get('description') or 'Task'}",
             target_members=new_mentions,
+            created_by=actor,
+            payload={'task_id': after.get('id'), 'status': after.get('status'), 'due_date': after.get('due_date')},
+            channels=['in_app', 'mobile'],
+        )
+
+    if before is None:
+        return
+
+    before_done = bool((before or {}).get('done'))
+    after_done = bool(after.get('done'))
+    if before_done == after_done or not after_done:
+        return
+
+    recipients = [name for name in _task_recipients(after) if name and name.lower() != (actor or '').lower()]
+    if recipients:
+        item_label = 'Chore' if after.get('task_type') == 'chore' else 'Task'
+        publish_notification(
+            event_type='task_completed',
+            title=f'{item_label} completed',
+            message=f"{actor or 'A family member'} marked this as done: {after.get('description') or 'Task'}",
+            target_members=recipients,
             created_by=actor,
             payload={'task_id': after.get('id'), 'status': after.get('status'), 'due_date': after.get('due_date')},
             channels=['in_app', 'mobile'],
@@ -277,7 +476,10 @@ def chores():
         description = sanitize_text(request.form.get('description') or request.form.get('title') or '')
         creator = sanitize_text(request.form.get('creator') or '').strip()
         task_type = sanitize_text(request.form.get('task_type') or 'todo').strip().lower() or 'todo'
-        assignee = sanitize_text(request.form.get('assignee') or '').strip() or None
+        assignees = _parse_assignees(request.form.get('assignees'), request.form.get('assignee'), task_type=task_type)
+        assignee = assignees[0] if assignees else None
+        watchers = _parse_name_list(request.form.get('watchers') or request.form.get('watcher') or [], fallback=assignee)
+        days_of_week = _parse_days_of_week(request.form.get('days_of_week') or request.form.get('days') or [])
         due_date = _parse_due_date(request.form.get('due_date'))
         details_html = _sanitize_details_html(request.form.get('details_html') or '')
         status = _normalize_status_token(request.form.get('status') or 'todo')
@@ -289,6 +491,7 @@ def chores():
         tags_list = _parse_tags(request.form.get('tags', '').strip())
         mentions = _parse_mentions(description, details_html, request.form.get('mentions') or [])
         checklist = _parse_checklist(request.form.get('checklist') or [])
+        checklist_meta = _parse_checklist_meta(request.form.get('checklist_meta') or '{}')
         chart_data = _parse_chart_data(request.form.get('chart_data') or [])
         table_data = _parse_table_data(request.form.get('table_data') or '{}')
 
@@ -298,12 +501,16 @@ def chores():
             tags=json.dumps(tags_list),
             task_type=task_type,
             assignee=assignee,
+            assignees_json=json.dumps(assignees),
+            watchers_json=json.dumps(watchers),
+            days_of_week_json=json.dumps(days_of_week),
             due_date=due_date,
             status=status,
             status_options_json=json.dumps(status_options),
             mentions_json=json.dumps(mentions),
             details_html=details_html,
             checklist_json=json.dumps(checklist),
+            checklist_meta_json=json.dumps(checklist_meta),
             chart_data_json=json.dumps(chart_data),
             table_data_json=json.dumps(table_data),
             done=done,
@@ -391,30 +598,30 @@ def api_get_chores():
     status = _normalize_status_token(request.args.get('status') or '') if request.args.get('status') else ''
     assignee = sanitize_text(request.args.get('assignee') or '').strip()
     include_completed = str(request.args.get('include_completed') or '').strip().lower() in {'1', 'true', 'yes'}
+    reference_date = _parse_reference_date(request.args.get('as_of'))
 
-    query = Chore.query
+    items = Chore.query.order_by(Chore.done.asc(), Chore.due_date.asc(), Chore.timestamp.desc()).all()
+    serialized = [_serialize_task(item, reference_date) for item in items]
     if not include_completed:
-        query = query.filter(Chore.done.is_(False))
-    if assignee:
-        query = query.filter(Chore.assignee == assignee)
+        serialized = [item for item in serialized if not item['done']]
     if status:
-        query = query.filter(Chore.status == status)
-
-    items = query.order_by(Chore.done.asc(), Chore.due_date.asc(), Chore.timestamp.desc()).all()
+        serialized = [item for item in serialized if item['status'] == status]
+    if assignee:
+        serialized = [
+            item for item in serialized
+            if any(name.lower() == assignee.lower() for name in item['assignees'])
+        ]
     if tags:
         try:
             sel = json.loads(tags)
             if isinstance(sel, list) and sel:
-                def match(item_tags):
-                    try:
-                        arr = json.loads(item_tags or '[]')
-                    except Exception:
-                        arr = []
-                    return any(t in arr for t in sel)
-                items = [i for i in items if match(i.tags)]
+                serialized = [
+                    item for item in serialized
+                    if any(tag in item['tags'] for tag in sel)
+                ]
         except Exception:
             pass
-    return jsonify([_serialize_task(i) for i in items])
+    return jsonify(serialized)
 
 
 @main_bp.route('/api/chores', methods=['POST'])
@@ -432,7 +639,10 @@ def api_create_chore():
 
         tags = _parse_tags(raw_tags)
         task_type = sanitize_text(data.get('task_type') or 'todo').strip().lower() or 'todo'
-        assignee = sanitize_text(data.get('assignee') or '').strip() or None
+        assignees = _parse_assignees(data.get('assignees'), data.get('assignee'), task_type=task_type)
+        assignee = assignees[0] if assignees else None
+        watchers = _parse_name_list(data.get('watchers') or data.get('watcher') or [], fallback=assignee)
+        days_of_week = _parse_days_of_week(data.get('days_of_week') or data.get('days') or data.get('weekdays') or [])
         due_date = _parse_due_date(data.get('due_date'))
         status_options = _normalize_status_options(data.get('status_options') or [], fallback=_DEFAULT_STATUS_OPTIONS)
         status = _normalize_status_token(data.get('status') or 'todo')
@@ -442,6 +652,7 @@ def api_create_chore():
         details_html = _sanitize_details_html(data.get('details_html') or '')
         mentions = _parse_mentions(description, details_html, data.get('mentions') or [])
         checklist = _parse_checklist(data.get('checklist') or [])
+        checklist_meta = _parse_checklist_meta(data.get('checklist_meta') or {})
         chart_data = _parse_chart_data(data.get('chart_data') or [])
         table_data = _parse_table_data(data.get('table_data') or {})
 
@@ -456,12 +667,16 @@ def api_create_chore():
             done=done,
             task_type=task_type,
             assignee=assignee,
+            assignees_json=json.dumps(assignees),
+            watchers_json=json.dumps(watchers),
+            days_of_week_json=json.dumps(days_of_week),
             due_date=due_date,
             status=status,
             status_options_json=json.dumps(status_options),
             mentions_json=json.dumps(mentions),
             details_html=details_html,
             checklist_json=json.dumps(checklist),
+            checklist_meta_json=json.dumps(checklist_meta),
             chart_data_json=json.dumps(chart_data),
             table_data_json=json.dumps(table_data),
             completed_at=datetime.utcnow() if done else None,
@@ -500,12 +715,23 @@ def api_update_chore(chore_id):
         elif isinstance(data.get('title'), str):
             chore.description = sanitize_text(data.get('title'))
 
-        if isinstance(data.get('assignee'), str) or data.get('assignee') is None:
-            chore.assignee = sanitize_text(data.get('assignee') or '').strip() or None
         if 'due_date' in data:
             chore.due_date = _parse_due_date(data.get('due_date'))
         if isinstance(data.get('task_type'), str):
             chore.task_type = sanitize_text(data.get('task_type') or 'todo').strip().lower() or 'todo'
+        if 'assignees' in data or 'assignee' in data or 'task_type' in data:
+            existing_assignees = _parse_json(getattr(chore, 'assignees_json', '[]'), [])
+            raw_assignees = data.get('assignees') if 'assignees' in data else existing_assignees
+            fallback_assignee = data.get('assignee') if 'assignee' in data else chore.assignee
+            assignees = _parse_assignees(raw_assignees, fallback_assignee, task_type=chore.task_type)
+            chore.assignee = assignees[0] if assignees else None
+            chore.assignees_json = json.dumps(assignees)
+
+        if 'watchers' in data or 'watcher' in data:
+            chore.watchers_json = json.dumps(_parse_name_list(data.get('watchers') or data.get('watcher') or [], fallback=chore.assignee))
+
+        if 'days_of_week' in data or 'days' in data or 'weekdays' in data:
+            chore.days_of_week_json = json.dumps(_parse_days_of_week(data.get('days_of_week') or data.get('days') or data.get('weekdays') or []))
 
         if 'details_html' in data:
             chore.details_html = _sanitize_details_html(data.get('details_html') or '')
@@ -540,6 +766,9 @@ def api_update_chore(chore_id):
         if 'checklist' in data:
             chore.checklist_json = json.dumps(_parse_checklist(data.get('checklist')))
 
+        if 'checklist_meta' in data:
+            chore.checklist_meta_json = json.dumps(_parse_checklist_meta(data.get('checklist_meta')))
+
         if 'chart_data' in data:
             chore.chart_data_json = json.dumps(_parse_chart_data(data.get('chart_data')))
 
@@ -566,25 +795,77 @@ def api_update_chore(chore_id):
 def api_set_chore_done(chore_id):
     chore = Chore.query.get_or_404(chore_id)
     try:
-        before = _serialize_task(chore)
         data = request.get_json(force=True) or {}
-        chore.done = bool(data.get('done'))
-        chore.status = 'completed' if chore.done else 'todo'
-        chore.completed_at = datetime.utcnow() if chore.done else None
-        chore.updated_at = datetime.utcnow()
-        _log_task_timeline_event(
-            task_id=chore.id,
-            actor=sanitize_text(data.get('actor') or chore.creator or '').strip(),
-            action='chore.completed' if chore.done else 'chore.reopened',
-            summary=(
+        actor = sanitize_text(data.get('actor') or chore.creator or '').strip()
+        requested_done = bool(data.get('done'))
+        occurrence_date = _parse_reference_date(data.get('occurrence_date'))
+        days_of_week = _parse_days_of_week(getattr(chore, 'days_of_week_json', '[]'))
+        before = _serialize_task(chore, occurrence_date)
+
+        if chore.task_type == 'chore' and days_of_week:
+            week_start = _sunday_week_start(occurrence_date)
+            existing = ChoreWeeklyCompletion.query.filter_by(
+                chore_id=chore.id,
+                week_start=week_start,
+            ).all()
+            completed_days = [
+                record.scheduled_day for record in existing if record.scheduled_day in days_of_week
+            ]
+            actual_day = _day_label(occurrence_date)
+
+            if requested_done:
+                scheduled_day = _resolve_completion_day(days_of_week, completed_days, occurrence_date)
+                if scheduled_day is not None:
+                    db.session.add(ChoreWeeklyCompletion(
+                        chore_id=chore.id,
+                        week_start=week_start,
+                        scheduled_day=scheduled_day,
+                        completed_by=actor,
+                        completed_on=occurrence_date,
+                        completed_at=datetime.utcnow(),
+                    ))
+            else:
+                target = _resolve_reopen_day(
+                    [record for record in existing if record.scheduled_day in days_of_week],
+                    occurrence_date,
+                )
+                scheduled_day = target.scheduled_day if target is not None else actual_day
+                if target is not None:
+                    db.session.delete(target)
+
+            db.session.flush()
+            after_progress = _weekly_progress(chore, days_of_week, occurrence_date)
+            chore.done = bool(after_progress and after_progress['complete'])
+            chore.status = 'completed' if chore.done else 'todo'
+            chore.completed_at = datetime.utcnow() if chore.done else None
+            action = 'chore.occurrence_completed' if requested_done else 'chore.occurrence_reopened'
+            early_note = ' (early)' if requested_done and scheduled_day and scheduled_day != actual_day else ''
+            summary = (
+                f"completed {scheduled_day} occurrence{early_note}: {chore.description[:120]}"
+                if requested_done
+                else f"reopened {scheduled_day} occurrence: {chore.description[:120]}"
+            )
+        else:
+            chore.done = requested_done
+            chore.status = 'completed' if chore.done else 'todo'
+            chore.completed_at = datetime.utcnow() if chore.done else None
+            action = 'chore.completed' if chore.done else 'chore.reopened'
+            summary = (
                 f"completed task: {chore.description[:120]}"
                 if chore.done
                 else f"reopened task: {chore.description[:120]}"
-            ),
+            )
+
+        chore.updated_at = datetime.utcnow()
+        _log_task_timeline_event(
+            task_id=chore.id,
+            actor=actor,
+            action=action,
+            summary=summary,
         )
         db.session.commit()
-        payload = _serialize_task(chore)
-        _emit_task_notifications(before=before, after=payload, actor=sanitize_text(data.get('actor') or chore.creator or '').strip())
+        payload = _serialize_task(chore, occurrence_date)
+        _emit_task_notifications(before=before, after=payload, actor=actor)
         return jsonify({'ok': True, 'item': payload})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 400

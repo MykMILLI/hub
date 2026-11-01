@@ -188,6 +188,13 @@ window.REMINDERS_TIME_FORMAT = "{{ (config.reminders.time_format if config.remin
 						</div>
 					</div>
 				</div>
+				<div id="weather-narrative-panel" class="mt-4 rounded-xl bg-sky-50/80 dark:bg-sky-950/30 border border-sky-100 dark:border-sky-900 px-4 py-3">
+					<div class="flex items-center gap-2 text-sm font-semibold text-sky-900 dark:text-sky-100">
+						<i class="fa-solid fa-cloud-sun"></i>
+						<span>Today's outlook</span>
+					</div>
+					<p id="weather-narrative" class="mt-1 text-sm leading-relaxed text-gray-700 dark:text-gray-200" aria-live="polite">Weather outlook unavailable.</p>
+				</div>
 			</div>
 
 			<!-- 7-Day Forecast -->
@@ -541,8 +548,13 @@ window.REMINDERS_TIME_FORMAT = "{{ (config.reminders.time_format if config.remin
 			{% endif %}
 		</div>
 		<div class="mt-5 pt-4 border-t border-gray-300 dark:border-gray-600">
-			<div class="flex items-center justify-between gap-2"><div><h3 class="font-bold">Shared Family Album</h3><p id="immichSlideshowStatus" class="text-xs text-gray-500">Loading slideshow…</p></div><div class="flex gap-1"><select id="immichSlideDuration" class="text-xs border rounded-lg px-1 dark:bg-gray-800"><option value="5">5s</option><option value="8" selected>8s</option><option value="12">12s</option><option value="20">20s</option></select><button id="immichPrevious" class="btn btn-secondary text-xs" aria-label="Previous photo"><i class="fa-solid fa-chevron-left"></i></button><button id="immichPlayPause" class="btn btn-secondary text-xs" aria-label="Pause slideshow"><i class="fa-solid fa-pause"></i></button><button id="immichNext" class="btn btn-secondary text-xs" aria-label="Next photo"><i class="fa-solid fa-chevron-right"></i></button><button id="immichFullscreen" class="btn btn-primary text-xs" aria-label="View slideshow fullscreen"><i class="fa-solid fa-expand"></i></button></div></div>
-			<div id="immichSlideshowFrame" class="mt-3 relative aspect-[4/3] rounded-xl overflow-hidden bg-black"><img id="immichSlideshowImage" class="w-full h-full object-contain" alt="Shared Family Album slideshow"><div id="immichSlideshowCaption" class="absolute bottom-0 inset-x-0 bg-black/60 text-white text-xs p-2"></div></div>
+			<div class="flex flex-wrap items-center justify-between gap-2"><div><h3 class="font-bold">Shared Family Album</h3><p id="immichSlideshowStatus" class="text-xs text-gray-500">Loading slideshow…</p></div><div class="flex flex-wrap gap-1"><select id="immichSlideDuration" class="text-xs border rounded-lg px-1 dark:bg-gray-800" aria-label="Slide duration"><option value="5">5s</option><option value="8" selected>8s</option><option value="12">12s</option><option value="20">20s</option></select><button id="immichShuffle" class="btn btn-secondary text-xs" type="button" aria-label="Shuffle album" aria-pressed="false" title="Shuffle album"><i class="fa-solid fa-shuffle"></i></button><button id="immichPrevious" class="btn btn-secondary text-xs" aria-label="Previous photo"><i class="fa-solid fa-chevron-left"></i></button><button id="immichPlayPause" class="btn btn-secondary text-xs" aria-label="Pause slideshow"><i class="fa-solid fa-pause"></i></button><button id="immichNext" class="btn btn-secondary text-xs" aria-label="Next photo"><i class="fa-solid fa-chevron-right"></i></button><button id="immichFullscreen" class="btn btn-primary text-xs" aria-label="View slideshow fullscreen"><i class="fa-solid fa-expand"></i></button></div></div>
+			<div id="immichSlideshowFrame" class="mt-3 relative aspect-[4/3] rounded-xl overflow-hidden bg-black">
+				<img id="immichSlideshowImage" class="w-full h-full object-contain" alt="Shared Family Album slideshow">
+				<video id="immichSlideshowVideo" class="hidden w-full h-full object-contain" controls playsinline webkit-playsinline preload="metadata"></video>
+				<button id="immichVideoPlay" type="button" class="hidden absolute inset-0 m-auto h-fit w-fit rounded-xl bg-black/75 px-5 py-3 font-semibold text-white shadow-lg hover:bg-black/90 focus:outline-none focus:ring-2 focus:ring-white"><i class="fa-solid fa-volume-high mr-2"></i>Play video with sound</button>
+				<div id="immichSlideshowCaption" class="absolute bottom-0 inset-x-0 bg-black/60 text-white text-xs p-2 pointer-events-none"></div>
+			</div>
 		</div>
 	</div>
 
@@ -585,38 +597,130 @@ window.REMINDERS_TIME_FORMAT = "{{ (config.reminders.time_format if config.remin
 		if (welcomeCalendar) overviewLayout.appendChild(welcomeCalendar);
 		if (familyNoticeCard) overviewLayout.appendChild(familyNoticeCard);
 	}
-	let slideshowAssets = [], slideshowIndex = 0, slideshowTimer = null, slideshowPlaying = true;
+	let slideshowAssets = [], slideshowOriginalAssets = [], slideshowIndex = 0, slideshowTimer = null, slideshowPlaying = true;
+	let slideshowShuffleEnabled = localStorage.getItem('shared-family-album-shuffle') === 'true';
 	const slideshowImage = document.getElementById('immichSlideshowImage');
+	const slideshowVideo = document.getElementById('immichSlideshowVideo');
+	const slideshowVideoPlay = document.getElementById('immichVideoPlay');
 	const slideshowCaption = document.getElementById('immichSlideshowCaption');
 	const slideshowStatus = document.getElementById('immichSlideshowStatus');
+	const slideshowFrame = document.getElementById('immichSlideshowFrame');
+	function shuffleSlideshowAssets(assets) {
+		const shuffled = [...assets];
+		for (let index = shuffled.length - 1; index > 0; index -= 1) {
+			const swapIndex = Math.floor(Math.random() * (index + 1));
+			[shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+		}
+		return shuffled;
+	}
+	function setSlideshowShuffle(enabled) {
+		const currentId = slideshowAssets[slideshowIndex]?.id;
+		slideshowShuffleEnabled = enabled;
+		slideshowAssets = enabled ? shuffleSlideshowAssets(slideshowOriginalAssets) : [...slideshowOriginalAssets];
+		const currentIndex = slideshowAssets.findIndex(asset => asset.id === currentId);
+		slideshowIndex = currentIndex >= 0 ? currentIndex : 0;
+		const button = document.getElementById('immichShuffle');
+		button?.classList.toggle('btn-primary', enabled);
+		button?.classList.toggle('btn-secondary', !enabled);
+		button?.setAttribute('aria-pressed', String(enabled));
+		button?.setAttribute('aria-label', enabled ? 'Disable album shuffle' : 'Shuffle album');
+		if (button) button.title = enabled ? 'Shuffle is on' : 'Shuffle album';
+		localStorage.setItem('shared-family-album-shuffle', String(enabled));
+		if (slideshowAssets.length) renderSlideshow();
+	}
 	function renderSlideshow() {
 		if (!slideshowAssets.length) return;
+		clearTimeout(slideshowTimer);
+		slideshowTimer = null;
 		const asset = slideshowAssets[slideshowIndex];
 		const next = slideshowAssets[(slideshowIndex + 1) % slideshowAssets.length];
-		const preload = new Image();
-		preload.onload = () => { slideshowImage.src = preload.src; };
-		preload.src = `/api/immich/assets/${encodeURIComponent(asset.id)}/thumbnail`;
+		const isVideo = String(asset.type || '').toUpperCase() === 'VIDEO';
+		const isCurrent = () => slideshowAssets[slideshowIndex]?.id === asset.id;
+		if (isVideo && slideshowVideo) {
+			slideshowImage?.classList.add('hidden');
+			slideshowVideo.classList.remove('hidden');
+			slideshowVideo.pause();
+			slideshowVideo.muted = true;
+			slideshowVideo.volume = 1;
+			slideshowVideo.poster = `/api/immich/assets/${encodeURIComponent(asset.id)}/thumbnail`;
+			slideshowVideo.src = `/api/immich/assets/${encodeURIComponent(asset.id)}/playback`;
+			slideshowVideoPlay?.classList.remove('hidden');
+			slideshowVideo.onended = () => {
+				if (slideshowPlaying && isCurrent()) advanceSlideshow();
+			};
+			slideshowVideo.onloadeddata = () => {
+				if (!slideshowPlaying || !isCurrent()) return;
+				slideshowVideo.play().then(() => {
+					if (isCurrent()) slideshowStatus.textContent = `${slideshowIndex + 1} of ${slideshowAssets.length} · Playing preview · tap for sound`;
+				}).catch(() => {
+					if (isCurrent()) slideshowStatus.textContent = `${slideshowIndex + 1} of ${slideshowAssets.length} · Tap Play video with sound`;
+				});
+			};
+			slideshowVideo.onerror = () => {
+				if (isCurrent()) slideshowStatus.textContent = `${slideshowIndex + 1} of ${slideshowAssets.length} · Video failed to load`;
+			};
+			slideshowVideo.load();
+		} else {
+			if (slideshowVideo) {
+				slideshowVideo.pause();
+				slideshowVideo.removeAttribute('src');
+				slideshowVideo.load();
+				slideshowVideo.classList.add('hidden');
+			}
+			slideshowVideoPlay?.classList.add('hidden');
+			slideshowImage?.classList.remove('hidden');
+			const preload = new Image();
+			preload.onload = () => {
+				if (!isCurrent() || !slideshowImage) return;
+				slideshowImage.src = preload.src;
+				scheduleWelcomeAdvance();
+			};
+			preload.src = `/api/immich/assets/${encodeURIComponent(asset.id)}/thumbnail`;
+		}
 		if (next?.type !== 'VIDEO') { const nextPreload = new Image(); nextPreload.src = `/api/immich/assets/${encodeURIComponent(next.id)}/thumbnail`; }
 		slideshowCaption.textContent = asset.filename || 'Shared Family Album';
-		slideshowStatus.textContent = `${slideshowIndex + 1} of ${slideshowAssets.length}`;
+		slideshowStatus.textContent = `${slideshowIndex + 1} of ${slideshowAssets.length}${isVideo ? ' · Loading video…' : ''}`;
 	}
 	function advanceSlideshow(direction = 1) { slideshowIndex = (slideshowIndex + direction + slideshowAssets.length) % slideshowAssets.length; renderSlideshow(); }
-	function setSlideshowPlaying(playing) {
-		slideshowPlaying = playing; clearInterval(slideshowTimer);
-		document.getElementById('immichPlayPause')?.querySelector('i')?.classList.replace(playing ? 'fa-play' : 'fa-pause', playing ? 'fa-pause' : 'fa-play');
-		if (playing && slideshowAssets.length > 1) slideshowTimer = setInterval(() => advanceSlideshow(), Number(document.getElementById('immichSlideDuration')?.value || 8) * 1000);
+	function scheduleWelcomeAdvance() {
+		clearTimeout(slideshowTimer);
+		slideshowTimer = null;
+		if (!slideshowPlaying || slideshowAssets.length <= 1 || String(slideshowAssets[slideshowIndex]?.type || '').toUpperCase() === 'VIDEO') return;
+		slideshowTimer = setTimeout(() => advanceSlideshow(), Number(document.getElementById('immichSlideDuration')?.value || 8) * 1000);
 	}
+	function setSlideshowPlaying(playing) {
+		slideshowPlaying = playing; clearTimeout(slideshowTimer);
+		document.getElementById('immichPlayPause')?.querySelector('i')?.classList.replace(playing ? 'fa-play' : 'fa-pause', playing ? 'fa-pause' : 'fa-play');
+		if (slideshowVideo && !slideshowVideo.classList.contains('hidden')) {
+			if (playing) slideshowVideo.play().catch(() => {});
+			else slideshowVideo.pause();
+		} else if (playing) {
+			scheduleWelcomeAdvance();
+		}
+	}
+	slideshowVideoPlay?.addEventListener('click', () => {
+		if (!slideshowVideo) return;
+		slideshowVideo.muted = false;
+		slideshowVideo.volume = 1;
+		slideshowVideo.play().then(() => {
+			slideshowVideoPlay.classList.add('hidden');
+			slideshowStatus.textContent = `${slideshowIndex + 1} of ${slideshowAssets.length} · Playing with sound`;
+		}).catch(() => {
+			slideshowStatus.textContent = `${slideshowIndex + 1} of ${slideshowAssets.length} · Use the video controls to play`;
+		});
+	});
 	fetch('/api/immich/shared-family-album').then(response => response.json()).then(data => {
 		if (!data.ok) throw new Error(data.error || 'Unable to load Shared Family Album');
-		slideshowAssets = data.assets || [];
-		if (!slideshowAssets.length) throw new Error('The Shared Family Album has no photos yet.');
-		renderSlideshow(); setSlideshowPlaying(true);
+		slideshowOriginalAssets = data.assets || [];
+		if (!slideshowOriginalAssets.length) throw new Error('The Shared Family Album has no photos yet.');
+		setSlideshowShuffle(slideshowShuffleEnabled); setSlideshowPlaying(true);
 	}).catch(error => { if (slideshowStatus) slideshowStatus.textContent = error.message; });
+	document.getElementById('immichShuffle')?.addEventListener('click', () => setSlideshowShuffle(!slideshowShuffleEnabled));
 	document.getElementById('immichPrevious')?.addEventListener('click', () => advanceSlideshow(-1));
 	document.getElementById('immichNext')?.addEventListener('click', () => advanceSlideshow(1));
 	document.getElementById('immichPlayPause')?.addEventListener('click', () => setSlideshowPlaying(!slideshowPlaying));
 	document.getElementById('immichSlideDuration')?.addEventListener('change', () => setSlideshowPlaying(slideshowPlaying));
-	document.getElementById('immichFullscreen')?.addEventListener('click', () => document.getElementById('immichSlideshowFrame')?.requestFullscreen?.());
+	document.getElementById('immichFullscreen')?.addEventListener('click', () => slideshowFrame?.requestFullscreen?.());
 	const currentUser = () => String(localStorage.getItem('username') || '').trim();
 	const welcomeModalPending = document.getElementById('welcomeModalState')?.dataset.pending === '1';
 	const missedModal = document.getElementById('missedUpdatesModal');
@@ -743,6 +847,24 @@ window.REMINDERS_TIME_FORMAT = "{{ (config.reminders.time_format if config.remin
 		}
 	}
 
+	async function showMissedUpdatesModalOnDemand() {
+		if (!missedModal) return;
+		localStorage.removeItem(missedMuteKey());
+		if (missedSummary) missedSummary.textContent = 'Checking what you missed...';
+		if (missedSections) missedSections.innerHTML = '';
+		if (missedEmpty) missedEmpty.classList.add('hidden');
+		openMissedModal();
+		try {
+			const response = await fetch('/api/dashboard/missed-updates');
+			const data = await response.json().catch(() => ({}));
+			if (!response.ok || !data?.ok) throw new Error(data?.error || 'Unable to load updates');
+			renderMissedSections(data);
+		} catch (error) {
+			if (missedSummary) missedSummary.textContent = error.message || 'Unable to load updates.';
+		}
+	}
+
+	document.getElementById('openMissedUpdatesHeader')?.addEventListener('click', showMissedUpdatesModalOnDemand);
 	missedCloseBtn?.addEventListener('click', async () => {
 		await muteMissedUpdates(Date.now() + (60 * 60 * 1000));
 	});

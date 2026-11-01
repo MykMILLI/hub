@@ -37,6 +37,18 @@
         <div id="choreBoard" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"></div>
     </section>
 
+    <div id="completionCelebrationModal" class="hidden fixed inset-0 z-[90] bg-black/60 p-4 sm:p-6 items-center justify-center" role="dialog" aria-modal="true" aria-labelledby="completionCelebrationTitle">
+        <div class="card completion-check w-full max-w-sm max-h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-3rem)] overflow-y-auto rounded-3xl p-6 text-center">
+            <div class="mx-auto grid h-20 w-20 place-items-center rounded-full bg-green-500 text-5xl text-white shadow-lg" aria-hidden="true">
+                <i class="fa-solid fa-check"></i>
+            </div>
+            <h2 id="completionCelebrationTitle" class="mt-4 text-2xl font-extrabold text-green-700 dark:text-green-300">Good job!</h2>
+            <p id="completionCelebrationMessage" class="mt-2 text-sm leading-relaxed text-gray-600 dark:text-gray-300">You completed this chore.</p>
+            <p id="completionCelebrationStamp" class="mt-2 text-xs font-semibold text-green-700 dark:text-green-300"></p>
+            <button id="closeCompletionCelebration" type="button" class="btn btn-primary mt-5 w-full justify-center">Awesome!</button>
+        </div>
+    </div>
+
     <div id="newTaskModal" class="hidden fixed inset-0 z-[60] flex items-center justify-center p-4 md:p-6">
         <div id="newTaskModalBackdrop" class="absolute inset-0 bg-black/50"></div>
         <div class="relative w-full max-w-xl max-h-[90vh] overflow-y-auto card p-4 md:p-5">
@@ -51,13 +63,28 @@
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div>
-                        <label class="block text-xs text-gray-600 dark:text-gray-300 mb-1">Assign to</label>
-                        <input id="newTaskAssignee" type="text" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded" placeholder="Start typing a name" autocomplete="off">
+                        <label id="newTaskAssigneeLabel" class="block text-xs text-gray-600 dark:text-gray-300 mb-1">Assign collaborators</label>
+                        <input id="newTaskAssignee" type="text" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded" placeholder="Type names, separated by commas" autocomplete="off">
+                        <p id="newTaskAssigneeHint" class="mt-1 text-xs text-gray-500">Choose one or more family members.</p>
                     </div>
                     <div>
                         <label class="block text-xs text-gray-600 dark:text-gray-300 mb-1">Due date</label>
                         <input id="newTaskDueDate" type="date" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded">
                     </div>
+                </div>
+                <div id="newTaskChoreDays" class="hidden">
+                    <label class="block text-xs text-gray-600 dark:text-gray-300 mb-2">Repeat on days</label>
+                    <div class="day-picker" role="group" aria-label="Chore days">
+                        {% for value, label in [('Mon','Mon'),('Tue','Tue'),('Wed','Wed'),('Thu','Thu'),('Fri','Fri'),('Sat','Sat'),('Sun','Sun')] %}
+                        <label class="day-chip"><input type="checkbox" class="new-task-day sr-only" value="{{ value }}"><span>{{ label }}</span></label>
+                        {% endfor %}
+                    </div>
+                    <p class="mt-1 text-xs text-gray-500">Select every day this chore should be done.</p>
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-600 dark:text-gray-300 mb-1">Watchers</label>
+                    <input id="newTaskWatchers" type="text" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded" placeholder="People to notify when this is finished" autocomplete="off">
+                    <p class="mt-1 text-xs text-gray-500">Collaborators are notified automatically. Add other family members who should follow progress.</p>
                 </div>
                 <div class="pt-1 flex justify-end gap-2">
                     <button id="cancelTaskModalBtn" type="button" class="btn btn-secondary">Cancel</button>
@@ -81,8 +108,9 @@
                         <input id="editTaskTitle" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded" required>
                     </div>
                     <div>
-                        <label class="block text-xs mb-1">Assign to</label>
-                        <input id="editTaskAssignee" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded" placeholder="Start typing a name" autocomplete="off">
+                        <label id="editTaskAssigneeLabel" class="block text-xs mb-1">Assign collaborators</label>
+                        <input id="editTaskAssignee" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded" placeholder="Type names, separated by commas" autocomplete="off">
+                        <p id="editTaskAssigneeHint" class="mt-1 text-xs text-gray-500">Choose one or more family members.</p>
                     </div>
                     <div>
                         <label class="block text-xs mb-1">Due date</label>
@@ -96,14 +124,46 @@
                         <label class="block text-xs mb-1">Mention people</label>
                         <input id="editTaskMentions" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded" placeholder="Type @ to pick people" autocomplete="off">
                     </div>
+                    <div id="editTaskChoreDays" class="md:col-span-2 hidden">
+                        <label class="block text-xs mb-2">Repeat on days</label>
+                        <div class="day-picker" role="group" aria-label="Chore days">
+                            {% for value, label in [('Mon','Mon'),('Tue','Tue'),('Wed','Wed'),('Thu','Thu'),('Fri','Fri'),('Sat','Sat'),('Sun','Sun')] %}
+                            <label class="day-chip"><input type="checkbox" class="edit-task-day sr-only" value="{{ value }}"><span>{{ label }}</span></label>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    <div class="md:col-span-2">
+                        <label class="block text-xs mb-1">Watchers</label>
+                        <input id="editTaskWatchers" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded" placeholder="People to notify when this is finished" autocomplete="off">
+                        <p class="mt-1 text-xs text-gray-500">Collaborators and watchers will be notified when the chore is completed.</p>
+                    </div>
                     <div class="md:col-span-2">
                         <label class="block text-xs mb-1">Notes (type @ to mention)</label>
                         <textarea id="editTaskDetailsHtml" rows="2" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded"></textarea>
                     </div>
                     <div class="md:col-span-2">
-                        <label class="block text-xs mb-1">Checklist</label>
+                        <div class="flex flex-wrap items-end justify-between gap-2">
+                            <label class="block text-xs mb-1">Checklist</label>
+                            <div class="flex items-center gap-2">
+                                <label for="checklistKind" class="text-xs text-gray-500">This list tracks</label>
+                                <select id="checklistKind" class="p-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded bg-transparent"></select>
+                            </div>
+                        </div>
+                        <div id="checklistCustomFields" class="hidden grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
+                            <div>
+                                <label class="block text-xs mb-1 text-gray-500">Each item is a…</label>
+                                <input id="checklistItemPlural" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded" placeholder="houses" autocomplete="off">
+                            </div>
+                            <div>
+                                <label class="block text-xs mb-1 text-gray-500">Checked off means… (optional)</label>
+                                <input id="checklistProgressVerb" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded" placeholder="visited" autocomplete="off">
+                            </div>
+                        </div>
                         <div id="checklistEditor" class="space-y-1"></div>
-                        <button type="button" id="addChecklistItemBtn" class="mt-2 text-sm font-semibold text-indigo-600 dark:text-indigo-300">+ Add item</button>
+                        <div class="mt-2 flex flex-wrap items-center justify-between gap-2">
+                            <button type="button" id="addChecklistItemBtn" class="text-sm font-semibold text-indigo-600 dark:text-indigo-300">+ Add item</button>
+                            <span id="checklistPreview" class="text-xs text-gray-500"></span>
+                        </div>
                     </div>
                 </div>
                 <div class="pt-1 flex justify-between gap-2">
@@ -133,6 +193,9 @@
     .circle-check { appearance: none; -webkit-appearance: none; width: 1.5rem; height: 1.5rem; border-radius: 9999px; border: 2px solid #6366f1; flex-shrink: 0; cursor: pointer; position: relative; background: transparent; }
     .circle-check:checked { background: #6366f1; }
     .circle-check:checked::after { content: '✓'; color: #fff; position: absolute; inset: 0; text-align: center; font-size: .9rem; line-height: 1.3rem; }
+    .circle-check:disabled { cursor: not-allowed; opacity: .42; }
+    .completion-stamps { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .3rem; }
+    .completion-stamp { display: inline-flex; align-items: center; gap: .3rem; font-size: .7rem; font-weight: 600; color: #047857; background: rgba(16,185,129,.12); border-radius: 9999px; padding: .12rem .5rem; }
     .chore-col { border-radius: 1.25rem; overflow: hidden; }
     .chore-card { display: flex; align-items: center; gap: .75rem; padding: .9rem 1rem; border-radius: 1rem; background: rgba(255,255,255,.75); color: #111827; cursor: pointer; }
     .chore-card .circle-check { width: 2rem; height: 2rem; border-width: 3px; }
@@ -142,6 +205,39 @@
     .dark .suggest-box { background: #1f2937; color: #f3f4f6; border-color: #4b5563; }
     .suggest-item { padding: .45rem .75rem; cursor: pointer; font-size: .9rem; }
     .suggest-item.active, .suggest-item:hover { background: #4f46e5; color: #fff; }
+    .day-picker { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: .4rem; }
+    .day-chip span { display: flex; min-height: 2.5rem; align-items: center; justify-content: center; border: 1px solid #cbd5e1; border-radius: .75rem; cursor: pointer; font-size: .78rem; font-weight: 700; transition: .15s; }
+    .day-chip input:checked + span { border-color: #4f46e5; background: #4f46e5; color: #fff; box-shadow: 0 1px 4px rgba(79,70,229,.35); }
+    .day-chip input:focus-visible + span { outline: 2px solid #818cf8; outline-offset: 2px; }
+    .dark .day-chip span { border-color: #475569; }
+    .confetti-piece {
+        position: fixed;
+        width: .6rem;
+        height: .95rem;
+        pointer-events: none;
+        z-index: 100;
+        opacity: .9;
+        animation: confettiDrop 1.2s ease-in forwards;
+    }
+    @keyframes confettiDrop {
+        0% { transform: translate3d(0, -8vh, 0) rotate(0deg) scale(1); opacity: 1; }
+        100% { transform: translate3d(var(--dx), 60vh, 0) rotate(var(--rot)) scale(.8); opacity: 0; }
+    }
+    @keyframes taskCelebrateIn {
+        0% { opacity: 0; transform: translateY(-8px) scale(.96); }
+        100% { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .completion-check {
+        animation: taskCelebrateIn .35s ease-out;
+        box-shadow: 0 18px 50px rgba(21, 128, 61, .28);
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .confetti-piece { display: none; }
+        .completion-check { animation: none; }
+    }
+    @media (max-width: 420px) {
+        .day-picker { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    }
 </style>
 
 <script>
@@ -211,7 +307,7 @@
             if (!info) return;
             let insert = name;
             if (mode === 'mention') insert = name + ' ';
-            if (mode === 'list') insert = name + ', ';
+            if (mode === 'list') insert = input.dataset.single === 'true' ? name : name + ', ';
             input.value = input.value.slice(0, info.start) + insert + input.value.slice(info.end);
             const caret = info.start + insert.length;
             input.setSelectionRange(caret, caret);
@@ -260,8 +356,14 @@
     }
 
     // ---------- API ----------
+    function localDateIso(value) {
+        const localDate = value instanceof Date ? value : new Date();
+        return `${localDate.getFullYear()}-${String(localDate.getMonth() + 1).padStart(2, '0')}-${String(localDate.getDate()).padStart(2, '0')}`;
+    }
+
     async function fetchTasks() {
-        const res = await fetch('/api/chores?include_completed=1');
+        const asOf = localDateIso();
+        const res = await fetch(`/api/chores?include_completed=1&as_of=${encodeURIComponent(asOf)}`);
         const data = await res.json();
         return Array.isArray(data) ? data : [];
     }
@@ -280,12 +382,136 @@
         return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '') || 'todo';
     }
 
-    async function createTask(description, type, assignee, dueDate) {
+    function parseAssignees(value, taskType = 'todo') {
+        const names = String(value || '').split(',').map(name => name.trim()).filter(Boolean);
+        return names.filter((name, index) => names.findIndex(other => sameUser(other, name)) === index);
+    }
+
+    function taskAssignees(task) {
+        if (Array.isArray(task.assignees) && task.assignees.length) return task.assignees;
+        return task.assignee ? [task.assignee] : [];
+    }
+
+    function taskCompletionState(task) {
+        const recurringDays = Array.isArray(task?.days_of_week) ? task.days_of_week : [];
+        const progress = task?.weekly_progress;
+        if (recurringDays.length && progress) {
+            const current = Number(progress.completed_count || 0);
+            const required = Number(progress.required_count || recurringDays.length);
+            const completions = Array.isArray(progress.completions) ? progress.completions : [];
+            const today = localDateIso();
+            const completedToday = completions.some(entry => entry.completed_on === today);
+            return {
+                current,
+                required,
+                checked: Boolean(progress.current_occurrence_completed) || completedToday,
+                done: Boolean(progress.complete),
+                canCompleteToday: true,
+                scheduledToday: Boolean(progress.current_occurrence_scheduled),
+                creditDay: progress.next_open_day || '',
+                completions,
+                lastCompletedAt: progress.last_completed_at || null,
+                label: `${current} of ${required}`,
+            };
+        }
+        return {
+            current: Boolean(task?.done) ? 1 : 0,
+            required: 1,
+            checked: Boolean(task?.done),
+            done: Boolean(task?.done),
+            canCompleteToday: true,
+            scheduledToday: true,
+            creditDay: '',
+            completions: [],
+            lastCompletedAt: task?.completed_at || null,
+            label: task?.done ? '1 of 1' : '0 of 1',
+        };
+    }
+
+    function formatCompletionStamp(value) {
+        if (!value) return '';
+        const parsed = new Date(value);
+        if (Number.isNaN(parsed.getTime())) return '';
+        return parsed.toLocaleString([], {
+            weekday: 'short', month: 'short', day: 'numeric',
+            hour: 'numeric', minute: '2-digit',
+        });
+    }
+
+    function completionStampHtml(state) {
+        if (state.completions.length) {
+            const parts = state.completions.map(entry => {
+                const stamp = formatCompletionStamp(entry.completed_at);
+                const who = entry.completed_by ? ` by ${esc(entry.completed_by)}` : '';
+                const flag = entry.early ? ' · early' : (entry.late ? ' · late' : '');
+                return `<span class="completion-stamp"><i class="fa-solid fa-check"></i> ${esc(entry.day)}${flag} — ${esc(stamp)}${who}</span>`;
+            });
+            return `<div class="completion-stamps">${parts.join('')}</div>`;
+        }
+        const stamp = formatCompletionStamp(state.lastCompletedAt);
+        if (!stamp) return '';
+        return `<div class="completion-stamps"><span class="completion-stamp"><i class="fa-solid fa-check"></i> Completed ${esc(stamp)}</span></div>`;
+    }
+
+    function launchConfetti() {
+        const colors = ['#f59e0b', '#10b981', '#ec4899', '#6366f1', '#14b8a6', '#f43f5e'];
+        for (let i = 0; i < 32; i++) {
+            const flake = document.createElement('span');
+            flake.className = 'confetti-piece';
+            flake.style.left = `${Math.random() * window.innerWidth}px`;
+            flake.style.top = '8vh';
+            flake.style.background = colors[i % colors.length];
+            flake.style.setProperty('--dx', `${(Math.random() - .5) * 260}px`);
+            flake.style.setProperty('--rot', `${(Math.random() - .5) * 900}deg`);
+            document.body.appendChild(flake);
+            setTimeout(() => flake.remove(), 1200);
+        }
+    }
+
+    function showChoreCompletionModal(task) {
+        const modal = $('completionCelebrationModal');
+        $('completionCelebrationMessage').textContent = `Nice work, ${currentUser || 'you'}! You completed “${task.description || 'this chore'}”.`;
+        const stampEl = $('completionCelebrationStamp');
+        if (stampEl) {
+            const state = taskCompletionState(task);
+            const latest = state.completions.length
+                ? state.completions.slice().sort((a, b) => String(a.completed_at || '').localeCompare(String(b.completed_at || '')))[state.completions.length - 1]
+                : null;
+            const stamp = formatCompletionStamp(latest ? latest.completed_at : state.lastCompletedAt);
+            const early = latest && latest.early ? ` — finished early for ${latest.day}` : '';
+            stampEl.textContent = stamp ? `Completed ${stamp}${early}` : '';
+        }
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+        document.body.classList.add('overflow-hidden');
+        setTimeout(() => $('closeCompletionCelebration')?.focus(), 20);
+    }
+
+    function closeChoreCompletionModal() {
+        const modal = $('completionCelebrationModal');
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+        document.body.classList.remove('overflow-hidden');
+    }
+
+    function selectedDays(selector) {
+        return [...document.querySelectorAll(selector)].filter(input => input.checked).map(input => input.value);
+    }
+
+    function setSelectedDays(selector, selected) {
+        const wanted = new Set((selected || []).map(String));
+        document.querySelectorAll(selector).forEach(input => { input.checked = wanted.has(input.value); });
+    }
+
+    async function createTask(description, type, assigneeInput, dueDate, watchersInput = '', daysOfWeek = []) {
+        const assignees = parseAssignees(assigneeInput, type);
+        const watchers = parseAssignees(watchersInput);
         const res = await fetch('/api/chores', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                description, creator: currentUser, assignee: assignee || null, due_date: dueDate || null,
+                description, creator: currentUser, assignee: assignees[0] || null, assignees, due_date: dueDate || null,
+                watchers, days_of_week: type === 'chore' ? daysOfWeek : [],
                 task_type: type, status: 'todo', status_options: availableStatuses,
             }),
         });
@@ -306,14 +532,28 @@
     }
 
     async function setDone(task, done) {
+        const recurringDays = Array.isArray(task.days_of_week) ? task.days_of_week : [];
+        const occurrenceDate = localDateIso();
         const res = await fetch(`/api/chores/${task.id}/done`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ done, actor: currentUser }),
+            body: JSON.stringify({
+                done,
+                actor: currentUser,
+                occurrence_date: recurringDays.length ? occurrenceDate : null,
+            }),
         });
         const data = await res.json();
-        if (!res.ok || !data.ok) { alert(data.error || 'Update failed'); return; }
+        if (!res.ok || !data.ok) {
+            alert(data.error || 'Update failed');
+            await load();
+            return;
+        }
         await load();
+        if (done) {
+            launchConfetti();
+            if (task.task_type === 'chore') showChoreCompletionModal(data.item || task);
+        }
     }
 
     async function removeTask(id) {
@@ -332,7 +572,7 @@
 
     function renderStats(list) {
         const open = list.filter(t => !t.done).length;
-        const mine = list.filter(t => !t.done && sameUser(t.assignee, currentUser)).length;
+        const mine = list.filter(t => !t.done && taskAssignees(t).some(name => sameUser(name, currentUser))).length;
         $('taskStats').innerHTML =
             `<span class="stat-pill stat-tasks"><b>${list.length}</b> Tasks</span>` +
             `<span class="stat-pill stat-open"><b>${open}</b> Open</span>` +
@@ -340,9 +580,10 @@
     }
 
     function filterTask(t) {
-        if (currentFilter === 'mine') return sameUser(t.assignee, currentUser);
-        if (currentFilter === 'open') return !t.done;
-        if (currentFilter === 'completed') return t.done;
+        const state = taskCompletionState(t);
+        if (currentFilter === 'mine') return taskAssignees(t).some(name => sameUser(name, currentUser));
+        if (currentFilter === 'open') return !state.done;
+        if (currentFilter === 'completed') return state.done;
         return true;
     }
 
@@ -354,23 +595,29 @@
     }
 
     function todoRow(t) {
+        const state = taskCompletionState(t);
         const steps = (t.checklist || []);
-        const stepInfo = steps.length ? `<span>${steps.filter(s => s.done).length} of ${steps.length} steps</span>` : '';
-        const who = t.assignee ? `<span>👤 ${esc(t.assignee)}</span>` : '';
-        const meta = [stepInfo, dueLabel(t), who].filter(Boolean).join('');
+        const stepInfo = steps.length
+            ? `<span>${esc(t.checklist_progress_label || checklistProgressLabel(t.checklist_meta, steps.filter(s => s.done).length, steps.length))}</span>`
+            : '';
+        const assignees = taskAssignees(t);
+        const who = assignees.length ? `<span>👥 ${esc(assignees.join(', '))}</span>` : '';
+        const days = (t.days_of_week || []).length ? `<span>↻ ${esc(t.days_of_week.join(', '))} · ${state.label}</span>` : '';
+        const meta = [stepInfo, dueLabel(t), days, who].filter(Boolean).join('');
         return `<div class="todo-row card" data-open="${t.id}">
-            <input type="checkbox" class="circle-check" data-done="${t.id}" ${t.done ? 'checked' : ''} aria-label="Complete task">
+            <input type="checkbox" class="circle-check" data-done="${t.id}" ${state.checked ? 'checked' : ''} aria-label="Complete task">
             <div class="flex-1 min-w-0">
-                <div class="${t.done ? 'line-through text-gray-500' : 'font-medium'} truncate">${esc(t.description)}</div>
+                <div class="${state.done ? 'line-through text-gray-500' : 'font-medium'} truncate">${esc(t.description)}</div>
                 ${meta ? `<div class="text-xs text-gray-500 flex flex-wrap gap-3 mt-0.5">${meta}</div>` : ''}
+                ${completionStampHtml(state)}
             </div>
         </div>`;
     }
 
     function renderTodo(list) {
         const filtered = list.filter(filterTask);
-        const open = filtered.filter(t => !t.done);
-        const done = filtered.filter(t => t.done);
+        const open = filtered.filter(t => !taskCompletionState(t).done);
+        const done = filtered.filter(t => taskCompletionState(t).done);
         $('todoList').innerHTML = open.length ? open.map(todoRow).join('') : '<div class="text-sm text-gray-500 p-3">Nothing to do. Add a task above.</div>';
         const toggle = $('toggleCompleted');
         toggle.classList.toggle('hidden', !done.length);
@@ -381,22 +628,34 @@
 
     function renderChores(list) {
         const names = [...members];
-        list.forEach(t => { if (t.assignee && !names.some(n => sameUser(n, t.assignee))) names.push(t.assignee); });
-        const cols = names.map(name => ({ name, items: list.filter(t => sameUser(t.assignee, name)) }));
-        const unassigned = list.filter(t => !t.assignee);
+        list.forEach(t => taskAssignees(t).forEach(assignee => {
+            if (!names.some(name => sameUser(name, assignee))) names.push(assignee);
+        }));
+        const cols = names.map(name => ({
+            name,
+            items: list.filter(t => taskAssignees(t).some(assignee => sameUser(assignee, name))),
+        }));
+        const unassigned = list.filter(t => !taskAssignees(t).length);
         if (unassigned.length) cols.push({ name: '', items: unassigned });
         $('choreBoard').innerHTML = cols.map(col => {
             const idx = memberIndex(col.name || 'x');
-            const done = col.items.filter(t => t.done).length;
+            const done = col.items.filter(t => taskCompletionState(t).done).length;
             const pct = col.items.length ? Math.round(done / col.items.length * 100) : 0;
-            const cards = col.items.slice().sort((a, b) => Number(a.done) - Number(b.done)).map(t => `
+            const cards = col.items.slice().sort((a, b) => Number(taskCompletionState(b).done) - Number(taskCompletionState(a).done)).map(t => {
+                const state = taskCompletionState(t);
+                return `
                 <div class="chore-card" data-open="${t.id}">
-                    <input type="checkbox" class="circle-check" data-done="${t.id}" ${t.done ? 'checked' : ''} aria-label="Complete chore">
+                    <input type="checkbox" class="circle-check" data-done="${t.id}" ${state.checked ? 'checked' : ''} aria-label="Complete this chore occurrence" title="${state.scheduledToday ? 'Mark today complete' : (state.creditDay ? 'Finishing early — credits ' + esc(state.creditDay) : 'Mark complete')}">
                     <div class="flex-1 min-w-0">
-                        <div class="text-base font-semibold ${t.done ? 'line-through opacity-50' : ''}">${esc(t.description)}</div>
+                        <div class="text-base font-semibold ${state.done ? 'line-through opacity-50' : ''}">${esc(t.description)}</div>
+                        ${(t.days_of_week || []).length ? `<div class="text-xs font-semibold text-indigo-700">↻ ${esc(t.days_of_week.join(' · '))} · ${state.label}</div>` : ''}
+                        ${taskAssignees(t).length > 1 ? `<div class="text-xs text-gray-600">With ${esc(taskAssignees(t).join(', '))}</div>` : ''}
+                        ${(t.watchers || []).length ? `<div class="text-xs text-gray-600">Watching: ${esc(t.watchers.join(', '))}</div>` : ''}
                         ${t.due_date ? `<div class="text-xs text-gray-600">${dueLabel(t)}</div>` : ''}
+                        ${completionStampHtml(state)}
                     </div>
-                </div>`).join('') || '<div class="text-sm text-gray-600 px-2 py-3">No chores yet.</div>';
+                </div>`;
+            }).join('') || '<div class="text-sm text-gray-600 px-2 py-3">No chores yet.</div>';
             return `<div class="chore-col p-3 space-y-3" style="background:${pastel[idx % pastel.length]}">
                 <div class="flex items-center gap-3">
                     <span class="avatar-dot" style="background:${palette[idx % palette.length]}">${esc((col.name || '?').charAt(0).toUpperCase())}</span>
@@ -432,7 +691,14 @@
         $('newTaskModalTitle').textContent = type === 'chore' ? 'New Chore' : 'New Task';
         $('newTaskTitle').value = title || '';
         $('newTaskAssignee').value = '';
+        $('newTaskAssignee').dataset.single = 'false';
+        $('newTaskAssigneeLabel').textContent = 'Assign collaborators';
+        $('newTaskAssignee').placeholder = 'Type names, separated by commas';
+        $('newTaskAssigneeHint').textContent = 'Choose one or more family members who will work together.';
         $('newTaskDueDate').value = '';
+        $('newTaskWatchers').value = '';
+        $('newTaskChoreDays').classList.toggle('hidden', type !== 'chore');
+        setSelectedDays('.new-task-day', []);
         $('newTaskModal').classList.remove('hidden');
         setTimeout(() => $('newTaskTitle').focus(), 10);
     }
@@ -444,18 +710,109 @@
     const closeNewModal = () => $('newTaskModal').classList.add('hidden');
 
     // ---------- edit modal ----------
+    const CHECKLIST_PRESETS = [
+        { id: 'steps', label: 'Steps', singular: 'step', plural: 'steps', verb: '' },
+        { id: 'items', label: 'Items', singular: 'item', plural: 'items', verb: '' },
+        { id: 'houses', label: 'Houses visited', singular: 'house', plural: 'houses', verb: 'visited' },
+        { id: 'places', label: 'Places visited', singular: 'place', plural: 'places', verb: 'visited' },
+        { id: 'stores', label: 'Stores visited', singular: 'store', plural: 'stores', verb: 'visited' },
+        { id: 'books', label: 'Books read', singular: 'book', plural: 'books', verb: 'read' },
+        { id: 'movies', label: 'Movies watched', singular: 'movie', plural: 'movies', verb: 'watched' },
+        { id: 'episodes', label: 'Episodes watched', singular: 'episode', plural: 'episodes', verb: 'watched' },
+        { id: 'recipes', label: 'Recipes tried', singular: 'recipe', plural: 'recipes', verb: 'tried' },
+        { id: 'packed', label: 'Things packed', singular: 'thing', plural: 'things', verb: 'packed' },
+        { id: 'people', label: 'People contacted', singular: 'person', plural: 'people', verb: 'contacted' },
+        { id: 'gifts', label: 'Gifts bought', singular: 'gift', plural: 'gifts', verb: 'bought' },
+        { id: 'custom', label: 'Something else…', singular: '', plural: '', verb: '' },
+    ];
+
+    function pluralize(word) {
+        const low = word.toLowerCase();
+        if (low.endsWith('y') && word.length > 1 && !'aeiou'.includes(low[low.length - 2])) return word.slice(0, -1) + 'ies';
+        if (/(s|x|z|ch|sh)$/.test(low)) return word + 'es';
+        return word + 's';
+    }
+
+    function singularize(word) {
+        const low = word.toLowerCase();
+        if (low.endsWith('ies') && word.length > 3) return word.slice(0, -3) + 'y';
+        if (low.endsWith('es') && /(ss|x|z|ch|sh)$/.test(low.slice(0, -2))) return word.slice(0, -2);
+        if (low.endsWith('s') && word.length > 1) return word.slice(0, -1);
+        return word;
+    }
+
+    function normalizeChecklistMeta(meta) {
+        const src = meta && typeof meta === 'object' ? meta : {};
+        let plural = String(src.item_label_plural || '').trim();
+        let singular = String(src.item_label || '').trim();
+        if (!plural && !singular) return { item_label: 'step', item_label_plural: 'steps', progress_verb: '' };
+        if (!plural) plural = pluralize(singular);
+        if (!singular) singular = singularize(plural);
+        return { item_label: singular, item_label_plural: plural, progress_verb: String(src.progress_verb || '').trim() };
+    }
+
+    function checklistProgressLabel(meta, done, total) {
+        const m = normalizeChecklistMeta(meta);
+        const noun = total === 1 ? m.item_label : m.item_label_plural;
+        return `${done} of ${total} ${noun}${m.progress_verb ? ' ' + m.progress_verb : ''}`;
+    }
+
+    function matchChecklistPreset(meta) {
+        const m = normalizeChecklistMeta(meta);
+        const hit = CHECKLIST_PRESETS.find(p => p.id !== 'custom'
+            && p.plural.toLowerCase() === m.item_label_plural.toLowerCase()
+            && p.verb.toLowerCase() === m.progress_verb.toLowerCase());
+        return hit ? hit.id : 'custom';
+    }
+
+    function currentChecklistMeta() {
+        const preset = CHECKLIST_PRESETS.find(p => p.id === $('checklistKind').value);
+        if (preset && preset.id !== 'custom') {
+            return { item_label: preset.singular, item_label_plural: preset.plural, progress_verb: preset.verb };
+        }
+        return normalizeChecklistMeta({
+            item_label_plural: $('checklistItemPlural').value,
+            progress_verb: $('checklistProgressVerb').value,
+        });
+    }
+
+    function refreshChecklistVocabulary() {
+        const meta = currentChecklistMeta();
+        const isCustom = $('checklistKind').value === 'custom';
+        $('checklistCustomFields').classList.toggle('hidden', !isCustom);
+        $('checklistCustomFields').classList.toggle('grid', isCustom);
+        document.querySelectorAll('#checklistEditor .cl-text').forEach(input => {
+            input.placeholder = `Add a ${meta.item_label}`;
+        });
+        const rows = document.querySelectorAll('#checklistEditor .checklist-row');
+        const done = [...rows].filter(r => r.querySelector('.cl-done').checked).length;
+        $('checklistPreview').textContent = rows.length ? checklistProgressLabel(meta, done, rows.length) : '';
+    }
+
     function checklistRow(item) {
         const row = document.createElement('div');
-        row.className = 'flex items-center gap-2 checklist-row';
-        row.innerHTML = `<input type="checkbox" class="circle-check cl-done" ${item && item.done ? 'checked' : ''} aria-label="Done">
-            <input type="text" class="cl-text flex-1 p-1.5 border border-gray-300 dark:border-gray-600 rounded bg-transparent" placeholder="Add a step" value="${esc(item ? item.text : '')}">
-            <button type="button" class="cl-remove text-gray-400 hover:text-red-500 px-2" aria-label="Remove item">✕</button>`;
-        row.querySelector('.cl-remove').addEventListener('click', () => row.remove());
+        row.className = 'checklist-row space-y-1';
+        const note = item && item.note ? String(item.note) : '';
+        row.innerHTML = `<div class="flex items-center gap-2">
+                <input type="checkbox" class="circle-check cl-done" ${item && item.done ? 'checked' : ''} aria-label="Done">
+                <input type="text" class="cl-text flex-1 p-1.5 border border-gray-300 dark:border-gray-600 rounded bg-transparent" placeholder="Add a step" value="${esc(item ? item.text : '')}">
+                <button type="button" class="cl-note-toggle text-gray-400 hover:text-indigo-500 px-1" aria-label="Add detail" title="Add a detail (address, link, price…)">📝</button>
+                <button type="button" class="cl-remove text-gray-400 hover:text-red-500 px-2" aria-label="Remove item">✕</button>
+            </div>
+            <input type="text" class="cl-note w-full ml-7 p-1.5 text-xs border border-gray-200 dark:border-gray-700 rounded bg-transparent ${note ? '' : 'hidden'}" placeholder="Detail (address, link, price…)" value="${esc(note)}">`;
+        row.querySelector('.cl-remove').addEventListener('click', () => { row.remove(); refreshChecklistVocabulary(); });
+        row.querySelector('.cl-done').addEventListener('change', refreshChecklistVocabulary);
+        row.querySelector('.cl-note-toggle').addEventListener('click', () => {
+            const field = row.querySelector('.cl-note');
+            field.classList.toggle('hidden');
+            if (!field.classList.contains('hidden')) field.focus();
+        });
         row.querySelector('.cl-text').addEventListener('keydown', (ev) => {
             if (ev.key === 'Enter') {
                 ev.preventDefault();
                 const next = checklistRow();
                 row.after(next);
+                refreshChecklistVocabulary();
                 next.querySelector('.cl-text').focus();
             }
         });
@@ -464,7 +821,11 @@
 
     function readChecklist() {
         return [...document.querySelectorAll('#checklistEditor .checklist-row')]
-            .map(r => ({ text: r.querySelector('.cl-text').value.trim(), done: r.querySelector('.cl-done').checked }))
+            .map(r => ({
+                text: r.querySelector('.cl-text').value.trim(),
+                done: r.querySelector('.cl-done').checked,
+                note: r.querySelector('.cl-note').value.trim(),
+            }))
             .filter(i => i.text);
     }
 
@@ -474,13 +835,25 @@
         $('editTaskTitle').value = task.description || '';
         $('editTaskStatus').innerHTML = statuses.map(s =>
             `<option value="${esc(s)}" ${normalizeStatus(task.status) === s ? 'selected' : ''}>${esc(s.replace(/_/g, ' '))}</option>`).join('');
-        $('editTaskAssignee').value = task.assignee || '';
+        $('editTaskAssignee').dataset.single = 'false';
+        $('editTaskAssigneeLabel').textContent = 'Assign collaborators';
+        $('editTaskAssignee').placeholder = 'Type names, separated by commas';
+        $('editTaskAssigneeHint').textContent = 'Choose one or more family members who will work together.';
+        $('editTaskAssignee').value = taskAssignees(task).join(', ');
         $('editTaskDueDate').value = task.due_date || '';
+        $('editTaskWatchers').value = (task.watchers || []).join(', ');
+        $('editTaskChoreDays').classList.toggle('hidden', task.task_type !== 'chore');
+        setSelectedDays('.edit-task-day', task.days_of_week || []);
         $('editTaskMentions').value = (task.mentions || []).map(m => '@' + m).join(', ');
         $('editTaskDetailsHtml').value = task.details_html || '';
         const editor = $('checklistEditor');
         editor.innerHTML = '';
         (task.checklist || []).forEach(i => editor.appendChild(checklistRow(i)));
+        const meta = normalizeChecklistMeta(task.checklist_meta);
+        $('checklistKind').value = matchChecklistPreset(meta);
+        $('checklistItemPlural').value = meta.item_label_plural;
+        $('checklistProgressVerb').value = meta.progress_verb;
+        refreshChecklistVocabulary();
         $('editTaskModal').classList.remove('hidden');
     }
 
@@ -498,12 +871,16 @@
         try {
             await updateTask(editingTaskId, {
                 description: $('editTaskTitle').value.trim() || task.description,
-                assignee: $('editTaskAssignee').value.trim() || null,
+                assignee: parseAssignees($('editTaskAssignee').value, task.task_type)[0] || null,
+                assignees: parseAssignees($('editTaskAssignee').value, task.task_type),
+                watchers: parseAssignees($('editTaskWatchers').value),
+                days_of_week: task.task_type === 'chore' ? selectedDays('.edit-task-day') : [],
                 due_date: $('editTaskDueDate').value || null,
                 status: $('editTaskStatus').value,
                 mentions,
                 details_html: $('editTaskDetailsHtml').value,
                 checklist: readChecklist(),
+                checklist_meta: currentChecklistMeta(),
             });
             closeEditModal();
             await load();
@@ -545,7 +922,14 @@
         const btn = $('createTaskModalBtn');
         btn.disabled = true;
         try {
-            await createTask($('newTaskTitle').value.trim(), newTaskType, $('newTaskAssignee').value.trim(), $('newTaskDueDate').value);
+            await createTask(
+                $('newTaskTitle').value.trim(),
+                newTaskType,
+                $('newTaskAssignee').value.trim(),
+                $('newTaskDueDate').value,
+                $('newTaskWatchers').value.trim(),
+                selectedDays('.new-task-day'),
+            );
             $('quickAddInput').value = '';
             closeNewModal();
             await load();
@@ -555,11 +939,19 @@
 
     ['closeTaskModalBtn', 'cancelTaskModalBtn', 'newTaskModalBackdrop'].forEach(id => $(id).addEventListener('click', closeNewModal));
     ['closeEditTaskModalBtn', 'cancelEditTaskModalBtn', 'editTaskModalBackdrop'].forEach(id => $(id).addEventListener('click', closeEditModal));
+    $('closeCompletionCelebration').addEventListener('click', closeChoreCompletionModal);
+    $('completionCelebrationModal').addEventListener('click', (event) => {
+        if (event.target === event.currentTarget) closeChoreCompletionModal();
+    });
     $('editTaskForm').addEventListener('submit', (ev) => { ev.preventDefault(); saveEdit(); });
     $('deleteEditTaskBtn').addEventListener('click', () => { if (editingTaskId) removeTask(editingTaskId); });
+    $('checklistKind').innerHTML = CHECKLIST_PRESETS.map(p => `<option value="${esc(p.id)}">${esc(p.label)}</option>`).join('');
+    $('checklistKind').addEventListener('change', refreshChecklistVocabulary);
+    ['checklistItemPlural', 'checklistProgressVerb'].forEach(id => $(id).addEventListener('input', refreshChecklistVocabulary));
     $('addChecklistItemBtn').addEventListener('click', () => {
         const row = checklistRow();
         $('checklistEditor').appendChild(row);
+        refreshChecklistVocabulary();
         row.querySelector('.cl-text').focus();
     });
 
@@ -582,10 +974,13 @@
         if (ev.key !== 'Escape') return;
         if (!$('newTaskModal').classList.contains('hidden')) closeNewModal();
         if (!$('editTaskModal').classList.contains('hidden')) closeEditModal();
+        if (!$('completionCelebrationModal').classList.contains('hidden')) closeChoreCompletionModal();
     });
 
-    attachSuggest($('newTaskAssignee'), 'single');
-    attachSuggest($('editTaskAssignee'), 'single');
+    attachSuggest($('newTaskAssignee'), 'list');
+    attachSuggest($('newTaskWatchers'), 'list');
+    attachSuggest($('editTaskAssignee'), 'list');
+    attachSuggest($('editTaskWatchers'), 'list');
     attachSuggest($('editTaskMentions'), 'list');
     attachSuggest($('editTaskDetailsHtml'), 'mention');
     attachSuggest($('quickAddInput'), 'mention');

@@ -13,7 +13,7 @@ from ..models import (
 )
 from ..blueprints import main_bp
 from ..security import is_http_url, sanitize_text
-from ..permissions import APP_MODULES, parse_allowed_members, sanitize_visibility
+from ..permissions import APP_MODULES, get_visible_app_modules, parse_allowed_members, sanitize_visibility
 from ..services.notification_service import send_test_email
 from ..services.supabase_service import supabase_service
 from datetime import datetime
@@ -426,6 +426,22 @@ def api_delete_family_member(member_id):
 
 
 # Menu Visibility Management
+@main_bp.route('/api/app-modules', methods=['GET'])
+def api_app_modules():
+    """Modules visible to the signed-in member, in web sidebar order.
+
+    Native clients use this to build their navigation so they stay in sync with
+    the web sidebar instead of hardcoding a section list.
+    """
+    config = current_app.config['HOMEHUB_CONFIG']
+    member = sanitize_text(session.get('current_member') or '').strip()
+    return jsonify({
+        'ok': True,
+        'member': member,
+        'modules': get_visible_app_modules(config, member),
+    })
+
+
 @main_bp.route('/api/menu-visibility', methods=['GET'])
 def api_get_menu_visibility():
     """Get current menu visibility settings"""

@@ -122,6 +122,12 @@
             description.textContent = data.description || 'Unknown';
         }
 
+        const narrative = document.getElementById('weather-narrative');
+        if (narrative) {
+            narrative.textContent = data.narrative || '';
+            narrative.style.display = data.narrative ? 'block' : 'none';
+        }
+
         const feelsLike = document.getElementById('feels-like');
         if (feelsLike) {
             feelsLike.textContent = `Feels like ${Math.round(data.apparent_temperature)}°F`;

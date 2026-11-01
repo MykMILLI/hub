@@ -4,8 +4,11 @@ from zoneinfo import ZoneInfo
 from ..models import db, HomeStatus, MemberStatus, Notice, Reminder, RecurringReminder, FamilyMember, ActivityLog, FamilyNotice, FamilyNoticeAcknowledgement, HouseholdRoutineState, LibraryBookLoan, PhotoAsset, FamilyCalendarEvent, FamilyChatMessage, Chore, AppNotification
 from ..blueprints import main_bp
 from ..security import sanitize_html, sanitize_text
+from ..services.chore_recurrence import is_effectively_done
 from ..services.notification_service import publish_notification
 import json
+
+_BATH_NOTIFICATION_MEMBERS = ('Mykal', 'Rachel')
 
 
 _FINANCE_ACTION_PREFIXES = (
@@ -62,6 +65,11 @@ def _bedtime_reader_for_date(anchor_date: date, anchor_reader: str, on_date: dat
     return first if delta_days % 2 == 0 else second
 
 
+def _next_bath_date(state: HouseholdRoutineState, today: date) -> date:
+    last_completed_date = state.updated_at.date() if state.updated_at else None
+    return (last_completed_date + timedelta(days=2)) if last_completed_date else today
+
+
 def _build_routine_payload(state: HouseholdRoutineState) -> dict:
     bath_mode = int(state.bath_mode or 0) % 2
     if bath_mode == 0:
@@ -78,8 +86,7 @@ def _build_routine_payload(state: HouseholdRoutineState) -> dict:
     completed_at = None
     if state.updated_at:
         completed_at = state.updated_at.replace(microsecond=0).isoformat() + 'Z'
-    last_completed_date = state.updated_at.date() if state.updated_at else None
-    next_bath_date = (last_completed_date + timedelta(days=2)) if last_completed_date else today
+    next_bath_date = _next_bath_date(state, today)
     overdue_days = max(0, (today - next_bath_date).days)
 
     return {
@@ -119,6 +126,54 @@ def emit_due_bedtime_reader_notification_for_member(member_name: str) -> int:
     publish_notification(event_type='bedtime_reader', title='Bedtime Reader', message='It is time for your bedtime reading assignment.', target_members=[member_name], created_by='HomeHub', payload={'reminder_key': key}, channels=['in_app', 'mobile'])
     db.session.commit()
     return 1
+
+
+def emit_due_bath_day_notification() -> int:
+    """Notify the bath-day parents at 5:00 PM Eastern whenever a bath is due."""
+    eastern = ZoneInfo('America/New_York')
+    now_eastern = datetime.now(timezone.utc).astimezone(eastern)
+    today_eastern = now_eastern.date()
+    if now_eastern.time() < time(17, 0):
+        return 0
+
+    state = _get_or_create_household_routine_state('HomeHub')
+    if today_eastern < _next_bath_date(state, today_eastern):
+        return 0
+
+    payload = _build_routine_payload(state)['bath']
+    pairings = ', '.join(
+        pairing.replace(' & ', ' with ')
+        for pairing in (payload['avery'], payload['harley'])
+    )
+    key = f'bath-day:{today_eastern.isoformat()}'
+    sent = 0
+    for member in _BATH_NOTIFICATION_MEMBERS:
+        already_sent = (AppNotification.query
+                        .filter(AppNotification.event_type == 'bath_day')
+                        .filter(AppNotification.target_member == member)
+                        .filter(AppNotification.payload_json.contains(key))
+                        .first())
+        if already_sent:
+            continue
+        publish_notification(
+            event_type='bath_day',
+            title='Bath Day',
+            message=f'Bath time tonight: {pairings}.',
+            target_members=[member],
+            created_by='HomeHub',
+            payload={
+                'reminder_key': key,
+                'avery': payload['avery'],
+                'harley': payload['harley'],
+                'overdue_days': payload['overdue_days'],
+            },
+            channels=['in_app', 'mobile'],
+        )
+        sent += 1
+
+    if sent:
+        db.session.commit()
+    return sent
 
 
 def _is_finance_timeline_row(row: ActivityLog) -> bool:
@@ -165,6 +220,22 @@ def _task_mentions_member(chore: Chore, member_name: str) -> bool:
     return False
 
 
+def _task_assigned_to_member(chore: Chore, member_name: str) -> bool:
+    name_key = sanitize_text(member_name or '').strip().lower()
+    if not name_key:
+        return False
+    try:
+        assignees = json.loads(getattr(chore, 'assignees_json', '') or '[]')
+    except Exception:
+        assignees = []
+    if not isinstance(assignees, list):
+        assignees = []
+    legacy_assignee = sanitize_text(getattr(chore, 'assignee', '') or '').strip()
+    if legacy_assignee:
+        assignees.append(legacy_assignee)
+    return any(sanitize_text(str(item or '')).strip().lower() == name_key for item in assignees)
+
+
 def _coalesce_timestamp(*values):
     for value in values:
         if isinstance(value, datetime):
@@ -182,10 +253,15 @@ def index():
     current_member_status_text = ''
     if current_member_row and (current_member_row.status or '').strip():
         current_member_status_text = current_member_row.status
-    assigned_open_tasks = (Chore.query.filter(Chore.done.is_(False))
-                          .filter(db.func.lower(Chore.assignee) == current_member_name.lower())
-                          .filter(db.func.lower(Chore.task_type) != 'chore')
-                          .order_by(Chore.due_date.asc(), Chore.updated_at.desc()).all())
+    assigned_open_tasks = [
+        row for row in (
+            Chore.query.filter(Chore.done.is_(False))
+            .filter(db.func.lower(Chore.task_type) != 'chore')
+            .order_by(Chore.due_date.asc(), Chore.updated_at.desc())
+            .all()
+        )
+        if _task_assigned_to_member(row, current_member_name)
+    ]
     notice = Notice.query.order_by(Notice.updated_at.desc()).first()
     # Calendar: gather reminders grouped by date
     try:
@@ -381,8 +457,7 @@ def api_dashboard_missed_updates():
     )
     task_rows = []
     for row in chore_candidates:
-        assignee = sanitize_text(row.assignee or '').strip().lower()
-        is_assigned = bool(assignee and assignee == member_name.lower())
+        is_assigned = _task_assigned_to_member(row, member_name)
         is_mentioned = _task_mentions_member(row, member_name)
         if not (is_assigned or is_mentioned):
             continue
@@ -421,13 +496,15 @@ def api_dashboard_missed_updates():
     # Open chores assigned to this member always show, regardless of when they were created.
     assigned_chores = (
         Chore.query
-        .filter(Chore.done.is_(False))
-        .filter(db.func.lower(Chore.assignee) == member_name.lower())
         .filter(db.func.lower(Chore.task_type) == 'chore')
         .order_by(Chore.due_date.asc(), Chore.id.desc())
-        .limit(12)
+        .limit(80)
         .all()
     )
+    assigned_chores = [
+        row for row in assigned_chores
+        if _task_assigned_to_member(row, member_name) and not is_effectively_done(row)
+    ][:12]
     chore_items = [
         {
             'title': sanitize_text(row.description or 'Chore').strip() or 'Chore',

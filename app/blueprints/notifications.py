@@ -45,6 +45,43 @@ def _ensure_member_row(member_name: str) -> Optional[FamilyMember]:
     return row
 
 
+def _notification_items(member: str, *, event_type: str = '', unread_only: bool = False) -> list[dict]:
+    try:
+        from .family_calendar import emit_due_calendar_reminders_for_member
+        emit_due_calendar_reminders_for_member(member)
+        from .dashboard import emit_due_bedtime_reader_notification_for_member
+        emit_due_bedtime_reader_notification_for_member(member)
+        from .dashboard import emit_due_bath_day_notification
+        emit_due_bath_day_notification()
+    except Exception:
+        current_app.logger.exception('Failed to emit scheduled notifications for %s', member)
+
+    q = AppNotification.query.order_by(AppNotification.created_at.desc(), AppNotification.id.desc())
+    if member:
+        q = q.filter(or_(AppNotification.target_member == member, AppNotification.target_member.is_(None)))
+    if event_type:
+        q = q.filter(AppNotification.event_type == event_type)
+    if unread_only:
+        q = q.filter(AppNotification.is_read.is_(False))
+
+    return [
+        {
+            'id': row.id,
+            'event_type': row.event_type,
+            'title': row.title,
+            'message': row.message,
+            'target_member': row.target_member,
+            'payload_json': row.payload_json,
+            'channels_json': row.channels_json,
+            'created_by': row.created_by,
+            'is_read': bool(row.is_read),
+            'read_at': row.read_at.isoformat() if row.read_at else None,
+            'created_at': row.created_at.isoformat() if row.created_at else None,
+        }
+        for row in q.limit(100).all()
+    ]
+
+
 @main_bp.route('/notifications', methods=['GET'])
 def notifications_page():
     config = current_app.config['HOMEHUB_CONFIG']
@@ -61,9 +98,12 @@ def api_register_mobile_token():
 
     if not member_name or not token:
         return jsonify({'ok': False, 'error': 'member and token are required'}), 400
+    authenticated_member = sanitize_text(session.get('current_member') or '').strip()
+    if not authenticated_member or authenticated_member.lower() != member_name.lower():
+        return jsonify({'ok': False, 'error': 'Mobile token must be registered by its signed-in member'}), 403
 
-    if provider not in {'fcm', 'apns'}:
-        provider = 'fcm'
+    if provider not in {'fcm', 'apns', 'local_poll'}:
+        provider = 'local_poll'
 
     # Keep metadata compact because the existing db column is short.
     normalized_platform = f"{platform}-{provider}" if platform else provider
@@ -81,6 +121,18 @@ def api_register_mobile_token():
 
     db.session.commit()
     return jsonify({'ok': True, 'message': 'Mobile token registered', 'provider': provider, 'platform': row.platform})
+
+
+@main_bp.route('/api/notifications/mobile/poll', methods=['GET'])
+def api_poll_mobile_notifications():
+    token = sanitize_text(request.headers.get('X-HomeHub-Mobile-Token') or '').strip()
+    if not token:
+        return jsonify({'ok': False, 'error': 'Mobile device token is required'}), 401
+    device = MobilePushToken.query.filter_by(device_token=token, enabled=True).first()
+    if not device:
+        return jsonify({'ok': False, 'error': 'Mobile device token is invalid'}), 401
+    items = _notification_items(device.member_name, unread_only=True)
+    return jsonify({'ok': True, 'member': device.member_name, 'items': items})
 
 
 @main_bp.route('/api/notifications/mobile/unregister', methods=['POST'])
@@ -103,45 +155,12 @@ def api_get_notifications():
     event_type = sanitize_text(request.args.get('event_type') or '').strip()
     unread_only = str(request.args.get('unread_only') or '').strip().lower() in {'1', 'true', 'yes'}
 
-    try:
-        from .family_calendar import emit_due_calendar_reminders_for_member
-        emit_due_calendar_reminders_for_member(member)
-        from .dashboard import emit_due_bedtime_reader_notification_for_member
-        emit_due_bedtime_reader_notification_for_member(member)
-    except Exception:
-        pass
-
-    q = AppNotification.query.order_by(AppNotification.created_at.desc(), AppNotification.id.desc())
-    if member:
-        q = q.filter(or_(AppNotification.target_member == member, AppNotification.target_member.is_(None)))
-    if event_type:
-        q = q.filter(AppNotification.event_type == event_type)
-    if unread_only:
-        q = q.filter(AppNotification.is_read.is_(False))
-
-    rows = q.limit(100).all()
-
     categories = [r[0] for r in db.session.query(AppNotification.event_type).distinct().order_by(AppNotification.event_type.asc()).all() if r and r[0]]
 
     return jsonify({
         'ok': True,
         'categories': categories,
-        'items': [
-            {
-                'id': r.id,
-                'event_type': r.event_type,
-                'title': r.title,
-                'message': r.message,
-                'target_member': r.target_member,
-                'payload_json': r.payload_json,
-                'channels_json': r.channels_json,
-                'created_by': r.created_by,
-                'is_read': bool(r.is_read),
-                'read_at': r.read_at.isoformat() if r.read_at else None,
-                'created_at': r.created_at.isoformat() if r.created_at else None,
-            }
-            for r in rows
-        ],
+        'items': _notification_items(member, event_type=event_type, unread_only=unread_only),
     })
 
 

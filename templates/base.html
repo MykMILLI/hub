@@ -72,6 +72,30 @@
         --card-background-color: #111827;
         --text-color: #f1f5f9;
     }
+    [data-theme="dark"] body {
+        background-color: var(--background-color);
+        color: var(--text-color);
+    }
+    [data-theme="dark"] .card,
+    [data-theme="dark"] .glass,
+    [data-theme="dark"] .glass-sm,
+    [data-theme="dark"] .glass-lg {
+        color: var(--text-color);
+    }
+    [data-theme="dark"] [class*="bg-white"] {
+        background-color: #111827 !important;
+    }
+    [data-theme="dark"] [class*="text-gray-900"],
+    [data-theme="dark"] [class*="text-gray-800"],
+    [data-theme="dark"] [class*="text-gray-700"],
+    [data-theme="dark"] [class*="text-gray-600"],
+    [data-theme="dark"] [class*="text-gray-500"] {
+        color: #e2e8f0 !important;
+    }
+    [data-theme="dark"] [class*="border-gray-200"],
+    [data-theme="dark"] [class*="border-gray-300"] {
+        border-color: #334155 !important;
+    }
     @media (max-width: 767px) {
         body {
             padding-bottom: env(safe-area-inset-bottom);
@@ -154,10 +178,11 @@
     </script>
     <script>
         (function() {
-            const mq = window.matchMedia('(prefers-color-scheme: dark)');
-            const apply = () => document.documentElement.setAttribute('data-theme', mq.matches ? 'dark' : 'light');
-            apply();
-            try { mq.addEventListener('change', apply); } catch(e) { mq.addListener(apply); }
+            const htmlElement = document.documentElement;
+            const savedTheme = localStorage.getItem('app-theme');
+            const theme = savedTheme === 'dark' ? 'dark' : 'light';
+            htmlElement.setAttribute('data-theme', theme);
+            htmlElement.classList.toggle('dark', theme === 'dark');
         })();
     </script>
 </head>
@@ -272,6 +297,11 @@
 
                         <div class="flex items-center gap-2">
                             {% if not (hide_user_ui | default(false)) %}
+                            {% if request.path == '/' %}
+                            <button id="openMissedUpdatesHeader" type="button" class="glass border border-gray-200/70 dark:border-gray-700/70 rounded-full px-3 py-2 hover:shadow-md transition-m3 text-sm font-semibold text-gray-800 dark:text-gray-100" aria-label="Open What You Missed" title="What You Missed">
+                                <i class="fa-solid fa-clock-rotate-left sm:mr-1"></i><span class="hidden sm:inline">What You Missed</span>
+                            </button>
+                            {% endif %}
                             <div id="profileSwitcher" class="relative">
                                 <button id="profileSwitcherBtn" type="button" class="glass border border-gray-200/70 dark:border-gray-700/70 rounded-full pl-1.5 pr-3 py-1.5 hover:shadow-md transition-m3 min-w-[170px] text-left" aria-label="Switch profile">
                                     <span class="flex items-center gap-2">
@@ -283,7 +313,6 @@
                                             {% endif %}
                                         </span>
                                         <span id="profileSwitcherValue" class="flex-1 text-sm font-semibold text-gray-800 dark:text-gray-100 truncate">{{ current_member or 'Guest' }}</span>
-                                        <i class="fa-solid fa-chevron-down text-[10px] text-gray-500 dark:text-gray-400"></i>
                                     </span>
                                 </button>
                                 <select id="userSwitcher" aria-label="Select profile" class="hidden" tabindex="-1" aria-hidden="true"></select>
@@ -765,7 +794,6 @@
             const launcherModal = document.getElementById('launcherModal');
             const launcherGrid = document.getElementById('launcherGrid');
             const launcherSearch = document.getElementById('launcherSearch');
-            let draggedLauncherCard = null;
 
             function currentLauncherMember(){
                 const fromStorage = String(localStorage.getItem('username') || '').trim();
@@ -789,14 +817,24 @@
                 }
             }
 
-            function saveLauncherOrderFromGrid(){
-                const memberName = currentLauncherMember();
-                const ids = Array.from(launcherGrid?.querySelectorAll('[data-launcher-id]') || [])
-                    .map(node => String(node.getAttribute('data-launcher-id') || '').trim())
-                    .filter(Boolean);
+            function saveLauncherOrder(orderIds){
                 try {
-                    localStorage.setItem(launcherOrderStorageKey(memberName), JSON.stringify(ids));
+                    localStorage.setItem(launcherOrderStorageKey(currentLauncherMember()), JSON.stringify(orderIds));
                 } catch (_) {}
+            }
+
+            function reorderLauncherItems(draggedId, targetId){
+                if (!draggedId || !targetId || draggedId === targetId) return;
+                const currentOrder = Array.from(launcherGrid?.querySelectorAll('[data-launcher-id]') || []).map((node) => node.getAttribute('data-launcher-id'));
+                if (!currentOrder.length) return;
+                const sourceIndex = currentOrder.indexOf(draggedId);
+                const targetIndex = currentOrder.indexOf(targetId);
+                if (sourceIndex === -1 || targetIndex === -1) return;
+                const reordered = [...currentOrder];
+                const [moved] = reordered.splice(sourceIndex, 1);
+                reordered.splice(targetIndex, 0, moved);
+                saveLauncherOrder(reordered);
+                buildLauncherItems();
             }
 
             function buildLauncherItems(){
@@ -842,18 +880,57 @@
 
                 launcherGrid.innerHTML = '';
                 items.forEach((item) => {
-                    const card = document.createElement('a');
-                    card.href = item.href;
-                    card.draggable = true;
-                    card.className = 'glass-sm p-3 rounded-2xl border border-white/20 hover:shadow-lg transition-m3 flex flex-col gap-2 min-h-[92px] justify-center cursor-grab active:cursor-grabbing';
+                    const card = document.createElement('div');
+                    card.draggable = false;
+                    card.className = 'launcher-item relative';
                     card.setAttribute('data-launcher-id', item.id);
                     card.setAttribute('data-launcher-label', item.label.toLowerCase());
-                    card.innerHTML = `
+
+                    const handle = document.createElement('button');
+                    handle.type = 'button';
+                    handle.draggable = true;
+                    handle.className = 'launcher-drag-handle absolute -top-2 right-2 z-10 flex h-7 w-7 items-center justify-center rounded-full border border-white/30 bg-slate-900/70 text-[10px] text-white shadow-md opacity-80 transition hover:opacity-100';
+                    handle.setAttribute('aria-label', `Drag to reorder ${item.label}`);
+                    handle.innerHTML = '<i class="fa-solid fa-grip"></i>';
+                    handle.addEventListener('dragstart', (event) => {
+                        event.dataTransfer?.setData('text/plain', item.id);
+                        event.dataTransfer && (event.dataTransfer.effectAllowed = 'move');
+                        card.classList.add('opacity-70');
+                    });
+                    handle.addEventListener('dragend', () => {
+                        card.classList.remove('opacity-70');
+                        card.classList.remove('ring-2', 'ring-m3-primary', 'ring-offset-2');
+                    });
+
+                    const link = document.createElement('a');
+                    link.href = item.href;
+                    link.draggable = false;
+                    link.className = 'glass-sm block p-3 rounded-2xl border border-white/20 hover:shadow-lg transition-m3 flex flex-col gap-2 min-h-[92px] justify-center cursor-pointer';
+                    link.innerHTML = `
                         <span class="w-8 h-8 rounded-lg bg-white/20 inline-flex items-center justify-center text-m3-on-surface">
                             <i class="${item.iconClass}"></i>
                         </span>
                         <span class="text-sm font-semibold text-m3-on-surface leading-tight">${item.label}</span>
                     `;
+
+                    card.addEventListener('dragover', (event) => {
+                        if (!event.dataTransfer) return;
+                        event.preventDefault();
+                        card.classList.add('ring-2', 'ring-m3-primary', 'ring-offset-2');
+                    });
+                    card.addEventListener('dragleave', () => {
+                        card.classList.remove('ring-2', 'ring-m3-primary', 'ring-offset-2');
+                    });
+                    card.addEventListener('drop', (event) => {
+                        if (!event.dataTransfer) return;
+                        event.preventDefault();
+                        const draggedId = event.dataTransfer.getData('text/plain');
+                        reorderLauncherItems(draggedId, item.id);
+                        card.classList.remove('ring-2', 'ring-m3-primary', 'ring-offset-2');
+                    });
+
+                    card.appendChild(handle);
+                    card.appendChild(link);
                     launcherGrid.appendChild(card);
                 });
             }
@@ -908,34 +985,6 @@
             });
             document.addEventListener('keydown', (event) => {
                 if (event.key === 'Escape') closeLauncher();
-            });
-            launcherGrid?.addEventListener('dragstart', (event) => {
-                const card = event.target.closest('[data-launcher-id]');
-                if (!card) return;
-                draggedLauncherCard = card;
-                card.classList.add('opacity-60');
-                if (event.dataTransfer) {
-                    event.dataTransfer.effectAllowed = 'move';
-                    event.dataTransfer.setData('text/plain', card.getAttribute('data-launcher-id') || '');
-                }
-            });
-            launcherGrid?.addEventListener('dragover', (event) => {
-                const targetCard = event.target.closest('[data-launcher-id]');
-                if (!draggedLauncherCard || !targetCard || targetCard === draggedLauncherCard) return;
-                event.preventDefault();
-            });
-            launcherGrid?.addEventListener('drop', (event) => {
-                const targetCard = event.target.closest('[data-launcher-id]');
-                if (!draggedLauncherCard || !targetCard || targetCard === draggedLauncherCard) return;
-                event.preventDefault();
-                const rect = targetCard.getBoundingClientRect();
-                const before = event.clientY < (rect.top + rect.height / 2);
-                launcherGrid.insertBefore(draggedLauncherCard, before ? targetCard : targetCard.nextSibling);
-                saveLauncherOrderFromGrid();
-            });
-            launcherGrid?.addEventListener('dragend', () => {
-                launcherGrid.querySelectorAll('[data-launcher-id]').forEach((node) => node.classList.remove('opacity-60'));
-                draggedLauncherCard = null;
             });
             launcherSearch?.addEventListener('input', () => {
                 ensureLauncherItems();
@@ -1114,24 +1163,23 @@
 // Dark mode toggle
 (function() {
     const themeToggle = document.getElementById('themeToggle');
-    if (!themeToggle) return;
-    
     const htmlElement = document.documentElement;
-    const savedTheme = localStorage.getItem('app-theme');
-    
-    // Sync with OS if no saved preference
-    if (!savedTheme) {
-        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        htmlElement.setAttribute('data-theme', prefersDark ? 'dark' : 'light');
-    } else {
-        htmlElement.setAttribute('data-theme', savedTheme);
-    }
-    
-    themeToggle.addEventListener('click', () => {
+    const applyTheme = (theme) => {
+        const normalizedTheme = theme === 'dark' ? 'dark' : 'light';
+        htmlElement.setAttribute('data-theme', normalizedTheme);
+        htmlElement.classList.toggle('dark', normalizedTheme === 'dark');
+        if (themeToggle) {
+            themeToggle.setAttribute('aria-pressed', normalizedTheme === 'dark' ? 'true' : 'false');
+            themeToggle.title = normalizedTheme === 'dark' ? 'Use light mode' : 'Use dark mode';
+        }
+    };
+    applyTheme(localStorage.getItem('app-theme') === 'dark' ? 'dark' : 'light');
+
+    themeToggle?.addEventListener('click', () => {
         const currentTheme = htmlElement.getAttribute('data-theme') || 'light';
         const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-        htmlElement.setAttribute('data-theme', newTheme);
         localStorage.setItem('app-theme', newTheme);
+        applyTheme(newTheme);
     });
 })();
 </script>

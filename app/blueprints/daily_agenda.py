@@ -1,13 +1,67 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+import json
+import logging
+import threading
+import time
 
 from flask import current_app, jsonify, render_template, request, session
+import requests
 
 from ..blueprints import main_bp
 from ..models import Chore, DailyAgendaEntry, DailyAgendaLocation, FamilyCalendarEvent, FamilyMember, db
 from ..permissions import is_admin_name
 from ..security import sanitize_text
+from ..services.chore_recurrence import is_effectively_done
+
+
+_logger = logging.getLogger(__name__)
+_NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search'
+_NOMINATIM_MIN_INTERVAL = 1.0
+_nominatim_lock = threading.Lock()
+_nominatim_last_request = 0.0
+
+
+def _nominatim_search(query: str) -> list[dict]:
+    global _nominatim_last_request
+    with _nominatim_lock:
+        wait = _NOMINATIM_MIN_INTERVAL - (time.monotonic() - _nominatim_last_request)
+        if wait > 0:
+            time.sleep(wait)
+        try:
+            response = requests.get(
+                _NOMINATIM_URL,
+                params={
+                    'q': query,
+                    'format': 'jsonv2',
+                    'addressdetails': '1',
+                    'limit': '5',
+                },
+                headers={
+                    'Accept': 'application/json',
+                    'User-Agent': 'HomeHub/1.0 (self-hosted family dashboard)',
+                },
+                timeout=8,
+            )
+            _nominatim_last_request = time.monotonic()
+            response.raise_for_status()
+            payload = response.json()
+        except requests.RequestException:
+            _nominatim_last_request = time.monotonic()
+            raise
+        if not isinstance(payload, list):
+            raise ValueError('Address provider returned an invalid response')
+        return [
+            {
+                'display_name': sanitize_text(str(item.get('display_name') or '')).strip()[:512],
+                'latitude': item.get('lat'),
+                'longitude': item.get('lon'),
+                'type': sanitize_text(str(item.get('type') or '')).strip()[:80],
+            }
+            for item in payload
+            if isinstance(item, dict) and item.get('display_name')
+        ]
 
 
 def _actor() -> str:
@@ -22,6 +76,18 @@ def _members() -> list[str]:
     if admin:
         names.append(admin)
     return sorted({name for name in names if name}, key=str.lower)
+
+
+def _task_assigned_to(row: Chore, member: str) -> bool:
+    try:
+        assignees = json.loads(getattr(row, 'assignees_json', '') or '[]')
+    except Exception:
+        assignees = []
+    if not isinstance(assignees, list):
+        assignees = []
+    if row.assignee:
+        assignees.append(row.assignee)
+    return any(sanitize_text(str(name or '')).strip().lower() == member.lower() for name in assignees)
 
 
 def _parse_date(value, fallback: date | None = None) -> date:
@@ -146,6 +212,24 @@ def api_daily_agenda_members():
     return jsonify({'ok': True, 'members': _members(), 'current_member': _actor()})
 
 
+@main_bp.route('/api/daily-agenda/address-search', methods=['GET'])
+def api_daily_agenda_address_search():
+    query = sanitize_text(str(request.args.get('q') or '')).strip()
+    if len(query) < 3:
+        return jsonify({'ok': True, 'suggestions': []})
+    if len(query) > 120:
+        return jsonify({'ok': False, 'error': 'Address search is limited to 120 characters'}), 400
+    try:
+        suggestions = _nominatim_search(query)
+    except requests.RequestException:
+        _logger.warning('Nominatim address search failed', exc_info=True)
+        return jsonify({'ok': False, 'error': 'Address search is temporarily unavailable'}), 502
+    except ValueError:
+        _logger.warning('Nominatim returned an invalid address response', exc_info=True)
+        return jsonify({'ok': False, 'error': 'Address search returned an invalid response'}), 502
+    return jsonify({'ok': True, 'suggestions': suggestions})
+
+
 @main_bp.route('/api/daily-agenda/locations', methods=['GET'])
 def api_daily_agenda_locations():
     rows = DailyAgendaLocation.query.order_by(DailyAgendaLocation.name.asc(), DailyAgendaLocation.id.asc()).all()
@@ -211,9 +295,12 @@ def api_daily_agenda_member_work():
     member = sanitize_text(request.args.get('member') or _actor()).strip()
     if member not in _members():
         return jsonify({'ok': False, 'error': 'Select a valid family member'}), 400
-    rows = (Chore.query.filter(Chore.done.is_(False))
-            .filter(db.func.lower(Chore.assignee) == member.lower())
-            .order_by(Chore.due_date.asc(), Chore.updated_at.desc(), Chore.id.desc()).limit(30).all())
+    candidates = (Chore.query
+                  .order_by(Chore.due_date.asc(), Chore.updated_at.desc(), Chore.id.desc()).limit(100).all())
+    rows = [
+        row for row in candidates
+        if not is_effectively_done(row) and _task_assigned_to(row, member)
+    ][:30]
     groups = {'todo': [], 'task': [], 'chore': []}
     for row in rows:
         kind = sanitize_text(row.task_type or 'task').strip().lower()

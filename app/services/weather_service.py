@@ -4,6 +4,7 @@ Handles Open-Meteo API interactions and data transformations
 """
 
 import requests
+import re
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
 from dataclasses import dataclass, asdict
@@ -26,6 +27,7 @@ class DailyForecast:
     min_temp: float
     weather_code: int
     description: str
+    precipitation_probability: int = 0
 
 
 @dataclass
@@ -41,6 +43,7 @@ class WeatherData:
     humidity: float  # percentage 0-100
     apparent_temperature: float  # "feels like" temp
     timestamp: str  # ISO timestamp
+    narrative: str
     daily_forecast: List[DailyForecast]
 
 
@@ -89,7 +92,7 @@ class WeatherService:
 
     OPEN_METEO_FORECAST_API = "https://api.open-meteo.com/v1/forecast"
     OPEN_METEO_GEOCODING_API = "https://geocoding-api.open-meteo.com/v1/search"
-    OPEN_METEO_REVERSE_GEOCODING_API = "https://geocoding-api.open-meteo.com/v1/reverse"
+    NOMINATIM_REVERSE_GEOCODING_API = "https://nominatim.openstreetmap.org/reverse"
     TIMEOUT = 10  # seconds
 
     @staticmethod
@@ -106,6 +109,29 @@ class WeatherService:
     def celsius_to_fahrenheit(celsius: float) -> float:
         """Convert Celsius to Fahrenheit"""
         return celsius * 9 / 5 + 32
+
+    @staticmethod
+    def _is_coordinate_label(value: str) -> bool:
+        return bool(re.fullmatch(r"\s*-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?\s*", value or ""))
+
+    @staticmethod
+    def build_narrative(temperature: float, description: str, forecast: List[DailyForecast]) -> str:
+        current = round(temperature)
+        opening = f"It is {current} degrees Fahrenheit with {description.lower()}."
+        if not forecast:
+            return opening
+        today = forecast[0]
+        high = round(today.max_temp)
+        low = round(today.min_temp)
+        precipitation = max(0, min(100, round(today.precipitation_probability)))
+        outlook = f" Today's high is {high} degrees with a low of {low}."
+        if precipitation >= 60:
+            outlook += f" Rain or snow is likely, with a {precipitation}% chance of precipitation."
+        elif precipitation >= 30:
+            outlook += f" There is a {precipitation}% chance of precipitation."
+        else:
+            outlook += " Significant precipitation is not expected."
+        return opening + outlook
 
     @classmethod
     def fetch_weather(
@@ -134,7 +160,7 @@ class WeatherService:
                 "latitude": latitude,
                 "longitude": longitude,
                 "current": "temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,apparent_temperature",
-                "daily": "weather_code,temperature_2m_max,temperature_2m_min",
+                "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max",
                 "temperature_unit": "fahrenheit",
                 "wind_speed_unit": "mph",
                 "timezone": "auto",
@@ -162,11 +188,17 @@ class WeatherService:
                 weather_codes = daily.get("weather_code", [])
                 max_temps = daily.get("temperature_2m_max", [])
                 min_temps = daily.get("temperature_2m_min", [])
+                precipitation_probabilities = daily.get("precipitation_probability_max", [])
 
                 for i, date in enumerate(dates[:7]):  # Get first 7 days
                     weather_code = weather_codes[i] if i < len(weather_codes) else 0
                     max_temp = max_temps[i] if i < len(max_temps) else 0
                     min_temp = min_temps[i] if i < len(min_temps) else 0
+                    precipitation_probability = (
+                        precipitation_probabilities[i]
+                        if i < len(precipitation_probabilities) and precipitation_probabilities[i] is not None
+                        else 0
+                    )
 
                     daily_forecast.append(
                         DailyForecast(
@@ -175,25 +207,30 @@ class WeatherService:
                             min_temp=min_temp,
                             weather_code=weather_code,
                             description=cls.get_description(weather_code),
+                            precipitation_probability=round(precipitation_probability),
                         )
                     )
 
-            # If no location name provided, reverse geocode
-            if not location_name:
-                location_name = cls.reverse_geocode(latitude, longitude) or f"{latitude:.2f}, {longitude:.2f}"
+            # GPS clients historically saved the coordinates as the label.
+            # Resolve both blank and coordinate-shaped labels to a city/state.
+            if not location_name or cls._is_coordinate_label(location_name):
+                location_name = cls.reverse_geocode(latitude, longitude) or "Location unavailable"
 
             weather_code = int(current.get("weather_code", 0))
+            temperature = round(current.get("temperature_2m", 0), 1)
+            description = cls.get_description(weather_code)
             return WeatherData(
                 location_name=location_name,
                 latitude=latitude,
                 longitude=longitude,
-                temperature=round(current.get("temperature_2m", 0), 1),
+                temperature=temperature,
                 weather_code=weather_code,
-                description=cls.get_description(weather_code),
+                description=description,
                 wind_speed=round(current.get("wind_speed_10m", 0), 1),
                 humidity=round(current.get("relative_humidity_2m", 0), 1),
                 apparent_temperature=round(current.get("apparent_temperature", 0), 1),
                 timestamp=current.get("time", datetime.now(timezone.utc).isoformat()),
+                narrative=cls.build_narrative(temperature, description, daily_forecast),
                 daily_forecast=daily_forecast,
             )
 
@@ -277,33 +314,36 @@ class WeatherService:
         """
         try:
             params = {
-                "latitude": latitude,
-                "longitude": longitude,
-                "language": "en",
+                "lat": latitude,
+                "lon": longitude,
                 "format": "json",
+                "addressdetails": 1,
+                "zoom": 10,
             }
 
             response = requests.get(
-                cls.OPEN_METEO_REVERSE_GEOCODING_API,
+                cls.NOMINATIM_REVERSE_GEOCODING_API,
                 params=params,
+                headers={"User-Agent": "HomeHub/1.0"},
                 timeout=cls.TIMEOUT,
             )
             response.raise_for_status()
             data = response.json()
 
-            results = data.get("results", [])
-            if results:
-                result = results[0]
-                parts = []
-                
-                if result.get("name"):
-                    parts.append(result["name"])
-                if result.get("admin1"):
-                    parts.append(result["admin1"])
-                if result.get("country"):
-                    parts.append(result["country"])
-                
-                return ", ".join(parts) if parts else None
+            address = data.get("address", {}) if isinstance(data, dict) else {}
+            city = next(
+                (
+                    address.get(key)
+                    for key in ("city", "town", "village", "municipality", "hamlet", "county")
+                    if address.get(key)
+                ),
+                None,
+            )
+            state_code = str(address.get("ISO3166-2-lvl4") or "")
+            state = state_code.split("-", 1)[1] if state_code.startswith("US-") else address.get("state")
+            parts = [str(value).strip() for value in (city, state) if str(value or "").strip()]
+            if parts:
+                return ", ".join(parts)
 
             return None
 

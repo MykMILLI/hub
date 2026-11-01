@@ -13,12 +13,23 @@
   .agenda-weather-card { min-height:290px; }
   .agenda-album-card { min-height:290px; }
   .agenda-work-card { min-height:290px; }
+  .agenda-header { position:relative; }
+  .agenda-clock { position:absolute; top:0; left:50%; display:flex; min-width:15rem; flex-direction:column; align-items:center; transform:translateX(-50%); }
+  .agenda-clock-time { color:var(--m3-on-surface); font-size:clamp(1.65rem, 3vw, 2.5rem); font-variant-numeric:tabular-nums; font-weight:700; letter-spacing:.035em; line-height:1; white-space:nowrap; }
+  .agenda-clock[data-font="modern"] .agenda-clock-time { font-family:Inter, ui-sans-serif, system-ui, sans-serif; }
+  .agenda-clock[data-font="digital"] .agenda-clock-time { font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; letter-spacing:.02em; }
+  .agenda-clock[data-font="classic"] .agenda-clock-time { font-family:Georgia, 'Times New Roman', serif; font-weight:600; letter-spacing:.01em; }
+  .agenda-clock[data-font="handwritten"] .agenda-clock-time { font-family:'Segoe Print', 'Bradley Hand', cursive; font-weight:600; letter-spacing:0; }
+  .agenda-clock-select { max-width:9rem; padding:.15rem .35rem; border:0; background:transparent; color:var(--m3-on-surface-variant); font-size:.7rem; text-align:center; }
+  .agenda-clock-select:focus-visible { border-radius:.4rem; }
   #memberWorkCards { grid-template-columns:1fr !important; gap:.65rem; }
   #agendaWeather { display:flex; height:calc(100% - 2rem); align-items:center; justify-content:center; text-align:center; }
   @media (max-width:767px) {
     #dailyAgendaRoot { width:100%; min-width:0; }
     #dailyAgendaRoot > section:first-child { padding:.9rem; }
     #dailyAgendaRoot > section:first-child > div:first-child { align-items:stretch; }
+    .agenda-clock { position:static; order:3; width:100%; margin-top:.5rem; transform:none; }
+    .agenda-clock-time { font-size:2rem; }
     #dailyAgendaRoot > section:first-child > div:first-child > div:last-child { width:100%; }
     #dailyAgendaRoot > section:first-child > div:first-child > div:last-child .btn { flex:1 1 0; justify-content:center; min-height:44px; }
     #dailyAgendaRoot > section:first-child > div:nth-child(2) { align-items:stretch; }
@@ -58,10 +69,11 @@
     .agenda-album-card > div:first-child > div:last-child {
       width:100%;
       display:grid;
-      grid-template-columns:minmax(0,1fr) repeat(4,44px);
+      grid-template-columns:minmax(0,1fr) repeat(5,44px);
       gap:.4rem;
     }
     #agendaSlideDuration,
+    #agendaSlideShuffle,
     #agendaSlidePrev,
     #agendaSlidePlay,
     #agendaSlideNext,
@@ -73,10 +85,20 @@
 </style>
 <div class="mx-auto max-w-7xl space-y-4" id="dailyAgendaRoot">
   <section class="card p-4 sm:p-6">
-    <div class="flex flex-wrap items-start justify-between gap-3">
+    <div class="agenda-header flex flex-wrap items-start justify-between gap-3">
       <div>
         <h2 class="text-3xl font-bold">Your week, at a glance</h2>
         <p class="text-sm text-gray-600 dark:text-gray-400">Family travel, shared moments, and a little less to remember.</p>
+      </div>
+      <div id="agendaClock" class="agenda-clock" data-font="modern">
+        <time id="agendaClockTime" class="agenda-clock-time" aria-label="Current time">12:00:00 PM</time>
+        <label class="sr-only" for="agendaClockFont">Clock style</label>
+        <select id="agendaClockFont" class="agenda-clock-select" aria-label="Clock style">
+          <option value="modern">Modern clock</option>
+          <option value="digital">Digital clock</option>
+          <option value="classic">Classic clock</option>
+          <option value="handwritten">Handwritten clock</option>
+        </select>
       </div>
       <div class="flex flex-wrap gap-2">
         <button type="button" id="agendaLocationsBtn" class="btn btn-secondary"><i class="fa-solid fa-location-dot mr-1"></i>Saved locations</button>
@@ -99,7 +121,7 @@
   <section id="agendaSchedule" class="agenda-grid" aria-live="polite"></section>
   <section class="agenda-dashboard-row">
     <article class="agenda-weather-card card p-4"><h3 class="font-bold"><i class="fa-solid fa-cloud-sun text-violet-500 mr-2"></i>Weather</h3><div id="agendaWeather" class="mt-3 text-sm text-gray-500">Loading weather…</div></article>
-    <article class="agenda-album-card card p-4"><div class="flex justify-between gap-2"><div><h3 class="font-bold"><i class="fa-solid fa-images text-violet-500 mr-2"></i>Shared Family Album</h3><p id="agendaSlideStatus" class="text-xs text-gray-500">Loading slideshow…</p></div><div class="flex gap-1"><select id="agendaSlideDuration" class="text-xs border rounded-lg px-1 dark:bg-gray-800"><option value="5">5s</option><option value="8" selected>8s</option><option value="12">12s</option><option value="20">20s</option></select><button id="agendaSlidePrev" class="btn btn-secondary text-xs"><i class="fa-solid fa-chevron-left"></i></button><button id="agendaSlidePlay" class="btn btn-secondary text-xs"><i class="fa-solid fa-pause"></i></button><button id="agendaSlideNext" class="btn btn-secondary text-xs"><i class="fa-solid fa-chevron-right"></i></button><button id="agendaSlideFullscreen" class="btn btn-primary text-xs"><i class="fa-solid fa-expand"></i></button></div></div><div id="agendaSlideFrame" class="mt-3 aspect-video bg-black rounded-xl overflow-hidden"><img id="agendaSlideImage" class="w-full h-full object-contain" alt="Shared Family Album slideshow"></div></article>
+    <article class="agenda-album-card card p-4"><div class="flex justify-between gap-2"><div><h3 class="font-bold"><i class="fa-solid fa-images text-violet-500 mr-2"></i>Shared Family Album</h3><p id="agendaSlideStatus" class="text-xs text-gray-500">Loading slideshow…</p></div><div class="flex gap-1"><select id="agendaSlideDuration" class="text-xs border rounded-lg px-1 dark:bg-gray-800" aria-label="Slide duration"><option value="5">5s</option><option value="8" selected>8s</option><option value="12">12s</option><option value="20">20s</option></select><button id="agendaSlideShuffle" class="btn btn-secondary text-xs" type="button" aria-label="Shuffle album" aria-pressed="false" title="Shuffle album"><i class="fa-solid fa-shuffle"></i></button><button id="agendaSlidePrev" class="btn btn-secondary text-xs" type="button" aria-label="Previous photo"><i class="fa-solid fa-chevron-left"></i></button><button id="agendaSlidePlay" class="btn btn-secondary text-xs" type="button" aria-label="Pause slideshow"><i class="fa-solid fa-pause"></i></button><button id="agendaSlideNext" class="btn btn-secondary text-xs" type="button" aria-label="Next photo"><i class="fa-solid fa-chevron-right"></i></button><button id="agendaSlideFullscreen" class="btn btn-primary text-xs" type="button" aria-label="View slideshow fullscreen"><i class="fa-solid fa-expand"></i></button></div></div><div id="agendaSlideFrame" class="mt-3 aspect-video bg-black rounded-xl overflow-hidden"><img id="agendaSlideImage" class="w-full h-full object-contain" alt="Shared Family Album slideshow"></div></article>
   <section class="agenda-work-card card p-4 sm:p-5">
     <div class="flex flex-wrap items-center justify-between gap-2"><div><h3 class="text-lg font-bold">Member work dashboard</h3><p id="memberWorkLabel" class="text-sm text-gray-500">Open work for the selected family member.</p></div><select id="memberWorkMember" class="p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600"></select></div>
     <div id="memberWorkCards" class="mt-4 grid md:grid-cols-3 gap-3"></div>
@@ -120,7 +142,7 @@
       <label class="block text-sm font-medium">Saved location<select id="agendaLocation" class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600"></select></label>
       <p class="text-xs text-gray-500">The selected location is copied into this agenda item, so future location edits do not alter the itinerary.</p>
       <label class="block text-sm font-medium">Details<textarea id="agendaDetails" rows="4" class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600" maxlength="5000" placeholder="Travel notes, confirmation details, or reminders"></textarea></label>
-      <div class="flex justify-end gap-2 pt-2"><button type="button" class="btn btn-secondary agenda-close">Cancel</button><button class="btn btn-primary">Save agenda item</button></div>
+      <div class="flex flex-wrap justify-end gap-2 pt-2"><button type="button" id="agendaDeleteBtn" class="btn btn-danger hidden"><i class="fa-solid fa-trash mr-1"></i>Delete agenda item</button><button type="button" class="btn btn-secondary agenda-close">Cancel</button><button class="btn btn-primary">Save agenda item</button></div>
     </form>
   </div>
 </div>
@@ -131,7 +153,14 @@
     <form id="agendaLocationForm" class="grid gap-3 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
       <input id="agendaLocationId" type="hidden">
       <label class="text-sm font-medium">Name<input id="agendaLocationName" required maxlength="160" class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600" placeholder="School, Office, Airport"></label>
-      <label class="text-sm font-medium">Address<input id="agendaLocationAddress" required maxlength="512" class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600" placeholder="Street address or directions"></label>
+      <label class="text-sm font-medium">Address
+        <div class="relative">
+          <input id="agendaLocationAddress" required maxlength="512" class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600" placeholder="Start typing a street address" autocomplete="street-address" aria-autocomplete="list" aria-controls="agendaAddressSuggestions">
+          <div id="agendaAddressSuggestions" class="hidden absolute left-0 right-0 top-full z-10 mt-1 max-h-60 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800" role="listbox"></div>
+        </div>
+        <span id="agendaAddressSearchStatus" class="mt-1 block text-xs font-normal text-gray-500">Start typing to search.</span>
+        <span class="block text-xs font-normal text-gray-500">Powered by <a class="underline hover:text-sky-600" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a>.</span>
+      </label>
       <label class="text-sm font-medium">Notes <span class="font-normal text-gray-500">(optional)</span><textarea id="agendaLocationNotes" rows="2" maxlength="5000" class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600"></textarea></label>
       <div class="flex justify-end gap-2"><button type="button" id="agendaLocationCancel" class="btn btn-secondary hidden">Cancel edit</button><button class="btn btn-primary">Save location</button></div>
     </form>
@@ -147,16 +176,287 @@
   const asDate = value => new Date(`${value}T12:00:00`);
   const monday = date => { const d = new Date(date); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d; };
   const toast = (message, type = 'success') => window.globalToast ? window.globalToast(message, type) : alert(message);
-  let slideAssets = [], slideIndex = 0, slideTimer, slidePlaying = true;
-  function renderSlide(){ if(!slideAssets.length) return; const a=slideAssets[slideIndex], frame=$('agendaSlideFrame'), url=`/api/immich/assets/${encodeURIComponent(a.id)}/${a.type==='VIDEO'?'original':'thumbnail'}`; const swap=()=>{frame.innerHTML=a.type==='VIDEO'?`<video class="w-full h-full object-contain" controls autoplay src="${url}"></video>`:`<img class="w-full h-full object-contain" alt="Shared Family Album slideshow" src="${url}">`;$('agendaSlideStatus').textContent=`${slideIndex+1} of ${slideAssets.length}`;}; if(a.type==='VIDEO'){swap();}else{const preload=new Image();preload.onload=swap;preload.onerror=()=>{$('agendaSlideStatus').textContent='Unable to load this photo.';};preload.src=url;} const next=slideAssets[(slideIndex+1)%slideAssets.length];if(next?.type!=='VIDEO'){const p=new Image();p.src=`/api/immich/assets/${encodeURIComponent(next.id)}/thumbnail`;}}
-  function playSlides(playing){slidePlaying=playing;clearInterval(slideTimer);$('agendaSlidePlay').innerHTML=`<i class="fa-solid fa-${playing?'pause':'play'}"></i>`;if(playing)slideTimer=setInterval(()=>$('agendaSlideNext').click(),Number($('agendaSlideDuration').value)*1000);}
-  fetch('/api/immich/shared-family-album').then(r=>r.json()).then(d=>{if(!d.ok) throw new Error(d.error); slideAssets=d.assets||[]; if(!slideAssets.length) throw new Error('No photos or videos in album'); renderSlide();playSlides(true);}).catch(e=>$('agendaSlideStatus').textContent=e.message);
-  $('agendaSlidePrev').onclick=()=>{if(slideAssets.length){slideIndex=(slideIndex-1+slideAssets.length)%slideAssets.length;renderSlide();}};
-  $('agendaSlideNext').onclick=()=>{if(slideAssets.length){slideIndex=(slideIndex+1)%slideAssets.length;renderSlide();}};
+  const clockFonts = new Set(['modern', 'digital', 'classic', 'handwritten']);
+  const savedClockFont = localStorage.getItem('daily-agenda-clock-font');
+  const clockFont = clockFonts.has(savedClockFont) ? savedClockFont : 'modern';
+  $('agendaClock').dataset.font = clockFont;
+  $('agendaClockFont').value = clockFont;
+  function updateClock() {
+    const now = new Date();
+    $('agendaClockTime').dateTime = now.toISOString();
+    $('agendaClockTime').textContent = now.toLocaleTimeString('en-US', {
+      hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true,
+    });
+  }
+  updateClock();
+  window.setInterval(updateClock, 1000);
+  $('agendaClockFont').onchange = event => {
+    const font = event.target.value;
+    $('agendaClock').dataset.font = font;
+    localStorage.setItem('daily-agenda-clock-font', font);
+  };
+  let slideAssets = [], slideOriginalAssets = [], slideIndex = 0, slideTimer, slidePlaying = true;
+  function uniqueAssets(assets) {
+    const seen = new Set();
+    return (assets || []).filter(asset => {
+      const id = String(asset?.id || '');
+      if (!id || seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+  }
+  function shuffleAssets(assets, avoidFirstId = '') {
+    const shuffled = [...assets];
+    for (let index = shuffled.length - 1; index > 0; index -= 1) {
+      const swapIndex = Math.floor(Math.random() * (index + 1));
+      [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+    }
+    if (shuffled.length > 1 && shuffled[0]?.id === avoidFirstId) {
+      [shuffled[0], shuffled[1]] = [shuffled[1], shuffled[0]];
+    }
+    return shuffled;
+  }
+  function reshuffleSlides({preserveCurrent = false} = {}) {
+    const current = preserveCurrent ? slideAssets[slideIndex] : null;
+    const remaining = current
+      ? slideOriginalAssets.filter(asset => asset.id !== current.id)
+      : slideOriginalAssets;
+    slideAssets = current
+      ? [current, ...shuffleAssets(remaining)]
+      : shuffleAssets(slideOriginalAssets);
+    slideIndex = 0;
+    const button = $('agendaSlideShuffle');
+    button.classList.add('btn-primary');
+    button.classList.remove('btn-secondary');
+    button.setAttribute('aria-pressed', 'true');
+    button.setAttribute('aria-label', 'Reshuffle family album');
+    button.title = 'Shuffle is always on · tap to reshuffle';
+    if (slideAssets.length) renderSlide();
+  }
+  function clearSlideTimer() {
+    window.clearTimeout(slideTimer);
+    slideTimer = null;
+  }
+  function advanceSlide(offset = 1) {
+    if (!slideAssets.length) return;
+    if (offset === 1 && slideIndex === slideAssets.length - 1) {
+      const previousId = slideAssets[slideIndex]?.id;
+      slideAssets = shuffleAssets(slideOriginalAssets, previousId);
+      slideIndex = 0;
+      renderSlide();
+      return;
+    }
+    slideIndex = (slideIndex + offset + slideAssets.length) % slideAssets.length;
+    renderSlide();
+  }
+  function schedulePhotoAdvance() {
+    clearSlideTimer();
+    if (!slidePlaying || slideAssets[slideIndex]?.type === 'VIDEO') return;
+    slideTimer = window.setTimeout(
+      () => advanceSlide(),
+      Number($('agendaSlideDuration').value) * 1000,
+    );
+  }
+  function showVideoPlayButton(video, asset) {
+    if (slideAssets[slideIndex]?.id !== asset.id) return;
+    let button = $('agendaVideoPlay');
+    if (!button) {
+      button = document.createElement('button');
+      button.id = 'agendaVideoPlay';
+      button.type = 'button';
+      button.className = 'absolute inset-0 m-auto h-fit w-fit rounded-xl bg-black/75 px-5 py-3 font-semibold text-white shadow-lg hover:bg-black/90 focus:outline-none focus:ring-2 focus:ring-white';
+      button.innerHTML = '<i class="fa-solid fa-volume-high mr-2"></i>Play video with sound';
+      $('agendaSlideFrame').appendChild(button);
+    }
+    button.onclick = () => {
+      video.muted = false;
+      video.volume = 1;
+      video.play().then(() => {
+        button.remove();
+        $('agendaSlideStatus').textContent = `${slideIndex + 1} of ${slideAssets.length} · Playing with sound`;
+      }).catch(() => {
+        $('agendaSlideStatus').textContent = `${slideIndex + 1} of ${slideAssets.length} · Tap the video controls to play`;
+      });
+    };
+  }
+  function showVideoError(frame, asset, url) {
+    if (slideAssets[slideIndex]?.id !== asset.id) return;
+    const error = document.createElement('div');
+    error.className = 'flex h-full flex-col items-center justify-center gap-3 p-4 text-center text-white';
+    error.innerHTML = '<i class="fa-solid fa-triangle-exclamation text-2xl text-amber-300"></i><strong>This video could not be loaded.</strong>';
+    const actions = document.createElement('div');
+    actions.className = 'flex flex-wrap justify-center gap-2';
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.className = 'btn btn-primary text-sm';
+    retry.textContent = 'Retry video';
+    retry.onclick = renderSlide;
+    const open = document.createElement('a');
+    open.className = 'btn btn-secondary text-sm';
+    open.href = url;
+    open.textContent = 'Open video';
+    actions.append(retry, open);
+    error.appendChild(actions);
+    frame.replaceChildren(error);
+    $('agendaSlideStatus').textContent = `${slideIndex + 1} of ${slideAssets.length} · Video failed to load`;
+  }
+  function renderSlide() {
+    clearSlideTimer();
+    if (!slideAssets.length) return;
+    const asset = slideAssets[slideIndex];
+    const frame = $('agendaSlideFrame');
+    const url = `/api/immich/assets/${encodeURIComponent(asset.id)}/${asset.type === 'VIDEO' ? 'playback' : 'thumbnail'}`;
+    const isCurrentAsset = () => slideAssets[slideIndex]?.id === asset.id;
+    const updateStatus = suffix => {
+      $('agendaSlideStatus').textContent = `${slideIndex + 1} of ${slideAssets.length}${suffix || ''}`;
+    };
+
+    if (asset.type === 'VIDEO') {
+      const video = document.createElement('video');
+      video.className = 'w-full h-full object-contain';
+      video.controls = true;
+      video.autoplay = true;
+      video.muted = true;
+      video.volume = 1;
+      video.playsInline = true;
+      video.preload = 'auto';
+      video.setAttribute('playsinline', '');
+      video.setAttribute('webkit-playsinline', '');
+      video.poster = `/api/immich/assets/${encodeURIComponent(asset.id)}/thumbnail`;
+      video.src = url;
+      video.addEventListener('ended', () => {
+        if (slidePlaying && isCurrentAsset()) advanceSlide();
+      }, {once: true});
+      video.addEventListener('loadedmetadata', () => {
+        if (isCurrentAsset()) {
+          updateStatus(` · ${Number.isFinite(video.duration) ? `${Math.ceil(video.duration)}s video` : 'Video ready'}`);
+        }
+      });
+      video.addEventListener('canplay', () => {
+        if (!slidePlaying || !isCurrentAsset()) return;
+        video.play().then(() => {
+          if (isCurrentAsset()) updateStatus(' · Playing preview · tap for sound');
+        }).catch(() => {
+          if (isCurrentAsset()) updateStatus(' · Tap play to start video');
+        });
+      }, {once: true});
+      video.addEventListener('loadeddata', () => {
+        if (!slidePlaying || !isCurrentAsset() || !video.paused) return;
+        video.play().catch(() => {
+          if (isCurrentAsset()) updateStatus(' · Tap Play video with sound');
+        });
+      }, {once: true});
+      video.addEventListener('error', () => {
+        if (isCurrentAsset()) showVideoError(frame, asset, url);
+      }, {once: true});
+      frame.classList.add('relative');
+      frame.replaceChildren(video);
+      updateStatus(' · Loading video…');
+      showVideoPlayButton(video, asset);
+      video.load();
+    } else {
+      const image = new Image();
+      image.className = 'w-full h-full object-contain';
+      image.alt = 'Shared Family Album slideshow';
+      image.onload = () => {
+        if (!isCurrentAsset()) return;
+        frame.replaceChildren(image);
+        updateStatus();
+        schedulePhotoAdvance();
+      };
+      image.onerror = () => {
+        if (isCurrentAsset()) $('agendaSlideStatus').textContent = 'Unable to load this photo.';
+      };
+      image.src = url;
+    }
+
+    const next = slideAssets[(slideIndex + 1) % slideAssets.length];
+    if (next?.type !== 'VIDEO') {
+      const preload = new Image();
+      preload.src = `/api/immich/assets/${encodeURIComponent(next.id)}/thumbnail`;
+    }
+  }
+  function playSlides(playing) {
+    slidePlaying = playing;
+    clearSlideTimer();
+    const button = $('agendaSlidePlay');
+    button.innerHTML = `<i class="fa-solid fa-${playing ? 'pause' : 'play'}"></i>`;
+    button.setAttribute('aria-label', playing ? 'Pause slideshow' : 'Play slideshow');
+    const video = $('agendaSlideFrame').querySelector('video');
+    if (video) {
+      if (playing) {
+        video.play().catch(() => {});
+        showVideoPlayButton(video, slideAssets[slideIndex]);
+      } else {
+        video.pause();
+        $('agendaVideoPlay')?.remove();
+      }
+    } else if (playing) {
+      schedulePhotoAdvance();
+    }
+  }
+  fetch('/api/immich/shared-family-album').then(r=>r.json()).then(d=>{if(!d.ok) throw new Error(d.error); slideOriginalAssets=uniqueAssets(d.assets||[]); if(!slideOriginalAssets.length) throw new Error('No photos or videos in album'); reshuffleSlides(); playSlides(true);}).catch(e=>$('agendaSlideStatus').textContent=e.message);
+  $('agendaSlideShuffle').onclick=()=>reshuffleSlides({preserveCurrent:true});
+  $('agendaSlidePrev').onclick=()=>advanceSlide(-1);
+  $('agendaSlideNext').onclick=()=>advanceSlide();
   $('agendaSlidePlay').onclick=()=>playSlides(!slidePlaying); $('agendaSlideFullscreen').onclick=()=>$('agendaSlideFrame').requestFullscreen?.();
   $('agendaSlideDuration').onchange=()=>playSlides(slidePlaying);
-  fetch('/api/weather/location').then(r=>r.json()).then(location => fetch(`/api/weather?latitude=${encodeURIComponent(location.latitude)}&longitude=${encodeURIComponent(location.longitude)}&location_name=${encodeURIComponent(location.location_name || '')}`)).then(r=>r.json()).then(d=>{const city=d.location_name||'Weather'; $('agendaWeather').innerHTML=`<div class=\"flex items-center gap-4\"><span class=\"text-4xl\">${d.weather_emoji||'☀️'}</span><div><b class=\"text-2xl text-gray-900 dark:text-white\">${Math.round(d.temperature)}°F</b><div>${city} · ${d.description||''}</div><div class=\"text-xs\">Wind ${d.wind_speed||'--'} mph · Humidity ${d.humidity||'--'}%</div></div></div>`;}).catch(()=>{$('agendaWeather').textContent='Weather is unavailable.';});
+  fetch('/api/weather/location').then(r=>r.json()).then(location => fetch(`/api/weather?latitude=${encodeURIComponent(location.latitude)}&longitude=${encodeURIComponent(location.longitude)}&location_name=${encodeURIComponent(location.location_name || '')}`)).then(r=>r.json()).then(d=>{const city=d.location_name||'Location unavailable'; $('agendaWeather').innerHTML=`<div class=\"space-y-3\"><div class=\"flex items-center gap-4\"><span class=\"text-4xl\">${d.weather_emoji||'☀️'}</span><div><b class=\"text-2xl text-gray-900 dark:text-white\">${Math.round(d.temperature)}°F</b><div>${city} · ${d.description||''}</div><div class=\"text-xs\">Wind ${d.wind_speed||'--'} mph · Humidity ${d.humidity||'--'}%</div></div></div><p class=\"rounded-lg bg-sky-50/80 p-3 text-sm leading-relaxed text-gray-700 dark:bg-sky-950/30 dark:text-gray-200\">${d.narrative||''}</p></div>`;}).catch(()=>{$('agendaWeather').textContent='Weather is unavailable.';});
   let view = 'week', anchor = new Date(), members = [], locations = [], entries = [];
+  let addressSearchTimer = null, addressSearchController = null;
+  function hideAddressSuggestions() {
+    $('agendaAddressSuggestions').classList.add('hidden');
+    $('agendaAddressSuggestions').innerHTML = '';
+  }
+  function renderAddressSuggestions(suggestions) {
+    const list = $('agendaAddressSuggestions');
+    list.innerHTML = suggestions.map((item, index) =>
+      `<button type="button" class="block w-full border-b border-gray-100 px-3 py-2 text-left text-sm last:border-0 hover:bg-sky-50 dark:border-gray-700 dark:hover:bg-gray-700" data-address-index="${index}" role="option">${esc(item.display_name)}</button>`
+    ).join('');
+    list.classList.toggle('hidden', !suggestions.length);
+    list.querySelectorAll('[data-address-index]').forEach(button => button.addEventListener('mousedown', event => {
+      event.preventDefault();
+      const item = suggestions[Number(button.dataset.addressIndex)];
+      if (item) {
+        $('agendaLocationAddress').value = item.display_name;
+        $('agendaAddressSearchStatus').textContent = 'Address selected.';
+        hideAddressSuggestions();
+      }
+    }));
+  }
+  $('agendaLocationAddress').addEventListener('input', () => {
+    const query = $('agendaLocationAddress').value.trim();
+    clearTimeout(addressSearchTimer);
+    if (addressSearchController) addressSearchController.abort();
+    if (query.length < 3) {
+      $('agendaAddressSearchStatus').textContent = 'Start typing to search.';
+      hideAddressSuggestions();
+      return;
+    }
+    $('agendaAddressSearchStatus').textContent = 'Searching addresses…';
+    addressSearchTimer = setTimeout(async () => {
+      addressSearchController = new AbortController();
+      try {
+        const response = await fetch(`/api/daily-agenda/address-search?q=${encodeURIComponent(query)}`, { signal: addressSearchController.signal });
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(data.error || 'Address search failed');
+        renderAddressSuggestions(data.suggestions || []);
+        $('agendaAddressSearchStatus').textContent = data.suggestions?.length ? 'Select an address to use it.' : 'No matching addresses found.';
+      } catch (error) {
+        if (error.name !== 'AbortError') {
+          hideAddressSuggestions();
+          $('agendaAddressSearchStatus').textContent = 'Address search is temporarily unavailable.';
+        }
+      }
+    }, 350);
+  });
+  document.addEventListener('click', event => {
+    if (!event.target.closest('#agendaLocationAddress, #agendaAddressSuggestions')) hideAddressSuggestions();
+  });
+  $('agendaLocationForm').addEventListener('reset', () => {
+    hideAddressSuggestions();
+    $('agendaAddressSearchStatus').textContent = 'Start typing to search.';
+  });
   async function loadMemberWork(member) {
     const data = await api(`/api/daily-agenda/member-work?member=${encodeURIComponent(member)}`);
     $('memberWorkLabel').textContent = `Open work for ${data.member}.`;
@@ -200,6 +500,7 @@
   }
   function openEntry(entry) {
     $('agendaEntryForm').reset(); $('agendaEntryId').value = entry?.id || ''; $('agendaEntryTitle').textContent = entry ? 'Edit agenda item' : 'Add agenda item';
+    $('agendaDeleteBtn').classList.toggle('hidden', !entry);
     $('agendaMember').innerHTML = members.map(member => `<option value="${esc(member)}">${esc(member)}</option>`).join('');
     $('agendaMember').value = entry?.member_name || members[0] || '';
     $('agendaDate').value = entry?.date || iso(anchor); $('agendaStartTime').value = entry?.start_time || '';
@@ -221,6 +522,26 @@
     event.preventDefault(); const id = $('agendaEntryId').value;
     const payload = {member_name:$('agendaMember').value, date:$('agendaDate').value, start_time:$('agendaStartTime').value, end_time:$('agendaEndTime').value, location_id:$('agendaLocation').value || null, details:$('agendaDetails').value};
     try { await api(id ? `/api/daily-agenda/entries/${id}` : '/api/daily-agenda/entries', {method:id ? 'PUT':'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}); close('agendaEntryModal'); toast('Agenda item saved'); await load(); } catch (err) { toast(err.message, 'error'); }
+  };
+  $('agendaDeleteBtn').onclick = async () => {
+    const id = $('agendaEntryId').value;
+    if (!id) return;
+    const confirmed = window.uiConfirm
+      ? await window.uiConfirm('Delete this agenda item? Its linked Family Calendar event will also be removed.', { title: 'Delete Agenda Item', confirmText: 'Delete', danger: true })
+      : window.confirm('Delete this agenda item? Its linked Family Calendar event will also be removed.');
+    if (!confirmed) return;
+    const button = $('agendaDeleteBtn');
+    button.disabled = true;
+    try {
+      await api(`/api/daily-agenda/entries/${id}`, { method: 'DELETE' });
+      close('agendaEntryModal');
+      toast('Agenda item deleted');
+      await load();
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      button.disabled = false;
+    }
   };
   $('agendaLocationsBtn').onclick = () => { renderLocations(); open('agendaLocationsModal'); };
   document.querySelectorAll('.agenda-locations-close').forEach(button => button.onclick = () => close('agendaLocationsModal'));

@@ -45,6 +45,7 @@ def load_config():
         rem.setdefault('calendar_start_day', 'sunday')  # default Sunday to align with expense tracker
     # Admin name default
     config.setdefault('admin_name', 'Administrator')
+    config.setdefault('instance_name', 'HomeHub')
     # Family members default list
     config.setdefault('family_members', [])
     # Theme defaults

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -15,9 +16,11 @@ import 'package:video_player/video_player.dart';
 import 'package:timezone/data/latest.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:workmanager/workmanager.dart';
 
 import 'supabase_runtime.dart';
+import 'session_client.dart';
 
 const String _notificationTaskName = 'homehub_notification_poll';
 const String _notificationChannelId = 'homehub_alerts';
@@ -35,7 +38,11 @@ const List<String> _mealTypes = [
 const String _cloudBaseUrl = 'https://hub.millitop.net';
 const String _localBaseUrl = 'http://192.168.1.225:5001';
 const bool _calendarSupportsOccurrenceScopedUpdates = false;
-final http.Client _httpClient = IOClient(HttpClient());
+
+final SessionCookieClient _sessionClient = SessionCookieClient(
+  IOClient(HttpClient()),
+);
+final http.Client _httpClient = _sessionClient;
 
 class _DailyWallClockReminder {
   const _DailyWallClockReminder({
@@ -156,6 +163,28 @@ String _scheduledDiagKey(String baseUrl, String member, String suffix) {
   final safeBase = baseUrl.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
   final safeMember = member.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
   return 'homehub_sched_diag_${safeBase}_${safeMember}_$suffix';
+}
+
+String _mobilePollTokenKey(String baseUrl, String member) {
+  final safeBase = baseUrl.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
+  final safeMember = member.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
+  return 'homehub_mobile_poll_token_${safeBase}_$safeMember';
+}
+
+Future<String> _loadOrCreateMobilePollToken(
+  String baseUrl,
+  String member,
+) async {
+  final prefs = await SharedPreferences.getInstance();
+  final key = _mobilePollTokenKey(baseUrl, member);
+  final existing = (prefs.getString(key) ?? '').trim();
+  if (existing.isNotEmpty) return existing;
+  final random = Random.secure();
+  final token = base64UrlEncode(
+    List<int>.generate(32, (_) => random.nextInt(256)),
+  );
+  await prefs.setString(key, token);
+  return token;
 }
 
 int _dailyReminderNotificationId(String slot) {
@@ -313,17 +342,20 @@ void notificationBackgroundDispatcher() {
     final baseUrl = (prefs.getString('homehub_base_url') ?? '').trim();
     final member = (prefs.getString('homehub_member') ?? '').trim();
     if (baseUrl.isEmpty || member.isEmpty) return true;
+    final token = (prefs.getString(_mobilePollTokenKey(baseUrl, member)) ?? '')
+        .trim();
+    if (token.isEmpty) return true;
 
     final normalized =
         baseUrl.startsWith('http://') || baseUrl.startsWith('https://')
         ? baseUrl
         : 'http://$baseUrl';
-    final uri = _apiUri(normalized, '/api/notifications', {
-      'member': member,
-      'unread_only': 'true',
-    });
+    final uri = _apiUri(normalized, '/api/notifications/mobile/poll');
 
-    final response = await http.get(uri).timeout(const Duration(seconds: 20));
+    final response = await http.get(
+      uri,
+      headers: {'X-HomeHub-Mobile-Token': token},
+    ).timeout(const Duration(seconds: 20));
     if (response.statusCode < 200 || response.statusCode >= 300) return true;
     final data = jsonDecode(response.body);
     if (data is! Map<String, dynamic>) return true;
@@ -405,6 +437,7 @@ class _HomeHubMobileAppState extends State<HomeHubMobileApp> {
   final SettingsStore _settingsStore = SettingsStore();
   AppSettings? _settings;
   bool _loading = true;
+  bool _authenticated = false;
 
   @override
   void initState() {
@@ -418,6 +451,7 @@ class _HomeHubMobileAppState extends State<HomeHubMobileApp> {
     setState(() {
       _settings = settings;
       _loading = false;
+      _authenticated = false;
     });
   }
 
@@ -477,12 +511,15 @@ class _HomeHubMobileAppState extends State<HomeHubMobileApp> {
           ? const Scaffold(body: Center(child: CircularProgressIndicator()))
           : (_settings == null || !_settings!.isValid)
           ? SetupScreen(onSave: _saveSettings)
-          : (_settings!.member.trim().isEmpty)
+          : !_authenticated
           ? AuthGateScreen(
               settings: _settings!,
               onUpdateSettings: _saveSettings,
               onAuthenticated: (authedSettings) {
-                setState(() => _settings = authedSettings);
+                setState(() {
+                  _settings = authedSettings;
+                  _authenticated = true;
+                });
               },
             )
           : HomeShell(settings: _settings!, onUpdateSettings: _saveSettings),
@@ -501,16 +538,95 @@ class AppSettings {
 
 class AppSection {
   const AppSection({
+    required this.id,
     required this.label,
     required this.icon,
-    this.nativeBuilder,
     this.webPath,
   });
 
+  final String id;
   final String label;
   final IconData icon;
-  final Widget Function(HomeHubApi api, AppSettings settings)? nativeBuilder;
   final String? webPath;
+}
+
+IconData _moduleIcon(String name) {
+  switch (name) {
+    case 'home':
+      return Icons.home_outlined;
+    case 'timeline':
+      return Icons.timeline;
+    case 'chat':
+      return Icons.chat_bubble_outline;
+    case 'poll':
+      return Icons.poll_outlined;
+    case 'projects':
+      return Icons.account_tree_outlined;
+    case 'cloud':
+      return Icons.cloud_outlined;
+    case 'cart':
+      return Icons.shopping_cart_outlined;
+    case 'checklist':
+      return Icons.checklist_outlined;
+    case 'recipes':
+      return Icons.menu_book_outlined;
+    case 'hourglass':
+      return Icons.hourglass_top_outlined;
+    case 'link':
+      return Icons.link_outlined;
+    case 'download':
+      return Icons.download_outlined;
+    case 'pdf':
+      return Icons.picture_as_pdf_outlined;
+    case 'qr':
+      return Icons.qr_code_2_outlined;
+    case 'calendar':
+      return Icons.calendar_month_outlined;
+    case 'route':
+      return Icons.route_outlined;
+    case 'meal':
+      return Icons.restaurant_menu;
+    case 'bell':
+      return Icons.notifications_none;
+    case 'settings':
+      return Icons.settings_outlined;
+    default:
+      return Icons.widgets_outlined;
+  }
+}
+
+/// Used when `/api/app-modules` cannot be reached and nothing is cached.
+const List<Map<String, String>> _fallbackModules = [
+  {'id': 'welcome', 'label': 'Welcome', 'path': '/', 'icon': 'home'},
+  {'id': 'timeline', 'label': 'Timeline', 'path': '/timeline', 'icon': 'timeline'},
+  {'id': 'messages', 'label': 'Messages', 'path': '/messages', 'icon': 'chat'},
+  {'id': 'polls', 'label': 'Polls', 'path': '/polls', 'icon': 'poll'},
+  {'id': 'shared_notes', 'label': 'Projects & Spaces', 'path': '/notes', 'icon': 'projects'},
+  {'id': 'shared_cloud', 'label': 'Shared Cloud', 'path': '/upload', 'icon': 'cloud'},
+  {'id': 'shopping_list', 'label': 'Shopping List', 'path': '/shopping', 'icon': 'cart'},
+  {'id': 'chores', 'label': 'To-Do/Chores', 'path': '/chores', 'icon': 'checklist'},
+  {'id': 'recipes', 'label': 'Recipe Book', 'path': '/recipes', 'icon': 'recipes'},
+  {'id': 'expiry_tracker', 'label': 'Expiry Tracker', 'path': '/expiry', 'icon': 'hourglass'},
+  {'id': 'qr_generator', 'label': 'QR Generator', 'path': '/qr', 'icon': 'qr'},
+  {'id': 'shared_calendar', 'label': 'Family Calendar', 'path': '/calendar', 'icon': 'calendar'},
+  {'id': 'daily_agenda', 'label': 'Daily Agenda', 'path': '/daily-agenda', 'icon': 'route'},
+  {'id': 'meal_planner', 'label': 'Meal Planner', 'path': '/meal-planner', 'icon': 'meal'},
+  {'id': 'notifications', 'label': 'Notifications', 'path': '/notifications', 'icon': 'bell'},
+  {'id': 'settings', 'label': 'Settings', 'path': '/settings', 'icon': 'settings'},
+];
+
+List<AppSection> _sectionsFromModules(List<Map<String, dynamic>> modules) {
+  return modules.map((module) {
+    final id = '${module['id'] ?? ''}'.trim();
+    final label = '${module['label'] ?? id}'.trim();
+    final path = '${module['path'] ?? '/'}'.trim();
+    return AppSection(
+      id: id,
+      label: label.isEmpty ? id : label,
+      icon: _moduleIcon('${module['icon'] ?? ''}'.trim()),
+      webPath: path.isEmpty ? '/' : path,
+    );
+  }).where((section) => section.id.isNotEmpty).toList();
 }
 
 enum LauncherSearchAction {
@@ -568,6 +684,15 @@ class HomeHubApi {
     return _decodeObject(response);
   }
 
+  /// Authoritative navigation list, mirroring the web sidebar.
+  Future<List<Map<String, dynamic>>> fetchAppModules() async {
+    final response = await _get(_uri('/api/app-modules'));
+    final body = _decodeObject(response);
+    return (body['modules'] as List<dynamic>? ?? const <dynamic>[])
+        .whereType<Map<String, dynamic>>()
+        .toList();
+  }
+
   Uri _uri(String path, [Map<String, String>? query]) {
     // Always prioritize the configured URL (external DNS) and use runtime fallback only when needed.
     final preferred = settings.baseUrl.trim();
@@ -598,8 +723,16 @@ class HomeHubApi {
     required Future<http.Response> Function(Uri uri) sender,
     required int seconds,
   }) async {
+    Future<http.Response> attempt(Uri target) async {
+      final response = await sender(target).timeout(Duration(seconds: seconds));
+      if (response.statusCode != 401 || _isAuthPath(target.path)) {
+        return response;
+      }
+      return response;
+    }
+
     try {
-      return await sender(uri).timeout(Duration(seconds: seconds));
+      return await attempt(uri);
     } catch (err) {
       if (!_isRetryableNetworkError(err)) rethrow;
     }
@@ -613,9 +746,7 @@ class HomeHubApi {
           '${mapped.scheme}://${mapped.host}${mapped.hasPort ? ':${mapped.port}' : ''}';
       if (!tried.add(key)) continue;
       try {
-        final response = await sender(
-          mapped,
-        ).timeout(Duration(seconds: seconds));
+        final response = await attempt(mapped);
         // Keep fallback non-sticky when a configured URL exists.
         if (settings.baseUrl.trim().isEmpty) {
           _activeBaseUrl = _normalizeBaseUrl(candidate);
@@ -630,6 +761,13 @@ class HomeHubApi {
       'All configured HomeHub endpoints are unreachable',
       uri,
     );
+  }
+
+  bool _isAuthPath(String path) {
+    return path.startsWith('/api/member-login') ||
+        path.startsWith('/api/member-logout') ||
+        path.startsWith('/api/current-member') ||
+        path.startsWith('/api/auth/');
   }
 
   String _weatherLocationStoragePrefix() {
@@ -936,6 +1074,17 @@ class HomeHubApi {
         .toList();
   }
 
+  Future<void> registerMobilePollingToken(String token) async {
+    final uri = _uri('/api/notifications/mobile/register');
+    final response = await _postJson(uri, {
+      'member': settings.member,
+      'token': token,
+      'platform': 'android',
+      'provider': 'local_poll',
+    });
+    _decodeObject(response);
+  }
+
   Future<List<TimelinePost>> fetchTimeline({
     int limit = 50,
     int? beforeId,
@@ -986,21 +1135,6 @@ class HomeHubApi {
   Future<Map<String, dynamic>> fetchAuthStatus() async {
     final uri = _uri('/api/auth/status');
     final response = await _get(uri);
-    return _decodeObject(response);
-  }
-
-  Future<Map<String, dynamic>> fetchCurrentMember() async {
-    final uri = _uri('/api/current-member');
-    final response = await _get(uri);
-    return _decodeObject(response);
-  }
-
-  Future<Map<String, dynamic>> loginMember({
-    required String name,
-    String pin = '',
-  }) async {
-    final uri = _uri('/api/member-login');
-    final response = await _postJson(uri, {'name': name, 'pin': pin});
     return _decodeObject(response);
   }
 
@@ -4828,7 +4962,6 @@ class AuthGateScreen extends StatefulWidget {
 
 class _AuthGateScreenState extends State<AuthGateScreen> {
   final _passwordCtrl = TextEditingController();
-  final _pinCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
   final _supabasePasswordCtrl = TextEditingController();
 
@@ -4838,11 +4971,9 @@ class _AuthGateScreenState extends State<AuthGateScreen> {
   bool _requiresPassword = false;
   bool _authed = false;
   bool _useSupabaseAuth = false;
-  String? _selectedMember;
   String _effectiveBaseUrl = '';
   String _selectedEndpoint = '';
   List<String> _configuredEndpoints = const [];
-  List<Map<String, dynamic>> _members = const [];
 
   @override
   void initState() {
@@ -4862,7 +4993,6 @@ class _AuthGateScreenState extends State<AuthGateScreen> {
   @override
   void dispose() {
     _passwordCtrl.dispose();
-    _pinCtrl.dispose();
     _emailCtrl.dispose();
     _supabasePasswordCtrl.dispose();
     super.dispose();
@@ -5082,8 +5212,6 @@ class _AuthGateScreenState extends State<AuthGateScreen> {
       _requiresPassword = body['requires_password'] == true;
       _authed = body['authed'] == true;
       _useSupabaseAuth = supabaseAuthEnabled;
-      _members = members;
-      _selectedMember = selected.isEmpty ? null : selected;
       _loading = false;
       _error = null;
     });
@@ -5101,9 +5229,9 @@ class _AuthGateScreenState extends State<AuthGateScreen> {
 
     if (!supabaseAuthEnabled &&
         (_requiresPassword == false || _authed) &&
-        currentMember.isNotEmpty) {
+        selected.isNotEmpty) {
       final configuredBase = _preferredBaseUrl;
-      final next = AppSettings(baseUrl: configuredBase, member: currentMember);
+      final next = AppSettings(baseUrl: configuredBase, member: selected);
       await widget.onUpdateSettings(next);
       if (!mounted) return;
       widget.onAuthenticated(next);
@@ -5201,60 +5329,11 @@ class _AuthGateScreenState extends State<AuthGateScreen> {
     }
   }
 
-  Future<void> _submitMemberLogin() async {
-    final name = (_selectedMember ?? '').trim();
-    if (name.isEmpty) {
-      setState(() => _error = 'Select a member');
-      return;
-    }
-    setState(() {
-      _submitting = true;
-      _error = null;
-    });
-    try {
-      final response = await _runWithEndpointFailover((baseUrl) {
-        final uri = _apiUri(baseUrl, '/api/member-login');
-        return _httpClient
-            .post(
-              uri,
-              headers: {'Content-Type': 'application/json'},
-              body: jsonEncode({'name': name, 'pin': _pinCtrl.text.trim()}),
-            )
-            .timeout(const Duration(seconds: 15));
-      });
-      final body = jsonDecode(response.body);
-      if (response.statusCode < 200 ||
-          response.statusCode >= 300 ||
-          body is! Map<String, dynamic> ||
-          body['ok'] == false) {
-        throw Exception(
-          '${body is Map<String, dynamic> ? (body['error'] ?? 'Login failed') : 'Login failed'}',
-        );
-      }
-      final configuredBase = _preferredBaseUrl;
-      final next = AppSettings(baseUrl: configuredBase, member: name);
-      await widget.onUpdateSettings(next);
-      if (!mounted) return;
-      widget.onAuthenticated(next);
-    } catch (err) {
-      if (!mounted) return;
-      setState(() => _error = '$err');
-    } finally {
-      if (mounted) setState(() => _submitting = false);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     if (_loading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
-
-    final selectedMemberHasPin = _members
-        .where((row) => '${row['name'] ?? ''}' == (_selectedMember ?? ''))
-        .map((row) => row['has_pin'] == true)
-        .cast<bool>()
-        .fold<bool>(false, (prev, value) => value);
 
     return Scaffold(
       appBar: AppBar(title: const Text('HomeHub Sign In')),
@@ -5347,35 +5426,21 @@ class _AuthGateScreenState extends State<AuthGateScreen> {
                 label: Text(_submitting ? 'Signing in...' : 'Sign In'),
               ),
             ] else ...[
-              DropdownButtonFormField<String>(
-                initialValue: _selectedMember,
-                decoration: const InputDecoration(labelText: 'Member'),
-                items: _members
-                    .map(
-                      (row) => DropdownMenuItem<String>(
-                        value: '${row['name'] ?? ''}',
-                        child: Text('${row['name'] ?? ''}'),
-                      ),
-                    )
-                    .toList(),
-                onChanged: (value) => setState(() => _selectedMember = value),
+              const Text(
+                'Sign in with the same HomeHub account used on the web.',
+                style: TextStyle(fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 8),
               TextField(
-                controller: _pinCtrl,
-                keyboardType: TextInputType.number,
+                controller: _passwordCtrl,
                 obscureText: true,
-                decoration: InputDecoration(
-                  labelText: selectedMemberHasPin
-                      ? 'PIN'
-                      : 'PIN (optional for first login)',
-                ),
+                decoration: const InputDecoration(labelText: 'Hub Password'),
               ),
               const SizedBox(height: 10),
               FilledButton.icon(
-                onPressed: _submitting ? null : _submitMemberLogin,
-                icon: const Icon(Icons.person),
-                label: Text(_submitting ? 'Continuing...' : 'Continue'),
+                onPressed: _submitting ? null : _submitPassword,
+                icon: const Icon(Icons.lock_open),
+                label: Text(_submitting ? 'Signing in...' : 'Sign In'),
               ),
             ],
             if (_error != null) ...[
@@ -5414,13 +5479,12 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   bool _notificationBootstrapDone = false;
   int _lastNotifiedId = 0;
   bool _privacyMaskEnabled = false;
-  bool _memberHasPin = false;
-  bool _pinLocked = false;
-  bool _unlockPromptOpen = false;
-  DateTime? _lastBackgroundedAt;
+  String? _bootstrapError;
+  String? _bootstrapWarning;
+  bool _notificationSetupInProgress = false;
+  List<AppSection> _sections = const <AppSection>[];
   StreamSubscription<_SseEvent>? _eventsSub;
   Timer? _eventsReconnectTimer;
-  static const Duration _pinRelockGrace = Duration(minutes: 5);
 
   String get _privacyMaskKey {
     final base = widget.settings.baseUrl.replaceAll(
@@ -5443,22 +5507,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (_memberHasPin &&
-        (state == AppLifecycleState.inactive ||
-            state == AppLifecycleState.paused ||
-            state == AppLifecycleState.detached)) {
-      _lastBackgroundedAt = DateTime.now();
-      return;
-    }
     if (state == AppLifecycleState.resumed) {
-      final pausedAt = _lastBackgroundedAt;
-      _lastBackgroundedAt = null;
-      if (_memberHasPin && pausedAt != null) {
-        final awayFor = DateTime.now().difference(pausedAt);
-        if (awayFor >= _pinRelockGrace) {
-          _pinLocked = true;
-        }
-      }
       unawaited(
         _rescheduleDailyWallClockReminders(
           notifications: _notifications,
@@ -5466,148 +5515,157 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
           member: widget.settings.member,
         ),
       );
-      if (_memberHasPin) {
-        _ensurePinUnlocked();
-      }
     }
   }
 
   Future<void> _bootstrapApi() async {
-    AppSettings effective = widget.settings;
-    final reachable = await _firstReachableEndpoint(widget.settings.baseUrl);
-    if (reachable != null &&
-        _normalizeBaseUrl(widget.settings.baseUrl) != reachable) {
-      effective = AppSettings(
-        baseUrl: reachable,
-        member: widget.settings.member,
-      );
-      await widget.onUpdateSettings(effective);
+    try {
+      AppSettings effective = widget.settings;
+      final reachable = await _firstReachableEndpoint(widget.settings.baseUrl);
+      if (reachable != null &&
+          _normalizeBaseUrl(widget.settings.baseUrl) != reachable) {
+        effective = AppSettings(
+          baseUrl: reachable,
+          member: widget.settings.member,
+        );
+        await widget.onUpdateSettings(effective);
+      }
+
+      _api = HomeHubApi(effective);
+      try {
+        final settingsObj = await _api.fetchHubSettings();
+        final value = '${settingsObj['hub_name'] ?? ''}'.trim();
+        if (value.isNotEmpty) {
+          _hubName = value;
+        }
+      } catch (_) {}
+      await _loadPrivacyMask();
+      _startLiveEvents();
+      await _loadSections();
+    } catch (error, stackTrace) {
+      debugPrint('HomeHub bootstrap failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
+      _bootstrapError = '$error';
+    } finally {
+      if (mounted) {
+        setState(() {
+          _index = 0;
+          _bootstrapping = false;
+        });
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || _bootstrapError != null) return;
+          unawaited(_setupNotificationsAfterBootstrap());
+        });
+      }
     }
-
-    _api = HomeHubApi(effective);
-    try {
-      final settingsObj = await _api.fetchHubSettings();
-      final value = '${settingsObj['hub_name'] ?? ''}'.trim();
-      if (value.isNotEmpty) {
-        _hubName = value;
-      }
-    } catch (_) {}
-    await _refreshPinRequirement();
-    await _syncCurrentMemberSession();
-    await _loadPrivacyMask();
-    await _initNativeNotifications();
-    _startLiveEvents();
-    await _ensurePinUnlocked();
-    if (!mounted) return;
-    setState(() {
-      _index = 0;
-      _bootstrapping = false;
-    });
   }
 
-  Future<void> _refreshPinRequirement() async {
+  Future<void> _initializeNotificationsSafely() async {
     try {
-      final status = await _api.fetchAuthStatus();
-      final members = (status['members'] as List<dynamic>? ?? const <dynamic>[])
-          .whereType<Map<String, dynamic>>()
-          .toList();
-      final row = members.firstWhere(
-        (m) =>
-            '${m['name'] ?? ''}'.trim().toLowerCase() ==
-            widget.settings.member.trim().toLowerCase(),
-        orElse: () => const <String, dynamic>{},
-      );
-      final hasPin = row['has_pin'] == true;
-      _memberHasPin = hasPin;
-      if (hasPin) {
-        _pinLocked = true;
-      }
-    } catch (_) {}
+      await _initNativeNotifications();
+      _bootstrapWarning = null;
+    } catch (error, stackTrace) {
+      debugPrint('HomeHub notification setup failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
+      _bootstrapWarning =
+          'HomeHub loaded, but notifications could not be started: $error';
+    }
   }
 
-  Future<void> _syncCurrentMemberSession() async {
+  Future<void> _setupNotificationsAfterBootstrap() async {
+    if (_notificationSetupInProgress) return;
+    _notificationSetupInProgress = true;
     try {
-      final current = await _api.fetchCurrentMember();
-      final currentMember = '${current['member'] ?? ''}'.trim();
-      final expected = widget.settings.member.trim();
-      if (currentMember.toLowerCase() == expected.toLowerCase()) return;
-      if (!_memberHasPin) {
-        await _api.loginMember(name: expected);
-      }
-    } catch (_) {}
-  }
-
-  Future<void> _ensurePinUnlocked() async {
-    if (!_memberHasPin || !_pinLocked || _unlockPromptOpen || !mounted) return;
-    _unlockPromptOpen = true;
-    final pinCtrl = TextEditingController();
-    String? error;
-    while (mounted && _pinLocked) {
-      final result = await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => StatefulBuilder(
-          builder: (context, setDialogState) => AlertDialog(
-            insetPadding: const EdgeInsets.symmetric(
-              horizontal: 24,
-              vertical: 24,
-            ),
-            title: const Text('Unlock HomeHub'),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Enter the PIN for ${widget.settings.member} to continue.',
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: pinCtrl,
-                    keyboardType: TextInputType.number,
-                    obscureText: true,
-                    maxLength: 4,
-                    decoration: const InputDecoration(labelText: 'PIN'),
-                  ),
-                  if (error != null) ...[
-                    const SizedBox(height: 8),
-                    Text(error!, style: const TextStyle(color: Colors.red)),
-                  ],
-                ],
-              ),
-            ),
-            actions: [
-              FilledButton(
-                onPressed: () async {
-                  final pin = pinCtrl.text.trim();
-                  if (pin.length != 4) {
-                    setDialogState(() => error = 'PIN must be 4 digits');
-                    return;
-                  }
-                  try {
-                    await _api.loginMember(
-                      name: widget.settings.member,
-                      pin: pin,
-                    );
-                    if (!context.mounted) return;
-                    Navigator.pop(context, true);
-                  } catch (_) {
-                    setDialogState(() => error = 'Invalid PIN');
-                  }
-                },
-                child: const Text('Unlock'),
-              ),
-            ],
-          ),
+      await _initializeNotificationsSafely();
+    } finally {
+      _notificationSetupInProgress = false;
+    }
+    if (!mounted || _bootstrapWarning == null) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(_bootstrapWarning!),
+        action: SnackBarAction(
+          label: 'Retry',
+          onPressed: () => unawaited(_retryNotificationSetup()),
         ),
-      );
-      if (result == true) {
-        _pinLocked = false;
-        break;
-      }
+      ),
+    );
+  }
+
+  Future<void> _retryNotificationSetup() async {
+    if (_notificationSetupInProgress) return;
+    _notificationSetupInProgress = true;
+    try {
+      await _initializeNotificationsSafely();
+    } finally {
+      _notificationSetupInProgress = false;
     }
-    pinCtrl.dispose();
-    _unlockPromptOpen = false;
+    if (!mounted) return;
+    final warning = _bootstrapWarning;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          warning ?? 'Notifications are connected.',
+        ),
+      ),
+    );
+  }
+
+  Future<void> _retryBootstrap() async {
+    if (_bootstrapping) return;
+    setState(() {
+      _bootstrapError = null;
+      _bootstrapWarning = null;
+      _bootstrapping = true;
+    });
+    await _bootstrapApi();
+  }
+
+  String get _sectionCacheKey {
+    final base = widget.settings.baseUrl.replaceAll(
+      RegExp(r'[^a-zA-Z0-9]'),
+      '_',
+    );
+    final member = widget.settings.member.replaceAll(
+      RegExp(r'[^a-zA-Z0-9]'),
+      '_',
+    );
+    return 'homehub_app_modules_${base}_$member';
+  }
+
+  /// Builds navigation from the server so the app shows exactly the modules the
+  /// web sidebar shows for this member. Falls back to the last known list, then
+  /// to a built-in default, so the app still works offline.
+  Future<void> _loadSections() async {
+    final prefs = await SharedPreferences.getInstance();
+    List<Map<String, dynamic>>? modules;
+    try {
+      final fetched = await _api.fetchAppModules();
+      if (fetched.isNotEmpty) {
+        modules = fetched;
+        await prefs.setString(_sectionCacheKey, jsonEncode(fetched));
+      }
+    } catch (_) {}
+
+    if (modules == null) {
+      try {
+        final cached = jsonDecode(prefs.getString(_sectionCacheKey) ?? '[]');
+        if (cached is List && cached.isNotEmpty) {
+          modules = cached.whereType<Map<String, dynamic>>().toList();
+        }
+      } catch (_) {}
+    }
+
+    modules ??= _fallbackModules
+        .map((m) => m.map((k, v) => MapEntry(k, v as dynamic)))
+        .toList();
+
+    final sections = _sectionsFromModules(modules);
+    if (sections.isEmpty || !mounted) return;
+    setState(() {
+      _sections = sections;
+      if (_index >= _sections.length) _index = 0;
+    });
   }
 
   Future<void> _loadPrivacyMask() async {
@@ -5627,6 +5685,9 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   }
 
   Future<void> _initNativeNotifications() async {
+    _notificationTimer?.cancel();
+    _notificationTimer = null;
+
     const androidSettings = AndroidInitializationSettings(
       '@mipmap/ic_launcher',
     );
@@ -5641,10 +5702,23 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         .resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin
         >();
+    await android?.createNotificationChannel(
+      const AndroidNotificationChannel(
+        _notificationChannelId,
+        _notificationChannelName,
+        description: _notificationChannelDesc,
+        importance: Importance.max,
+      ),
+    );
     await android?.requestNotificationsPermission();
 
     final prefs = await SharedPreferences.getInstance();
     _lastNotifiedId = prefs.getInt(_notificationKey) ?? 0;
+    final mobilePollToken = await _loadOrCreateMobilePollToken(
+      widget.settings.baseUrl,
+      widget.settings.member,
+    );
+    await _api.registerMobilePollingToken(mobilePollToken);
 
     await _rescheduleDailyWallClockReminders(
       notifications: _notifications,
@@ -5748,12 +5822,18 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
 
       if (!_notificationBootstrapDone) {
         _notificationBootstrapDone = true;
-        _lastNotifiedId = unread.last.id > _lastNotifiedId
-            ? unread.last.id
-            : _lastNotifiedId;
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setInt(_notificationKey, _lastNotifiedId);
-        return;
+        if (_lastNotifiedId == 0) {
+          final recentCutoff = DateTime.now().toUtc().subtract(
+            const Duration(minutes: 10),
+          );
+          final historical = unread.where((item) {
+            final createdAt = item.createdAt;
+            return createdAt == null || createdAt.toUtc().isBefore(recentCutoff);
+          });
+          for (final item in historical) {
+            if (item.id > _lastNotifiedId) _lastNotifiedId = item.id;
+          }
+        }
       }
 
       for (final item in unread) {
@@ -5812,8 +5892,9 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     }
   }
 
-  int _sectionIndexByLabel(List<AppSection> sections, String label) {
-    return sections.indexWhere((s) => s.label == label);
+  /// Labels come from the server, so navigation targets match on the stable id.
+  int _sectionIndexById(List<AppSection> sections, String id) {
+    return sections.indexWhere((s) => s.id == id);
   }
 
   Future<void> _openLauncher(List<AppSection> sections) async {
@@ -5905,7 +5986,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
 
       await _api.createShoppingItem(listId: targetListId, item: query);
       if (!mounted) return;
-      final idx = _sectionIndexByLabel(sections, 'Shopping List');
+      final idx = _sectionIndexById(sections, 'shopping_list');
       if (idx >= 0) setState(() => _index = idx);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Added "$query" to shopping list')),
@@ -5971,7 +6052,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         );
 
         if (!mounted) return;
-        final calendarIdx = _sectionIndexByLabel(sections, 'Family Calendar');
+        final calendarIdx = _sectionIndexById(sections, 'shared_calendar');
         if (calendarIdx >= 0) setState(() => _index = calendarIdx);
         if (pick != null) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -6016,7 +6097,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       );
       await _api.createCalendarEvent(draft);
       if (!mounted) return;
-      final idx = _sectionIndexByLabel(sections, 'Family Calendar');
+      final idx = _sectionIndexById(sections, 'shared_calendar');
       if (idx >= 0) setState(() => _index = idx);
       ScaffoldMessenger.of(
         context,
@@ -6036,7 +6117,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     try {
       await _api.saveRecipe(title: query, ingredients: '', instructions: '');
       if (!mounted) return;
-      final idx = _sectionIndexByLabel(sections, 'Recipe Book');
+      final idx = _sectionIndexById(sections, 'recipes');
       if (idx >= 0) setState(() => _index = idx);
       ScaffoldMessenger.of(
         context,
@@ -6069,7 +6150,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         amount: amount,
       );
       if (!mounted) return;
-      final idx = _sectionIndexByLabel(sections, 'Expense & Money');
+      final idx = _sectionIndexById(sections, 'expense_tracker');
       if (idx >= 0) setState(() => _index = idx);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -6092,120 +6173,80 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    final sections = <AppSection>[
-      AppSection(
-        label: 'Welcome',
-        icon: Icons.home_outlined,
-        nativeBuilder: (api, settings) =>
-            DashboardPage(api: api, member: settings.member),
-      ),
-      AppSection(
-        label: 'Timeline',
-        icon: Icons.timeline,
-        nativeBuilder: (api, settings) => TimelinePage(api: api),
-      ),
-      AppSection(
-        label: 'Messages',
-        icon: Icons.chat_bubble_outline,
-        nativeBuilder: (api, settings) => ChatThreadsPage(api: api),
-      ),
-      AppSection(
-        label: 'Polls',
-        icon: Icons.poll_outlined,
-        nativeBuilder: (api, settings) => PollsPage(api: api),
-      ),
-      AppSection(
-        label: 'Projects & Spaces',
-        icon: Icons.account_tree_outlined,
-        nativeBuilder: (api, settings) => ProjectsSpacesPage(api: api),
-      ),
-      AppSection(
-        label: 'Shared Cloud',
-        icon: Icons.cloud_outlined,
-        nativeBuilder: (api, settings) => SharedCloudPage(api: api),
-      ),
-      AppSection(
-        label: 'Shopping List',
-        icon: Icons.shopping_cart_outlined,
-        nativeBuilder: (api, settings) => ShoppingListPage(api: api),
-      ),
-      AppSection(
-        label: 'To-Do/Chores',
-        icon: Icons.checklist_outlined,
-        nativeBuilder: (api, settings) => ChoresPage(api: api),
-      ),
-      AppSection(
-        label: 'Recipe Book',
-        icon: Icons.menu_book_outlined,
-        nativeBuilder: (api, settings) => RecipeBookPage(api: api),
-      ),
-      AppSection(
-        label: 'Expiry Tracker',
-        icon: Icons.hourglass_top_outlined,
-        nativeBuilder: (api, settings) => ExpiryTrackerPage(api: api),
-      ),
-      AppSection(
-        label: 'QR Generator',
-        icon: Icons.qr_code_2_outlined,
-        nativeBuilder: (api, settings) => QrGeneratorPage(api: api),
-      ),
-      AppSection(
-        label: 'Expense & Money',
-        icon: Icons.receipt_long_outlined,
-        nativeBuilder: (api, settings) => ExpensesPage(api: api),
-      ),
-      AppSection(
-        label: 'Family Calendar',
-        icon: Icons.calendar_month_outlined,
-        nativeBuilder: (api, settings) => CalendarPage(api: api),
-      ),
-      AppSection(
-        label: 'Meal Planner',
-        icon: Icons.restaurant_menu,
-        nativeBuilder: (api, settings) => MealPlannerPage(api: api),
-      ),
-      AppSection(
-        label: 'Notifications',
-        icon: Icons.notifications_none,
-        nativeBuilder: (api, settings) => NotificationsPage(api: api),
-      ),
-      AppSection(
-        label: 'Settings',
-        icon: Icons.settings_outlined,
-        nativeBuilder: (api, settings) => SettingsNativePage(api: api),
-      ),
-    ];
+    final bootstrapError = _bootstrapError;
+    if (bootstrapError != null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('HomeHub')),
+        body: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.cloud_off_outlined,
+                    size: 48,
+                    color: Color(0xFF64748B),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'HomeHub could not finish loading',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    bootstrapError,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Color(0xFF64748B)),
+                  ),
+                  const SizedBox(height: 16),
+                  FilledButton.icon(
+                    onPressed: _retryBootstrap,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Try Again'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    final sections = _sections;
+    if (sections.isEmpty) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('HomeHub')),
+        body: Center(
+          child: FilledButton.icon(
+            onPressed: _retryBootstrap,
+            icon: const Icon(Icons.refresh),
+            label: const Text('Reload HomeHub'),
+          ),
+        ),
+      );
+    }
     if (_index >= sections.length) {
       _index = 0;
     }
     final activeSection = sections[_index];
-    final activePage = activeSection.nativeBuilder != null
-        ? activeSection.nativeBuilder!.call(_api, widget.settings)
-        : ModuleWebPage(
-            settings: widget.settings,
-            title: activeSection.label,
-            path: activeSection.webPath ?? '/',
-          );
-    final isExpenseSection = activeSection.label == 'Expense & Money';
-    final maskedSections = {
-      'Welcome',
-      'Timeline',
-      'Messages',
-      'Polls',
-      'Projects & Spaces',
-      'Shared Cloud',
-      'Shopping List',
-      'To-Do/Chores',
-      'Recipe Book',
-      'Expiry Tracker',
-      'QR Generator',
-      'Expense & Money',
-      'Family Calendar',
-      'Meal Planner',
-      'Notifications',
-    };
+    final activePage = ModuleWebPage(
+      key: ValueKey('module-web-${activeSection.id}'),
+      settings: widget.settings,
+      title: activeSection.label,
+      path: activeSection.webPath ?? '/',
+    );
+    final isExpenseSection = activeSection.id == 'expense_tracker';
+    // Every module except Settings renders family data worth masking, so new
+    // server-provided modules are covered automatically.
     final isMaskedSection =
-        _privacyMaskEnabled && maskedSections.contains(activeSection.label);
+        _privacyMaskEnabled && activeSection.id != 'settings';
 
     return Scaffold(
       appBar: AppBar(
@@ -6609,6 +6650,24 @@ class ModuleWebPage extends StatefulWidget {
 class _ModuleWebPageState extends State<ModuleWebPage> {
   late final WebViewController _controller;
   int _loadingProgress = 0;
+  String? _error;
+
+  // Trims the web chrome so an embedded module looks like a native screen.
+  static const String _hideChromeJs = '''
+(function () {
+  var id = 'homehub-native-embed';
+  if (document.getElementById(id)) return;
+  var style = document.createElement('style');
+  style.id = id;
+  style.textContent = [
+    '#sidebar, #sidebarNav, #openSidebar, #closeSidebar { display: none !important; }',
+    'header.app-header, .app-shell > header { display: none !important; }',
+    'main, .app-main, #mainContent { margin-left: 0 !important; padding-top: 12px !important; width: 100% !important; }',
+    'body { overflow-x: hidden !important; }'
+  ].join('\\n');
+  document.head.appendChild(style);
+})();
+''';
 
   @override
   void initState() {
@@ -6622,36 +6681,168 @@ class _ModuleWebPageState extends State<ModuleWebPage> {
             if (!mounted) return;
             setState(() => _loadingProgress = progress);
           },
+          onPageFinished: (url) async {
+            await _handlePageFinished(url);
+            if (!mounted) return;
+            setState(() => _loadingProgress = 100);
+          },
+          onWebResourceError: (error) {
+            if (!mounted || error.isForMainFrame != true) return;
+            setState(() => _error = error.description);
+          },
+          onNavigationRequest: (request) {
+            final target = Uri.tryParse(request.url);
+            final origin = Uri.tryParse(
+              _normalizeBaseUrl(widget.settings.baseUrl),
+            );
+            // Keep HomeHub in the WebView; let anything else leave it alone.
+            if (target == null || origin == null) {
+              return NavigationDecision.navigate;
+            }
+            return target.host == origin.host
+                ? NavigationDecision.navigate
+                : NavigationDecision.prevent;
+          },
         ),
-      )
-      ..loadRequest(
-        Uri.parse(_moduleUrl(widget.settings.baseUrl, widget.path)),
       );
+    _configureAndroidWebView();
+    unawaited(_bootstrapWebView());
+  }
+
+  /// Embedded modules need uploads and inline media to match the web app.
+  void _configureAndroidWebView() {
+    final platform = _controller.platform;
+    if (platform is! AndroidWebViewController) return;
+    try {
+      platform.setMediaPlaybackRequiresUserGesture(false);
+      platform.setOnShowFileSelector(_pickFilesForWebView);
+    } catch (_) {}
+  }
+
+  Future<List<String>> _pickFilesForWebView(FileSelectorParams params) async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        allowMultiple: params.mode == FileSelectorMode.openMultiple,
+      );
+      if (result == null) return const <String>[];
+      return result.files
+          .map((file) => file.path)
+          .whereType<String>()
+          .map((path) => Uri.file(path).toString())
+          .toList();
+    } catch (_) {
+      return const <String>[];
+    }
+  }
+
+  String get _moduleUri => _moduleUrl(widget.settings.baseUrl, widget.path);
+
+  /// Hands the native session cookie to the WebView so embedded modules load
+  /// already signed in instead of bouncing to /login.
+  Future<void> _bootstrapWebView() async {
+    try {
+      await _controller.clearCache();
+      final cookies = await _sessionClient.currentCookies();
+      final origin = Uri.parse(_normalizeBaseUrl(widget.settings.baseUrl));
+      final manager = WebViewCookieManager();
+      for (final entry in cookies.entries) {
+        await manager.setCookie(
+          WebViewCookie(
+            name: entry.key,
+            value: entry.value,
+            domain: origin.host,
+            path: '/',
+          ),
+        );
+      }
+    } catch (_) {}
+    if (!mounted) return;
+    await _controller.loadRequest(
+      Uri.parse(_moduleUri),
+      headers: const {'Cache-Control': 'no-cache'},
+    );
+  }
+
+  Future<void> _handlePageFinished(String url) async {
+    final current = Uri.tryParse(url);
+    if (current != null && current.path.startsWith('/login')) {
+      return;
+    }
+    try {
+      await _controller.runJavaScript(_hideChromeJs);
+    } catch (_) {}
+  }
+
+  Future<void> _reload() async {
+    setState(() {
+      _error = null;
+      _loadingProgress = 0;
+    });
+    await _controller.clearCache();
+    await _controller.loadRequest(
+      Uri.parse(_moduleUri),
+      headers: const {'Cache-Control': 'no-cache'},
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        if (_loadingProgress < 100)
-          LinearProgressIndicator(
-            value: _loadingProgress == 0 ? null : _loadingProgress / 100,
-          ),
-        Expanded(
-          child: RefreshIndicator(
-            onRefresh: () => _controller.reload(),
-            child: ListView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              children: [
-                SizedBox(
-                  height: MediaQuery.of(context).size.height,
-                  child: WebViewWidget(controller: _controller),
+    if (_error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.cloud_off, size: 40, color: Color(0xFF64748B)),
+              const SizedBox(height: 12),
+              Text(
+                'Could not load ${widget.title}',
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
                 ),
-              ],
-            ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 6),
+              Text(
+                _error!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Color(0xFF64748B)),
+              ),
+              const SizedBox(height: 14),
+              FilledButton.icon(
+                onPressed: _reload,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Try Again'),
+              ),
+            ],
           ),
         ),
-      ],
+      );
+    }
+
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        if (await _controller.canGoBack()) {
+          await _controller.goBack();
+          return;
+        }
+        if (mounted) Navigator.of(context).maybePop();
+      },
+      child: Column(
+        children: [
+          if (_loadingProgress < 100)
+            LinearProgressIndicator(
+              value: _loadingProgress == 0 ? null : _loadingProgress / 100,
+            ),
+          // The WebView must fill the remaining space directly; wrapping it in a
+          // scrollable with a fixed height breaks the page viewport.
+          Expanded(child: WebViewWidget(controller: _controller)),
+        ],
+      ),
     );
   }
 }

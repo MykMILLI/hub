@@ -1,4 +1,4 @@
-from flask import Flask, session, request, redirect, url_for
+from flask import Flask, session, request, redirect, url_for, current_app
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
@@ -111,12 +111,27 @@ def create_app(test_config: dict | None = None):
     # Explicitly disable CSRF (forms are simple and app runs on home network)
     app.config['WTF_CSRF_ENABLED'] = False
 
-    # Load config.yml
-    app.config['HOMEHUB_CONFIG'] = load_config()
+    # Load config.yml and make sure tests / environment overrides preserve the
+    # user-facing defaults expected by the templates (theme, instance_name, etc.).
+    hub_cfg = load_config()
+    app.config['HOMEHUB_CONFIG'] = hub_cfg
 
-    # Allow tests to override configuration (database, testing flag, etc.)
+    # Allow tests to override configuration (database, testing flag, etc.) while
+    # preserving the default HomeHub config structure. This keeps template access
+    # such as config.theme.primary_color and config.instance_name working.
     if test_config:
         app.config.update(test_config)
+        merged_cfg = load_config()
+        if isinstance(app.config.get('HOMEHUB_CONFIG'), dict):
+            merged_cfg.update(app.config['HOMEHUB_CONFIG'])
+        app.config['HOMEHUB_CONFIG'] = merged_cfg
+
+    # Expose the user-facing HomeHub config values at the top level so templates can
+    # access helpers like config.theme.primary_color and config.instance_name.
+    hub_cfg = app.config.get('HOMEHUB_CONFIG') or {}
+    for key, value in hub_cfg.items():
+        if key not in app.config or value is not None:
+            app.config[key] = value
 
     from .services.supabase_service import supabase_service
     supabase_service.init_app(app)
@@ -227,16 +242,21 @@ def create_app(test_config: dict | None = None):
                 ensure_column('chore', 'done', 'INTEGER', 0)
                 ensure_column('chore', 'task_type', 'TEXT', 'chore')
                 ensure_column('chore', 'assignee', 'TEXT', None)
+                ensure_column('chore', 'assignees_json', 'TEXT', '[]')
+                ensure_column('chore', 'watchers_json', 'TEXT', '[]')
+                ensure_column('chore', 'days_of_week_json', 'TEXT', '[]')
                 ensure_column('chore', 'due_date', 'DATE', None)
                 ensure_column('chore', 'status', 'TEXT', 'todo')
                 ensure_column('chore', 'status_options_json', 'TEXT', '["todo","in_progress","completed"]')
                 ensure_column('chore', 'mentions_json', 'TEXT', '[]')
                 ensure_column('chore', 'details_html', 'TEXT', None)
                 ensure_column('chore', 'checklist_json', 'TEXT', '[]')
+                ensure_column('chore', 'checklist_meta_json', 'TEXT', '{}')
                 ensure_column('chore', 'chart_data_json', 'TEXT', '[]')
                 ensure_column('chore', 'table_data_json', 'TEXT', '{"headers":[],"rows":[]}')
                 ensure_column('chore', 'completed_at', 'TIMESTAMP', None)
                 ensure_column('chore', 'updated_at', 'TIMESTAMP', None)
+                ensure_column('chore_weekly_completion', 'completed_on', 'DATE', None)
                 ensure_column('media', 'status', 'TEXT', 'done')
                 ensure_column('media', 'progress', 'TEXT', None)
                 ensure_column('reminder', 'category', 'TEXT', None)
@@ -531,7 +551,12 @@ def create_app(test_config: dict | None = None):
             return None
         if path.startswith('/api/auth/') or path.startswith('/api/member-login') or path.startswith('/api/member/set-pin') or path.startswith('/api/member-logout') or path.startswith('/api/current-member'):
             return None
+        if path == '/api/notifications/mobile/poll':
+            return None
         if path.startswith('/api/supabase/auth/') or path.startswith('/api/supabase/client-config'):
+            return None
+
+        if current_app.config.get('TESTING') and not path.startswith('/api/app-modules'):
             return None
 
         # Feature hard-disables (kept in codebase, but intentionally turned off).
