@@ -479,10 +479,11 @@
 
     function showChoreCompletionModal(task, award) {
         const modal = $('completionCelebrationModal');
+        const who = (award && award.member) || currentUser || 'you';
         const title = task.description || 'this chore';
         $('completionCelebrationMessage').textContent = award && award.reward
-            ? `Good job, ${currentUser || 'you'}! Because you completed “${title}” you win: ${award.reward}!`
-            : `Nice work, ${currentUser || 'you'}! You completed “${title}”.`;
+            ? `Good job, ${who}! Because you completed “${title}” you win: ${award.reward}!`
+            : `Nice work, ${who}! You completed “${title}”.`;
         const stampEl = $('completionCelebrationStamp');
         if (stampEl) {
             const state = taskCompletionState(task);

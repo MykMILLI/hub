@@ -3,7 +3,7 @@ import json
 import re
 
 import bleach
-from flask import render_template, request, redirect, url_for, current_app, jsonify
+from flask import render_template, request, redirect, url_for, current_app, jsonify, session
 
 from ..models import ActivityLog, db, Chore, ChoreRewardAward, ChoreWeeklyCompletion, FamilyMember
 from ..blueprints import main_bp
@@ -801,7 +801,7 @@ def api_set_chore_done(chore_id):
     chore = Chore.query.get_or_404(chore_id)
     try:
         data = request.get_json(force=True) or {}
-        actor = sanitize_text(data.get('actor') or chore.creator or '').strip()
+        actor = sanitize_text(session.get('current_member') or data.get('actor') or chore.creator or '').strip()
         requested_done = bool(data.get('done'))
         occurrence_date = _parse_reference_date(data.get('occurrence_date'))
         days_of_week = _parse_days_of_week(getattr(chore, 'days_of_week_json', '[]'))
