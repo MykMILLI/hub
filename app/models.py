@@ -610,6 +610,18 @@ class MobilePushToken(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class WebPushSubscription(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    member_name = db.Column(db.String(128), nullable=False, index=True)
+    endpoint = db.Column(db.String(1024), nullable=False, unique=True)
+    p256dh = db.Column(db.String(256), nullable=False)
+    auth = db.Column(db.String(128), nullable=False)
+    user_agent = db.Column(db.String(256), default='')
+    enabled = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class FamilyChatMessage(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     sender = db.Column(db.String(128), nullable=False, index=True)

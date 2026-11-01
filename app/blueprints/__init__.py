@@ -89,6 +89,36 @@ def service_worker():
           );
         });
 
+        self.addEventListener('push', (event) => {
+          let data = {};
+          try { data = event.data ? event.data.json() : {}; } catch (e) { data = { body: event.data ? event.data.text() : '' }; }
+          const title = data.title || 'HomeHub';
+          event.waitUntil(
+            self.registration.showNotification(title, {
+              body: data.body || '',
+              tag: data.tag || undefined,
+              icon: '/static/icons/icon-192.png',
+              badge: '/static/icons/icon-192.png',
+              data: { url: data.url || '/notifications' },
+              renotify: false
+            })
+          );
+        });
+
+        self.addEventListener('pushsubscriptionchange', (event) => {
+          event.waitUntil(
+            fetch('/api/notifications/webpush/key').then(r => r.json()).then(k => {
+              const pad = '='.repeat((4 - k.public_key.length % 4) % 4);
+              const raw = atob((k.public_key + pad).replace(/-/g, '+').replace(/_/g, '/'));
+              const key = Uint8Array.from(raw, c => c.charCodeAt(0));
+              return self.registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+            }).then(sub => fetch('/api/notifications/webpush/subscribe', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ subscription: sub.toJSON() })
+            })).catch(() => {})
+          );
+        });
+
         self.addEventListener('notificationclick', (event) => {
           event.notification.close();
           const target = (event.notification.data && event.notification.data.url) || '/notifications';

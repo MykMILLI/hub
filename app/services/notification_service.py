@@ -301,4 +301,11 @@ def publish_notification(
             ))
 
     db.session.commit()
+
+    if created and ({'in_app', 'mobile'} & set(normalized_channels)):
+        try:
+            from .web_push import dispatch_push_async
+            dispatch_push_async([r.id for r in created])
+        except Exception as err:
+            print(f'[WEBPUSH] dispatch failed: {err}')
     return created

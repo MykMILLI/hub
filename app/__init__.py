@@ -541,6 +541,15 @@ def create_app(test_config: dict | None = None):
         except Exception as worker_err:
             print(f"[SYNC WORKER] failed to start: {worker_err}")
 
+    # Background scheduler so reminders fire even when no client is polling.
+    if not app.config.get('TESTING') and str(os.environ.get('NOTIFY_SCHEDULER_ENABLED', '1')).strip().lower() in {'1', 'true', 'yes', 'on'}:
+        try:
+            from .services.notification_scheduler import start_notification_scheduler
+            if start_notification_scheduler(app):
+                print('[NOTIFY SCHEDULER] started')
+        except Exception as sched_err:
+            print(f"[NOTIFY SCHEDULER] failed to start: {sched_err}")
+
     @app.before_request
     def enforce_module_permissions():
         path = (request.path or '').rstrip('/') or '/'

@@ -2,3 +2,4 @@
 .env.*
 *.tgz
 *.tar.gz
+data/vapid_keys.json

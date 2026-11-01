@@ -88,6 +88,56 @@ def notifications_page():
     return render_template('notifications.html', config=config, current_member_name=_current_member_name())
 
 
+@main_bp.route('/api/notifications/webpush/key', methods=['GET'])
+def api_webpush_key():
+    from ..services.web_push import get_vapid_keys
+    keys = get_vapid_keys()
+    if not keys:
+        return jsonify({'ok': False, 'error': 'Web Push unavailable'}), 503
+    return jsonify({'ok': True, 'public_key': keys['public']})
+
+
+@main_bp.route('/api/notifications/webpush/subscribe', methods=['POST'])
+def api_webpush_subscribe():
+    from ..models import WebPushSubscription
+    member = sanitize_text(session.get('current_member') or '').strip()
+    if not member:
+        return jsonify({'ok': False, 'error': 'Authentication required'}), 401
+    data = request.get_json(silent=True) or {}
+    sub = data.get('subscription') or {}
+    keys = sub.get('keys') or {}
+    endpoint = str(sub.get('endpoint') or '').strip()
+    p256dh = str(keys.get('p256dh') or '').strip()
+    auth = str(keys.get('auth') or '').strip()
+    if not endpoint.startswith('https://') or not p256dh or not auth or len(endpoint) > 1024:
+        return jsonify({'ok': False, 'error': 'Invalid subscription'}), 400
+
+    row = WebPushSubscription.query.filter_by(endpoint=endpoint).first()
+    if row is None:
+        row = WebPushSubscription(member_name=member, endpoint=endpoint, p256dh=p256dh, auth=auth)
+        db.session.add(row)
+    row.member_name = member
+    row.p256dh = p256dh
+    row.auth = auth
+    row.enabled = True
+    row.user_agent = (request.headers.get('User-Agent') or '')[:256]
+    db.session.commit()
+    return jsonify({'ok': True})
+
+
+@main_bp.route('/api/notifications/webpush/unsubscribe', methods=['POST'])
+def api_webpush_unsubscribe():
+    from ..models import WebPushSubscription
+    member = sanitize_text(session.get('current_member') or '').strip()
+    if not member:
+        return jsonify({'ok': False, 'error': 'Authentication required'}), 401
+    data = request.get_json(silent=True) or {}
+    endpoint = str(data.get('endpoint') or '').strip()
+    WebPushSubscription.query.filter_by(endpoint=endpoint, member_name=member).delete()
+    db.session.commit()
+    return jsonify({'ok': True})
+
+
 @main_bp.route('/api/notifications/mobile/register', methods=['POST'])
 def api_register_mobile_token():
     data = request.get_json(silent=True) or {}
