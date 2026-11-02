@@ -644,7 +644,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 editModal.classList.add('hidden');
                 editModal.classList.remove('flex');
                 renderMembers();
-                toast('Family member updated successfully', 'success');
+                const sync = data.supabase_sync || {};
+                if (password && sync.ok) {
+                    toast(`Password saved. ${name} can now sign in with username "${name}" and that password.`, 'success');
+                } else if (password) {
+                    toast(`Saved, but the login account was NOT updated: ${sync.error || sync.reason || 'Supabase sync failed'}`, 'error');
+                } else {
+                    toast('Family member updated successfully', 'success');
+                }
             } else {
                 toast(data.error || 'Failed to update family member', 'error');
             }
