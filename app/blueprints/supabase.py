@@ -138,8 +138,14 @@ def api_supabase_auth_login():
         return jsonify({'ok': False, 'error': 'Supabase auth is disabled'}), 403
 
     data = request.get_json(silent=True) or {}
-    email = str(data.get('email') or '').strip()
+    email = str(data.get('email') or data.get('username') or '').strip()
     password = str(data.get('password') or '')
+    if email and '@' not in email:
+        by_name = _find_member_by_name(email)
+        if by_name and by_name.email:
+            email = by_name.email.strip()
+        else:
+            return jsonify({'ok': False, 'error': 'Invalid username or password'}), 401
     login = supabase_service.auth_password_login(email=email, password=password)
     if not login.get('ok'):
         return jsonify({'ok': False, 'error': login.get('error') or 'Authentication failed'}), 401

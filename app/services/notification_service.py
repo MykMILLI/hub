@@ -65,7 +65,8 @@ def resolve_member_email(member_name: str) -> str:
     row = FamilyMember.query.filter_by(name=member).first()
     profile_email = sanitize_text(getattr(row, 'email', '') or '').strip() if row else ''
     if profile_email:
-        return profile_email
+        from .member_accounts import is_placeholder_email
+        return '' if is_placeholder_email(profile_email) else profile_email
     mapping = _notifications_cfg().get('member_emails', {}) or {}
     email = sanitize_text(mapping.get(member, '') or '').strip()
     return email

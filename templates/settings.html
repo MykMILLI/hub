@@ -130,6 +130,7 @@
             <form id="addMemberForm" class="flex flex-wrap gap-2 items-center">
                 <input type="text" id="newMemberInput" class="flex-1 min-w-[10rem] p-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-white" placeholder="Family member name" required>
                 <input type="email" id="newMemberEmail" class="flex-1 min-w-[12rem] p-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-white" placeholder="Email (sends login instructions; optional for kids)">
+                <input type="text" id="newMemberPassword" autocomplete="new-password" class="flex-1 min-w-[10rem] p-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-white" placeholder="Password (required for kids without email)">
                 <select id="newMemberRole" class="p-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-white">
                     <option value="standard" selected>Standard</option>
                     <option value="child">Child</option>
@@ -272,6 +273,11 @@
             <div>
                 <label class="block text-sm text-gray-600 dark:text-gray-300 mb-2">Name</label>
                 <input type="text" id="editMemberName" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-white" required>
+            </div>
+            <div>
+                <label class="block text-sm text-gray-600 dark:text-gray-300 mb-2">Set / reset login password (optional)</label>
+                <input type="text" id="editMemberPassword" autocomplete="new-password" placeholder="Leave blank to keep current" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-white">
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Members without an email sign in with their name and this password.</p>
             </div>
             <div class="flex justify-end gap-2">
                 <button type="button" id="editCancelBtn" class="btn btn-secondary">Cancel</button>
@@ -561,23 +567,27 @@ document.addEventListener('DOMContentLoaded', () => {
         const name = newMemberInput.value.trim();
         const role = newMemberRole.value;
         const email = document.getElementById('newMemberEmail').value.trim();
+        const password = document.getElementById('newMemberPassword').value;
         if (!name) return;
         
         try {
             const response = await fetch('/api/family-members', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, role, email })
+                body: JSON.stringify({ name, role, email, password })
             });
             const data = await response.json();
             
             if (data.ok) {
                 newMemberInput.value = '';
                 document.getElementById('newMemberEmail').value = '';
+                document.getElementById('newMemberPassword').value = '';
                 renderMembers();
                 const sync = data.supabase_sync || {};
                 if (data.welcome_email_sent) {
                     toast('Member added. Welcome email with login instructions sent.', 'success');
+                } else if (!email && password && sync.ok) {
+                    toast(`Member added. They can sign in with username "${name}" and the password you set.`, 'success');
                 } else if (email && sync.temporary_password) {
                     toast(`Member added, but the welcome email could not be sent. Temporary password: ${sync.temporary_password}`, 'warning');
                 } else if (email && !sync.ok) {
@@ -618,17 +628,19 @@ document.addEventListener('DOMContentLoaded', () => {
         e.preventDefault();
         const id = editMemberId.value;
         const name = editMemberName.value.trim();
+        const password = document.getElementById('editMemberPassword').value;
         if (!name) return;
         
         try {
             const response = await fetch(`/api/family-members/${id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name })
+                body: JSON.stringify(password ? { name, password } : { name })
             });
             const data = await response.json();
             
             if (data.ok) {
+                document.getElementById('editMemberPassword').value = '';
                 editModal.classList.add('hidden');
                 editModal.classList.remove('flex');
                 renderMembers();

@@ -667,10 +667,12 @@ class SupabaseService:
         role: str,
         actor: str = '',
         previous_email: str = '',
+        password: str = '',
     ) -> dict[str, Any]:
         if not self._admin_ready():
             return {'ok': False, 'synced': False, 'reason': 'service_role_key_missing_or_auth_disabled'}
 
+        chosen_password = str(password or '')
         clean_email = str(email or '').strip().lower()
         clean_prev_email = str(previous_email or '').strip().lower()
         clean_member_name = str(member_name or '').strip()
@@ -704,15 +706,18 @@ class SupabaseService:
                 user_id = str(user_row.get('id') or '').strip()
                 if not user_id:
                     continue
+                update_body = {
+                    'email': clean_email,
+                    'user_metadata': metadata_user,
+                    'app_metadata': metadata_app,
+                    'email_confirm': True,
+                }
+                if chosen_password:
+                    update_body['password'] = chosen_password
                 ok, _, payload = self._admin_request_json(
                     'PUT',
                     f"{base_url}/auth/v1/admin/users/{user_id}",
-                    json_body={
-                        'email': clean_email,
-                        'user_metadata': metadata_user,
-                        'app_metadata': metadata_app,
-                        'email_confirm': True,
-                    },
+                    json_body=update_body,
                 )
                 if ok:
                     self._active_url = base_url
@@ -726,7 +731,7 @@ class SupabaseService:
                 last_error = str(payload.get('error') or last_error)
                 continue
 
-            temp_password = f"Hh!{secrets.token_urlsafe(10)}"
+            temp_password = chosen_password or f"Hh!{secrets.token_urlsafe(10)}"
             ok, _, payload = self._admin_request_json(
                 'POST',
                 f"{base_url}/auth/v1/admin/users",
@@ -748,7 +753,7 @@ class SupabaseService:
                     'created': True,
                     'user_id': user_id,
                     'email': clean_email,
-                    'temporary_password': temp_password,
+                    'temporary_password': '' if chosen_password else temp_password,
                 }
             last_error = str(payload.get('error') or last_error)
 

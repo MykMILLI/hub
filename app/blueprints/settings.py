@@ -15,6 +15,7 @@ from ..blueprints import main_bp
 from ..security import is_http_url, sanitize_text
 from ..permissions import APP_MODULES, get_visible_app_modules, parse_allowed_members, sanitize_visibility
 from ..services.notification_service import send_test_email, send_welcome_email
+from ..services.member_accounts import MIN_PASSWORD_LENGTH, is_placeholder_email, placeholder_email_for
 from ..services.supabase_service import supabase_service
 from datetime import datetime
 import yaml
@@ -49,7 +50,7 @@ def _current_member_is_admin() -> bool:
     return _is_admin_name(current_member)
 
 
-def _sync_member_upsert_to_supabase(*, member_name: str, member_email: str | None, member_role: str, previous_email: str = '') -> dict | None:
+def _sync_member_upsert_to_supabase(*, member_name: str, member_email: str | None, member_role: str, previous_email: str = '', password: str = '') -> dict | None:
     clean_email = sanitize_text((member_email or '').strip().lower())
     if not clean_email:
         return None
@@ -60,6 +61,7 @@ def _sync_member_upsert_to_supabase(*, member_name: str, member_email: str | Non
         role=_normalize_role(member_role),
         actor=actor,
         previous_email=sanitize_text((previous_email or '').strip().lower()),
+        password=password,
     )
 
 
@@ -72,7 +74,7 @@ def _sync_member_revoke_in_supabase(*, member_email: str | None) -> dict | None:
 
 
 def _send_welcome_if_needed(member_name: str, email: str | None, sync: dict | None) -> bool:
-    if not email or not sync or not sync.get('ok'):
+    if not email or is_placeholder_email(email) or not sync or not sync.get('ok'):
         return False
     if not sync.get('created') and not sync.get('announce'):
         return False
@@ -305,6 +307,7 @@ def api_add_family_member():
         name = sanitize_text(str(data.get('name', '')).strip())
         role = _normalize_role(str(data.get('role', 'standard')))
         email = sanitize_text(str(data.get('email', '')).strip())
+        password = str(data.get('password') or '')
         
         if not name:
             return jsonify({"ok": False, "error": "Family member name cannot be empty"}), 400
@@ -317,6 +320,13 @@ def api_add_family_member():
         if email and ('@' not in email or '.' not in email.split('@')[-1]):
             return jsonify({"ok": False, "error": "Invalid email address"}), 400
 
+        if password and len(password) < MIN_PASSWORD_LENGTH:
+            return jsonify({"ok": False, "error": f"Password must be at least {MIN_PASSWORD_LENGTH} characters"}), 400
+        if not email and password:
+            email = placeholder_email_for(name)
+        elif not email and role == 'child':
+            return jsonify({"ok": False, "error": "Set a password so the child can sign in with their username"}), 400
+
         member = FamilyMember(name=name, role=role, email=(email or None))
         db.session.add(member)
         db.session.commit()
@@ -325,6 +335,7 @@ def api_add_family_member():
             member_name=member.name,
             member_email=member.email,
             member_role=member.role,
+            password=password,
         )
         welcome_email_sent = _send_welcome_if_needed(member.name, member.email, supabase_sync)
         
@@ -362,6 +373,7 @@ def api_update_family_member(member_id):
         pin = str(data.get('pin', '')).strip() if 'pin' in data else member.pin
         role = _normalize_role(str(data.get('role', member.role or 'standard')))
         email = sanitize_text(str(data.get('email', '')).strip()) if 'email' in data else (member.email or '')
+        password = str(data.get('password') or '')
         
         if not name:
             return jsonify({"ok": False, "error": "Family member name cannot be empty"}), 400
@@ -378,6 +390,13 @@ def api_update_family_member(member_id):
 
         if email and ('@' not in email or '.' not in email.split('@')[-1]):
             return jsonify({"ok": False, "error": "Invalid email address"}), 400
+
+        if password and len(password) < MIN_PASSWORD_LENGTH:
+            return jsonify({"ok": False, "error": f"Password must be at least {MIN_PASSWORD_LENGTH} characters"}), 400
+        if not email and password:
+            email = placeholder_email_for(name)
+        if is_placeholder_email(previous_email) and not data.get('email'):
+            email = previous_email if name == member.name else placeholder_email_for(name)
         
         member.name = name
         member.pin = pin if pin else None
@@ -392,6 +411,7 @@ def api_update_family_member(member_id):
                 member_email=member.email,
                 member_role=member.role,
                 previous_email=previous_email,
+                password=password,
             )
         elif previous_email:
             supabase_sync = _sync_member_revoke_in_supabase(member_email=previous_email)
