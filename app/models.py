@@ -888,6 +888,90 @@ class HouseholdRoutineState(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class KidRewardProfile(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    child_name = db.Column(db.String(128), nullable=False, unique=True, index=True)
+    stars = db.Column(db.Integer, nullable=False, default=0)
+    updated_by = db.Column(db.String(128))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class KidRewardRule(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    behavior_kind = db.Column(db.String(12), nullable=False, default='do')  # do|dont
+    title = db.Column(db.String(256), nullable=False)
+    points = db.Column(db.Integer, nullable=False, default=1)
+    emoji = db.Column(db.String(16), default='⭐')
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+    active = db.Column(db.Boolean, default=True)
+    created_by = db.Column(db.String(128))
+    updated_by = db.Column(db.String(128))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class KidRewardEvent(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    child_name = db.Column(db.String(128), nullable=False, index=True)
+    delta = db.Column(db.Integer, nullable=False)
+    reason = db.Column(db.String(256))
+    created_by = db.Column(db.String(128), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+
+class KidRewardRedemption(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    child_name = db.Column(db.String(128), nullable=False, index=True)
+    reward_label = db.Column(db.String(256), nullable=False)
+    stars_spent = db.Column(db.Integer, nullable=False, default=0)
+    redeemed_by = db.Column(db.String(128), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+
+class KidRewardTimeout(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    child_name = db.Column(db.String(128), nullable=False, index=True)
+    reason = db.Column(db.String(256), nullable=False)
+    timeout_minutes = db.Column(db.Integer, nullable=False, default=5)
+    stars_deducted = db.Column(db.Integer, nullable=False, default=1)
+    reward_minutes_lost = db.Column(db.Integer, nullable=False, default=10)
+    created_by = db.Column(db.String(128), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+
+class KidRewardRepairTask(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    timeout_id = db.Column(db.Integer, db.ForeignKey('kid_reward_timeout.id', ondelete='CASCADE'), nullable=False, unique=True, index=True)
+    child_name = db.Column(db.String(128), nullable=False, index=True)
+    task_text = db.Column(db.String(256), nullable=False)
+    completed = db.Column(db.Boolean, default=False, index=True)
+    completed_at = db.Column(db.DateTime)
+    completed_by = db.Column(db.String(128))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+
+class KidRewardParentActionTask(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    redemption_id = db.Column(db.Integer, db.ForeignKey('kid_reward_redemption.id', ondelete='CASCADE'), nullable=False, index=True)
+    child_name = db.Column(db.String(128), nullable=False, index=True)
+    reward_label = db.Column(db.String(256), nullable=False)
+    parent_name = db.Column(db.String(128), nullable=False, index=True)
+    chore_id = db.Column(db.Integer, db.ForeignKey('chore.id', ondelete='SET NULL'), index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+
+class KidRewardSetting(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    confetti_enabled = db.Column(db.Boolean, default=True)
+    sounds_enabled = db.Column(db.Boolean, default=False)
+    timeout_default_minutes = db.Column(db.Integer, nullable=False, default=5)
+    timeout_default_star_loss = db.Column(db.Integer, nullable=False, default=1)
+    timeout_default_reward_minutes_loss = db.Column(db.Integer, nullable=False, default=10)
+    updated_by = db.Column(db.String(128))
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class LibraryBookLoan(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     child_name = db.Column(db.String(128), nullable=False, index=True)

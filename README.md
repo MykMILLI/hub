@@ -38,6 +38,8 @@ HomeHub is packed with useful tools to make family life a little more organized:
 * **Private & Self-Hosted**: All your data stays on your network. No cloud, no tracking.
 * **Simple & Lightweight**: Runs smoothly on minimal hardware.
 * **Family-Focused**: Designed to be intuitive for users of all technical skill levels.
+* **Kid-Friendly Routines**: Includes a Gold Star Club dashboard with admin-managed rewards, plus bedtime reader/book/movie assignments children can quickly understand.
+* **Camera Center**: View configured RTSP cameras in-app, send PTZ commands, and capture snapshots or recorded clips through API routes.
 * **Customizable**: Toggle features on or off and even change the color theme right from the `config.yml` file.
 
 ![homehub](https://github.com/user-attachments/assets/55b1c580-8897-4073-9e51-2a892a2bdcd4)

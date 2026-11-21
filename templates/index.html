@@ -111,6 +111,50 @@ window.REMINDERS_TIME_FORMAT = "{{ (config.reminders.time_format if config.remin
 		</div>
 		<div id="welcomeOverviewLayout"><div id="welcomeTopRow"></div></div>
 		<div id="assignedTasksModal" class="hidden fixed inset-0 z-[70] bg-black/60 p-4 sm:p-6 items-center justify-center"><div class="card w-full max-w-xl max-h-[calc(100vh-2rem)] overflow-y-auto p-5 rounded-2xl"><div class="flex justify-between gap-3"><h3 class="text-xl font-bold">Tasks assigned to you</h3><button id="closeAssignedTasks" class="btn btn-secondary">Close</button></div><div class="mt-4 space-y-2">{% for task in assigned_open_tasks %}<a href="/chores?tab=todo" class="block rounded-lg border border-gray-200 dark:border-gray-700 p-3 hover:border-violet-400"><b>{{ task.description }}</b>{% if task.due_date %}<span class="block text-xs text-gray-500 mt-1">Due {{ task.due_date.strftime('%b %d') }}</span>{% endif %}</a>{% else %}<p class="text-sm text-gray-500">No open tasks are assigned to you.</p>{% endfor %}</div></div></div>
+		{% if can_manage_kid_rewards %}
+		<div id="quickStarModal" class="hidden fixed inset-0 z-[75] bg-black/60 p-4 sm:p-6 items-center justify-center">
+			<div class="card w-full max-w-lg max-h-[calc(100vh-2rem)] overflow-y-auto p-5 sm:p-6 rounded-2xl">
+				<div class="flex items-start justify-between gap-3">
+					<div>
+						<h3 class="text-xl font-bold">Give a Gold Star</h3>
+						<p id="quickStarModalMeta" class="mt-1 text-sm text-gray-500">Celebrate something specific they did well.</p>
+					</div>
+					<button id="quickStarModalClose" type="button" class="btn btn-secondary text-sm">Close</button>
+				</div>
+				<form id="quickStarForm" class="mt-4 space-y-3">
+					<input id="quickStarChild" type="hidden">
+					<label class="block text-sm font-medium">What is this star for?
+						<textarea id="quickStarReason" rows="3" maxlength="256" required class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600" placeholder="Used kind words, shared toys, listened the first time..."></textarea>
+					</label>
+					<div class="flex justify-end gap-2">
+						<button id="quickStarCancel" type="button" class="btn btn-secondary">Cancel</button>
+						<button id="quickStarSubmit" type="submit" class="btn btn-primary"><i class="fa-solid fa-star mr-1"></i>Give +1 Star</button>
+					</div>
+				</form>
+			</div>
+		</div>
+		<div id="quickConsequenceModal" class="hidden fixed inset-0 z-[75] bg-black/60 p-4 sm:p-6 items-center justify-center">
+			<div class="card w-full max-w-lg max-h-[calc(100vh-2rem)] overflow-y-auto p-5 sm:p-6 rounded-2xl">
+				<div class="flex items-start justify-between gap-3">
+					<div>
+						<h3 class="text-xl font-bold">Record Consequence</h3>
+						<p id="quickConsequenceModalMeta" class="mt-1 text-sm text-gray-500">Log what happened and remove one star.</p>
+					</div>
+					<button id="quickConsequenceModalClose" type="button" class="btn btn-secondary text-sm">Close</button>
+				</div>
+				<form id="quickConsequenceForm" class="mt-4 space-y-3">
+					<input id="quickConsequenceChild" type="hidden">
+					<label class="block text-sm font-medium">What happened?
+						<textarea id="quickConsequenceReason" rows="3" maxlength="256" required class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600" placeholder="Unsafe play, yelling, not listening..."></textarea>
+					</label>
+					<div class="flex justify-end gap-2">
+						<button id="quickConsequenceCancel" type="button" class="btn btn-secondary">Cancel</button>
+						<button id="quickConsequenceSubmit" type="submit" class="btn btn-danger"><i class="fa-solid fa-minus mr-1"></i>Apply -1 Star</button>
+					</div>
+				</form>
+			</div>
+		</div>
+		{% endif %}
 	</div>
 
 	<!-- Weather Widget (if enabled) -->
@@ -261,7 +305,7 @@ window.REMINDERS_TIME_FORMAT = "{{ (config.reminders.time_format if config.remin
 					<div class="date-square-weekday">WEDNESDAY · 2026</div>
 				</div>
 			</div>
-			<div class="space-y-3"><div class="rounded-2xl border border-gray-200 dark:border-gray-700 p-5 bg-white/80 dark:bg-gray-900/40"><div class="flex gap-4 items-center"><span class="w-12 h-12 rounded-xl bg-violet-100 text-violet-600 inline-flex items-center justify-center text-2xl"><i class="fa-solid fa-moon"></i></span><div><div class="text-xs uppercase tracking-wide text-gray-500">Bedtime Reader</div><div id="bedtimeReaderLabel" class="text-2xl font-bold">{{ routines.bedtime.reader if routines and routines.bedtime else 'Rachel' }}</div><div id="bedtimeReaderMeta" class="text-sm text-gray-500">Story time.</div></div></div></div>
+			<div class="space-y-3"><div class="rounded-2xl border border-gray-200 dark:border-gray-700 p-5 bg-white/80 dark:bg-gray-900/40"><div class="flex gap-4 items-center"><span class="w-12 h-12 rounded-xl bg-violet-100 text-violet-600 inline-flex items-center justify-center text-2xl"><i class="fa-solid fa-moon"></i></span><div><div class="text-xs uppercase tracking-wide text-gray-500">Bedtime Reader</div><div id="bedtimeReaderLabel" class="text-2xl font-bold">{{ routines.bedtime.reader if routines and routines.bedtime else 'Rachel' }}</div><div id="bedtimeReaderMeta" class="text-sm text-gray-500">Story time.</div></div></div><div class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm"><div class="rounded-lg bg-indigo-50 dark:bg-indigo-900/20 px-3 py-2"><div class="text-[11px] uppercase tracking-wide text-gray-500">Book Picker</div><div id="bedtimeBookPickerLabel" class="font-semibold">{{ routines.bedtime.book_picker if routines and routines.bedtime and routines.bedtime.book_picker else 'Harley' }}</div></div><div class="rounded-lg bg-amber-50 dark:bg-amber-900/20 px-3 py-2"><div class="text-[11px] uppercase tracking-wide text-gray-500">Bedtime Movie Selector</div><div id="bedtimeMoviePickerLabel" class="font-semibold">{{ routines.bedtime.movie_picker if routines and routines.bedtime and routines.bedtime.movie_picker else 'Avery' }}</div></div></div></div>
 			<div class="rounded-2xl border border-gray-200 dark:border-gray-700 p-5 bg-white/80 dark:bg-gray-900/40">
 				<div class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Bath Time</div>
 				<div class="mt-2 space-y-1 text-sm">
@@ -288,6 +332,136 @@ window.REMINDERS_TIME_FORMAT = "{{ (config.reminders.time_format if config.remin
 				<button id="addLibraryBookBtn" type="button" class="btn btn-secondary text-sm"><i class="fa-solid fa-book mr-1"></i>Add library book</button>
 			</div>
 			<div id="libraryBookList" class="mt-3 space-y-2"></div>
+		</div>
+		<div class="mt-4 rounded-xl border border-yellow-200 dark:border-yellow-700 p-4 bg-yellow-50/80 dark:bg-yellow-900/20">
+			<div class="flex flex-wrap items-start justify-between gap-3">
+				<div>
+					<div class="text-xs uppercase tracking-wide text-yellow-700 dark:text-yellow-200">Gold Star Summary</div>
+					<p class="text-sm text-gray-700 dark:text-gray-200">Kid dashboard is interactive, but only Rachel and Mykal can change stars and rules.</p>
+				</div>
+				<div class="flex flex-wrap items-center gap-2">
+					<a href="/gold-stars?kid_view=1" class="btn btn-secondary text-sm"><i class="fa-solid fa-child-reaching mr-1"></i>Open Kids Dashboard</a>
+					<a href="/gold-stars" class="btn btn-secondary text-sm"><i class="fa-solid fa-star mr-1"></i>Open Gold Star Dashboard</a>
+				</div>
+			</div>
+			<div id="goldStarSummaryRows" class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+				{% if rewards_summary and rewards_summary.children %}
+					{% for child in rewards_summary.children %}
+						<div class="rounded-lg bg-white/70 dark:bg-gray-900/30 px-3 py-2 border border-yellow-200 dark:border-yellow-700">
+							<div class="flex items-center justify-between text-sm">
+								<span class="font-semibold">{{ child.child_name }}</span>
+								<span class="text-yellow-700 dark:text-yellow-200 font-bold">{{ child.stars }} ⭐</span>
+							</div>
+							<div class="text-xs text-gray-500 mt-1">Next reward: {{ child.progress.next_label }}{% if child.progress.remaining > 0 %} ({{ child.progress.remaining }} to go){% endif %}</div>
+							{% if can_manage_kid_rewards %}
+							<div class="mt-2 flex justify-end gap-2">
+								<button type="button" class="btn btn-secondary text-xs quick-consequence-btn" data-child-name="{{ child.child_name }}">Consequence -1</button>
+								<button type="button" class="btn btn-primary text-xs quick-star-btn" data-child-name="{{ child.child_name }}">+1 Star</button>
+							</div>
+							{% endif %}
+						</div>
+					{% endfor %}
+				{% else %}
+					<div class="rounded-lg bg-white/70 dark:bg-gray-900/30 px-3 py-2 text-sm text-gray-500">No reward data yet.</div>
+				{% endif %}
+			</div>
+			{% if rewards_summary and rewards_summary.weekly_summary %}
+			{% set weekly = rewards_summary.weekly_summary %}
+			{% set weekly_peak = [weekly.awarded_total, weekly.taken_total, 1]|max %}
+			<div class="mt-4 rounded-xl border border-yellow-200 dark:border-yellow-700 p-4 bg-white/70 dark:bg-gray-900/30">
+				<div class="flex flex-wrap items-center justify-between gap-2">
+					<div class="text-sm font-semibold">Weekly Star Behavior</div>
+					<div class="text-xs text-gray-500">{{ weekly.week_label }}</div>
+				</div>
+				<div class="mt-3 space-y-2">
+					<div>
+						<div class="flex justify-between text-xs text-gray-600 dark:text-gray-300"><span>Awarded</span><span>{{ weekly.awarded_total }} ⭐</span></div>
+						<div class="h-2.5 rounded-full bg-emerald-100 dark:bg-emerald-900/30 overflow-hidden mt-1"><div class="h-full bg-emerald-500" style="width: {{ ((weekly.awarded_total / weekly_peak) * 100)|round(0, 'floor') }}%;"></div></div>
+					</div>
+					<div>
+						<div class="flex justify-between text-xs text-gray-600 dark:text-gray-300"><span>Taken with consequences</span><span>{{ weekly.taken_total }} ⭐</span></div>
+						<div class="h-2.5 rounded-full bg-rose-100 dark:bg-rose-900/30 overflow-hidden mt-1"><div class="h-full bg-rose-500" style="width: {{ ((weekly.taken_total / weekly_peak) * 100)|round(0, 'floor') }}%;"></div></div>
+					</div>
+				</div>
+				<div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+					{% for child in weekly.by_child %}
+					<div class="rounded-lg border border-yellow-100 dark:border-yellow-700 px-3 py-2 text-xs">
+						<div class="font-semibold text-sm">{{ child.child_name }}</div>
+						<div class="text-gray-600 dark:text-gray-300">+{{ child.awarded }} ⭐ awarded</div>
+						<div class="text-gray-600 dark:text-gray-300">-{{ child.taken }} ⭐ consequence</div>
+					</div>
+					{% endfor %}
+				</div>
+				<div class="mt-3">
+					<div class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Consequence reasons this week</div>
+					{% if weekly.consequence_reasons %}
+					<ul class="mt-1 space-y-1 text-xs text-gray-600 dark:text-gray-300">
+						{% for reason in weekly.consequence_reasons %}
+						<li>• {{ reason.reason }} <span class="text-gray-500">({{ reason.count }} time{% if reason.count != 1 %}s{% endif %}, {{ reason.stars_taken }} ⭐)</span></li>
+						{% endfor %}
+					</ul>
+					{% else %}
+					<div class="mt-1 text-xs text-gray-500">No consequence reasons logged this week.</div>
+					{% endif %}
+				</div>
+			</div>
+			{% endif %}
+		</div>
+	</div>
+
+	<div id="parentHelperCard" class="card p-6">
+		<div class="flex flex-wrap items-center justify-between gap-2 mb-4">
+			<h2 class="text-lg font-bold"><i class="fa-solid fa-hands-helping mr-2 text-indigo-500"></i>Parent Helper</h2>
+			<div class="flex flex-wrap items-center gap-2">
+				<a href="/gold-stars?kid_view=1" class="btn btn-secondary text-sm"><i class="fa-solid fa-child-reaching mr-1"></i>Open Kids Dashboard</a>
+				<a href="/gold-stars" class="btn btn-secondary text-sm"><i class="fa-solid fa-star mr-1"></i>Open Gold Star Dashboard</a>
+			</div>
+		</div>
+		<div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+			<div class="rounded-xl border border-gray-200 dark:border-gray-700 p-4 bg-white/80 dark:bg-gray-900/40">
+				<div class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Pending follow-through tasks</div>
+				<div class="mt-2 space-y-2">
+					{% if parent_helper_summary and parent_helper_summary.pending_by_parent %}
+						{% for p in parent_helper_summary.pending_by_parent %}
+							<div class="rounded-lg bg-indigo-50 dark:bg-indigo-900/20 px-3 py-2">
+								<div class="flex items-center justify-between">
+									<span class="font-semibold text-sm">{{ p.parent_name }}</span>
+									<span class="text-xs text-gray-600 dark:text-gray-300">{{ p.pending_count }} pending</span>
+								</div>
+								{% if p.task_items and p.task_items|length > 0 %}
+									<ul class="mt-1 text-xs text-gray-600 dark:text-gray-300 space-y-1">
+										{% for item in p.task_items %}
+											<li>• {{ item.child_name }} — {{ item.reward_label }}</li>
+										{% endfor %}
+									</ul>
+								{% else %}
+									<div class="mt-1 text-xs text-gray-500">No pending follow-through tasks.</div>
+								{% endif %}
+							</div>
+						{% endfor %}
+					{% else %}
+						<div class="text-sm text-gray-500">No parent tasks yet.</div>
+					{% endif %}
+				</div>
+			</div>
+			<div class="rounded-xl border border-gray-200 dark:border-gray-700 p-4 bg-white/80 dark:bg-gray-900/40">
+				<div class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">This Sunday meal-plan status</div>
+				<div class="mt-1 text-xs text-gray-500">Target: {{ parent_helper_summary.meal_plan.due_display if parent_helper_summary and parent_helper_summary.meal_plan else 'Sunday 10:00 AM ET' }}</div>
+				<div class="mt-2 space-y-2">
+					{% if parent_helper_summary and parent_helper_summary.meal_plan and parent_helper_summary.meal_plan.by_parent %}
+						{% for row in parent_helper_summary.meal_plan.by_parent %}
+							<div class="rounded-lg px-3 py-2 {% if row.sent %}bg-emerald-50 dark:bg-emerald-900/20{% else %}bg-amber-50 dark:bg-amber-900/20{% endif %}">
+								<div class="flex items-center justify-between text-sm">
+									<span class="font-semibold">{{ row.parent_name }}</span>
+									<span class="text-xs">{{ row.status }}</span>
+								</div>
+							</div>
+						{% endfor %}
+					{% else %}
+						<div class="text-sm text-gray-500">Status unavailable.</div>
+					{% endif %}
+				</div>
+			</div>
 		</div>
 	</div>
 
@@ -589,10 +763,12 @@ window.REMINDERS_TIME_FORMAT = "{{ (config.reminders.time_format if config.remin
 	const overviewTopRow = document.getElementById('welcomeTopRow');
 	const weatherWidget = document.querySelector('.weather-widget');
 	const routinesCard = document.getElementById('routinesCard');
+	const parentHelperCard = document.getElementById('parentHelperCard');
 	const welcomeCalendar = document.getElementById('welcomeCalendar');
 	const familyNoticeCard = document.getElementById('familyNoticeCard');
 	if (overviewLayout && overviewTopRow) {
 		if (routinesCard) overviewTopRow.appendChild(routinesCard);
+		if (parentHelperCard) overviewTopRow.appendChild(parentHelperCard);
 		if (weatherWidget) overviewTopRow.appendChild(weatherWidget);
 		if (welcomeCalendar) overviewLayout.appendChild(welcomeCalendar);
 		if (familyNoticeCard) overviewLayout.appendChild(familyNoticeCard);
@@ -722,6 +898,8 @@ window.REMINDERS_TIME_FORMAT = "{{ (config.reminders.time_format if config.remin
 	document.getElementById('immichSlideDuration')?.addEventListener('change', () => setSlideshowPlaying(slideshowPlaying));
 	document.getElementById('immichFullscreen')?.addEventListener('click', () => slideshowFrame?.requestFullscreen?.());
 	const currentUser = () => String(localStorage.getItem('username') || '').trim();
+	const canManageKidRewards = {{ can_manage_kid_rewards|tojson }};
+	const initialRewardChildren = {{ ((rewards_summary.children if rewards_summary and rewards_summary.children else []))|tojson }};
 	const welcomeModalPending = document.getElementById('welcomeModalState')?.dataset.pending === '1';
 	const missedModal = document.getElementById('missedUpdatesModal');
 	const missedSummary = document.getElementById('missedUpdatesSummary');
@@ -1095,6 +1273,8 @@ window.REMINDERS_TIME_FORMAT = "{{ (config.reminders.time_format if config.remin
 	const bathCompleteBtn = document.getElementById('bathCompleteBtn');
 	const bedtimeReaderLabel = document.getElementById('bedtimeReaderLabel');
 	const bedtimeReaderMeta = document.getElementById('bedtimeReaderMeta');
+	const bedtimeBookPickerLabel = document.getElementById('bedtimeBookPickerLabel');
+	const bedtimeMoviePickerLabel = document.getElementById('bedtimeMoviePickerLabel');
 	const bathAveryLabel = document.getElementById('bathAveryLabel');
 	const bathHarleyLabel = document.getElementById('bathHarleyLabel');
 	const bathCompletedMeta = document.getElementById('bathCompletedMeta');
@@ -1136,6 +1316,8 @@ window.REMINDERS_TIME_FORMAT = "{{ (config.reminders.time_format if config.remin
 				bedtimeReaderMeta.textContent = 'Switches nightly between Rachel and Mykal.';
 			}
 		}
+		if (bedtimeBookPickerLabel) bedtimeBookPickerLabel.textContent = (bedtime.book_picker || 'Harley').toString().trim() || 'Harley';
+		if (bedtimeMoviePickerLabel) bedtimeMoviePickerLabel.textContent = (bedtime.movie_picker || 'Avery').toString().trim() || 'Avery';
 		if (bathAveryLabel) bathAveryLabel.textContent = bath.avery || 'Avery & Mommy';
 		if (bathHarleyLabel) bathHarleyLabel.textContent = bath.harley || 'Harley & Daddy';
 		if (bathCompletedMeta) {
@@ -1165,6 +1347,183 @@ window.REMINDERS_TIME_FORMAT = "{{ (config.reminders.time_format if config.remin
 	}
 
 	refreshRoutineLabels();
+
+	const goldStarSummaryRows = document.getElementById('goldStarSummaryRows');
+	const quickStarModal = document.getElementById('quickStarModal');
+	const quickStarForm = document.getElementById('quickStarForm');
+	const quickStarChildInput = document.getElementById('quickStarChild');
+	const quickStarReason = document.getElementById('quickStarReason');
+	const quickStarSubmit = document.getElementById('quickStarSubmit');
+	const quickStarModalMeta = document.getElementById('quickStarModalMeta');
+	const quickConsequenceModal = document.getElementById('quickConsequenceModal');
+	const quickConsequenceForm = document.getElementById('quickConsequenceForm');
+	const quickConsequenceChildInput = document.getElementById('quickConsequenceChild');
+	const quickConsequenceReason = document.getElementById('quickConsequenceReason');
+	const quickConsequenceSubmit = document.getElementById('quickConsequenceSubmit');
+	const quickConsequenceModalMeta = document.getElementById('quickConsequenceModalMeta');
+
+	function setQuickStarModal(open, childName = '') {
+		if (!quickStarModal) return;
+		quickStarModal.classList.toggle('hidden', !open);
+		quickStarModal.classList.toggle('flex', open);
+		document.body.classList.toggle('overflow-hidden', open);
+		if (!open) return;
+		if (quickStarChildInput) quickStarChildInput.value = childName;
+		if (quickStarReason) quickStarReason.value = '';
+		if (quickStarModalMeta) quickStarModalMeta.textContent = childName
+			? `Celebrate ${childName} for a specific great choice.`
+			: 'Celebrate something specific they did well.';
+		quickStarReason?.focus();
+	}
+
+	function setQuickConsequenceModal(open, childName = '') {
+		if (!quickConsequenceModal) return;
+		quickConsequenceModal.classList.toggle('hidden', !open);
+		quickConsequenceModal.classList.toggle('flex', open);
+		document.body.classList.toggle('overflow-hidden', open);
+		if (!open) return;
+		if (quickConsequenceChildInput) quickConsequenceChildInput.value = childName;
+		if (quickConsequenceReason) quickConsequenceReason.value = '';
+		if (quickConsequenceModalMeta) quickConsequenceModalMeta.textContent = childName
+			? `Record what happened for ${childName}. This removes 1 star.`
+			: 'Log what happened and remove one star.';
+		quickConsequenceReason?.focus();
+	}
+
+	function renderGoldStarSummary(children) {
+		if (!goldStarSummaryRows) return;
+		const rows = Array.isArray(children) ? children : [];
+		if (!rows.length) {
+			goldStarSummaryRows.innerHTML = '<div class="rounded-lg bg-white/70 dark:bg-gray-900/30 px-3 py-2 text-sm text-gray-500">No reward data yet.</div>';
+			return;
+		}
+		goldStarSummaryRows.innerHTML = rows.map((child) => {
+			const rawChildName = String(child?.child_name || 'Child');
+			const childName = escapeCalendarText(rawChildName);
+			const stars = Number(child?.stars || 0);
+			const nextLabel = escapeCalendarText(child?.progress?.next_label || 'Keep going');
+			const remaining = Number(child?.progress?.remaining || 0);
+			const nextText = remaining > 0 ? `${nextLabel} (${remaining} to go)` : nextLabel;
+			return `<div class="rounded-lg bg-white/70 dark:bg-gray-900/30 px-3 py-2 border border-yellow-200 dark:border-yellow-700">
+				<div class="flex items-center justify-between text-sm">
+					<span class="font-semibold">${childName}</span>
+					<span class="text-yellow-700 dark:text-yellow-200 font-bold">${stars} ⭐</span>
+				</div>
+				<div class="text-xs text-gray-500 mt-1">Next reward: ${nextText}</div>
+				${canManageKidRewards ? `<div class="mt-2 flex justify-end gap-2"><button type="button" class="btn btn-secondary text-xs quick-consequence-btn" data-child-name="${escapeCalendarText(rawChildName)}">Consequence -1</button><button type="button" class="btn btn-primary text-xs quick-star-btn" data-child-name="${escapeCalendarText(rawChildName)}">+1 Star</button></div>` : ''}
+			</div>`;
+		}).join('');
+	}
+
+	renderGoldStarSummary(initialRewardChildren);
+
+	if (canManageKidRewards && goldStarSummaryRows) {
+		goldStarSummaryRows.addEventListener('click', (event) => {
+			const starButton = event.target.closest('.quick-star-btn');
+			if (starButton) {
+				setQuickStarModal(true, String(starButton.dataset.childName || '').trim());
+				return;
+			}
+			const consequenceButton = event.target.closest('.quick-consequence-btn');
+			if (consequenceButton) {
+				setQuickConsequenceModal(true, String(consequenceButton.dataset.childName || '').trim());
+			}
+		});
+	}
+
+	async function refreshGoldStarSummaryFromState() {
+		if (!goldStarSummaryRows) return;
+		try {
+			const response = await fetch('/api/rewards/state');
+			const data = await response.json();
+			if (!response.ok || !data?.ok || !data?.state) return;
+			renderGoldStarSummary(data.state.children || []);
+		} catch (_) {}
+	}
+
+	quickStarForm?.addEventListener('submit', async (event) => {
+		event.preventDefault();
+		const childName = String(quickStarChildInput?.value || '').trim();
+		const reason = String(quickStarReason?.value || '').trim();
+		if (!childName) {
+			globalToast('Choose a child before giving a star', 'error');
+			return;
+		}
+		if (!reason) {
+			globalToast('Please add what the star is for', 'error');
+			quickStarReason?.focus();
+			return;
+		}
+		if (quickStarSubmit) quickStarSubmit.disabled = true;
+		try {
+			const response = await fetch('/api/rewards/stars', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ child_name: childName, delta: 1, reason }),
+			});
+			const data = await response.json();
+			if (!response.ok || !data?.ok) {
+				globalToast(data?.error || 'Unable to add a star right now', 'error');
+				return;
+			}
+			renderGoldStarSummary(data?.state?.children || []);
+			globalToast(`+1 star added for ${childName}`, 'success');
+			setQuickStarModal(false);
+		} catch (_) {
+			globalToast('Unable to add a star right now', 'error');
+		} finally {
+			if (quickStarSubmit) quickStarSubmit.disabled = false;
+		}
+	});
+
+	document.getElementById('quickStarModalClose')?.addEventListener('click', () => setQuickStarModal(false));
+	document.getElementById('quickStarCancel')?.addEventListener('click', () => setQuickStarModal(false));
+	quickStarModal?.addEventListener('click', (event) => {
+		if (event.target === quickStarModal) setQuickStarModal(false);
+	});
+	quickConsequenceForm?.addEventListener('submit', async (event) => {
+		event.preventDefault();
+		const childName = String(quickConsequenceChildInput?.value || '').trim();
+		const reason = String(quickConsequenceReason?.value || '').trim();
+		if (!childName) {
+			globalToast('Choose a child before recording consequence', 'error');
+			return;
+		}
+		if (!reason) {
+			globalToast('Please add what happened', 'error');
+			quickConsequenceReason?.focus();
+			return;
+		}
+		if (quickConsequenceSubmit) quickConsequenceSubmit.disabled = true;
+		try {
+			const response = await fetch('/api/rewards/stars', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ child_name: childName, delta: -1, reason }),
+			});
+			const data = await response.json();
+			if (!response.ok || !data?.ok) {
+				globalToast(data?.error || 'Unable to apply consequence right now', 'error');
+				return;
+			}
+			renderGoldStarSummary(data?.state?.children || []);
+			globalToast(`Consequence recorded for ${childName} (-1 star)`, 'success');
+			setQuickConsequenceModal(false);
+		} catch (_) {
+			globalToast('Unable to apply consequence right now', 'error');
+		} finally {
+			if (quickConsequenceSubmit) quickConsequenceSubmit.disabled = false;
+		}
+	});
+	document.getElementById('quickConsequenceModalClose')?.addEventListener('click', () => setQuickConsequenceModal(false));
+	document.getElementById('quickConsequenceCancel')?.addEventListener('click', () => setQuickConsequenceModal(false));
+	quickConsequenceModal?.addEventListener('click', (event) => {
+		if (event.target === quickConsequenceModal) setQuickConsequenceModal(false);
+	});
+
+	if (!canManageKidRewards) {
+		refreshGoldStarSummaryFromState();
+	}
 
 	const libraryBookModal = document.getElementById('libraryBookModal');
 	const libraryBookList = document.getElementById('libraryBookList');

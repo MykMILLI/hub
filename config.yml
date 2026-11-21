@@ -6,6 +6,7 @@ family_members:
 - Vivek
 - India
 feature_toggles:
+  cameras: true
   chores: true
   expense_tracker: true
   expiry_tracker: true
@@ -24,7 +25,34 @@ instance_name: My Home Hub
 home_assistant:
   auto_login_url: ''
   url: https://home.millitop.net
+cameras:
+  enabled: true
+  admins:
+  - Rachel
+  - Mykal
+  items:
+  - id: camera-1
+    name: Living Room
+    host: 192.168.1.191 # e.g. 192.168.1.120
+    scheme: http
+    username: admin
+    password: Pliable7-Upcountry-Cosigner
+    channel: 0
+    ptz_enabled: true
+    rtsp_url: rtsp://192.168.1.191:554/h264Preview_01_main # e.g. rtsp://192.168.1.120:554/h264Preview_01_main
+    rtsp_sub_url: '' # e.g. rtsp://192.168.1.120:554/h264Preview_01_sub
+  - id: camera-2
+    name: Kids Room
+    host: 192.168.1.192 # e.g. 192.168.1.121
+    scheme: http
+    username: admin
+    password: Pliable7-Upcountry-Cosigner
+    channel: 0
+    ptz_enabled: true
+    rtsp_url: rtsp://192.168.1.192:554/h264Preview_01_main # e.g. rtsp://192.168.1.121:554/h264Preview_01_main
+    rtsp_sub_url: '' # e.g. rtsp://192.168.1.121:554/h264Preview_01_sub
 menu_visibility:
+  cameras: true
   home_assistant: true
   media_downloader: false
   pdf_compressor: false

@@ -13,6 +13,7 @@ APP_MODULES = [
     'shared_cloud',
     'shopping_list',
     'chores',
+    'reward_system',
     'recipes',
     'expiry_tracker',
     'url_shortener',
@@ -26,6 +27,7 @@ APP_MODULES = [
     'notifications',
     'photos',
     'home_assistant',
+    'cameras',
     'settings',
 ]
 
@@ -58,6 +60,8 @@ APP_MODULE_NAV = [
      'menu_default': True, 'feature_key': 'shopping_list', 'feature_default': False},
     {'id': 'chores', 'key': 'chores', 'label': 'To-Do/Chores', 'path': '/chores', 'icon': 'checklist',
      'menu_default': True, 'feature_key': 'chores', 'feature_default': False},
+    {'id': 'reward_system', 'key': 'reward_system', 'label': 'Gold Star Club', 'path': '/gold-stars', 'icon': 'star',
+     'menu_default': True, 'feature_key': 'reward_system', 'feature_default': True},
     {'id': 'recipes', 'key': 'recipes', 'label': 'Recipe Book', 'path': '/recipes', 'icon': 'recipes',
      'menu_default': True, 'feature_key': 'recipes', 'feature_default': False, 'skip_menu_check': True},
     {'id': 'expiry_tracker', 'key': 'expiry_tracker', 'label': 'Expiry Tracker', 'path': '/expiry', 'icon': 'hourglass',
@@ -78,6 +82,8 @@ APP_MODULE_NAV = [
      'menu_default': True, 'feature_key': 'meal_planner', 'feature_default': True},
     {'id': 'notifications', 'key': 'notifications', 'label': 'Notifications', 'path': '/notifications', 'icon': 'bell',
      'menu_default': True, 'feature_key': 'notifications', 'feature_default': True},
+    {'id': 'cameras', 'key': 'cameras', 'label': 'Cameras', 'path': '/cameras', 'icon': 'camera',
+     'menu_default': True, 'feature_key': 'cameras', 'feature_default': True},
     {'id': 'settings', 'key': 'settings', 'label': 'Settings', 'path': '/settings', 'icon': 'settings',
      'menu_default': True, 'feature_key': None, 'feature_default': True},
 ]
@@ -202,6 +208,8 @@ def can_access_app_module(module_key: str, member: str | None = None) -> bool:
 
     row = AppPermissionScheme.query.filter_by(resource_type='app_module', resource_key=key).first()
     if not row:
+        if key == 'reward_system':
+            return True
         return False
     return has_visibility_access(row.visibility, row.updated_by, row.allowed_members_json, member_name)
 

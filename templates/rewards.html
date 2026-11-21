@@ -1,0 +1,844 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="space-y-6">
+	<div class="card p-6 bg-gradient-to-r from-yellow-100 via-pink-100 to-sky-100 dark:from-yellow-900/30 dark:via-pink-900/20 dark:to-sky-900/30">
+		<div class="flex flex-wrap items-start justify-between gap-3">
+			<div>
+				<h1 class="text-2xl font-extrabold text-gray-900 dark:text-white"><i class="fa-solid fa-star text-yellow-500 mr-2"></i>Gold Star Club</h1>
+				<p class="text-sm text-gray-700 dark:text-gray-200 mt-1">Celebrate progress, teach responsibility, and keep discipline calm and consistent.</p>
+			</div>
+			<div class="text-xs uppercase tracking-wide rounded-lg px-3 py-1 bg-white/70 dark:bg-gray-900/40 text-gray-700 dark:text-gray-200">
+				Signed in as {{ actor_name }}
+			</div>
+			{% if kid_view %}
+			<div class="mt-3 rounded-xl border border-sky-200 dark:border-sky-700 bg-sky-50/80 dark:bg-sky-900/20 px-3 py-2 text-sm text-sky-800 dark:text-sky-200">
+				<i class="fa-solid fa-child-reaching mr-1"></i>Kid-safe mode is on. Kids can explore and tap around, but reward changes are locked in this view.
+			</div>
+			{% endif %}
+		</div>
+	</div>
+
+	<div class="card p-5 bg-indigo-50/80 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-700">
+		<h2 class="text-lg font-bold mb-2"><i class="fa-solid fa-bed mr-2 text-indigo-500"></i>Tonight's Bedtime Plan</h2>
+		<div class="grid grid-cols-1 sm:grid-cols-3 gap-2 text-sm">
+			<div class="rounded-lg bg-white/80 dark:bg-gray-900/40 px-3 py-2">
+				<div class="text-[11px] uppercase tracking-wide text-gray-500">Reader</div>
+				<div id="bedtimePlanReader" class="font-semibold">—</div>
+			</div>
+			<div class="rounded-lg bg-white/80 dark:bg-gray-900/40 px-3 py-2">
+				<div class="text-[11px] uppercase tracking-wide text-gray-500">Book Picker</div>
+				<div id="bedtimePlanBook" class="font-semibold">—</div>
+			</div>
+			<div class="rounded-lg bg-white/80 dark:bg-gray-900/40 px-3 py-2">
+				<div class="text-[11px] uppercase tracking-wide text-gray-500">Movie Selector</div>
+				<div id="bedtimePlanMovie" class="font-semibold">—</div>
+			</div>
+		</div>
+	</div>
+
+	<div id="rewardScoreGrid" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+
+	<div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+		<div class="card p-6">
+			<h2 class="text-lg font-bold mb-3"><i class="fa-solid fa-chart-column mr-2 text-emerald-500"></i>This Week: Stars Awarded vs Consequences</h2>
+			<div id="weeklyBehaviorSummary" class="space-y-2 text-sm"></div>
+		</div>
+		<div class="card p-6">
+			<h2 class="text-lg font-bold mb-3"><i class="fa-solid fa-chart-line mr-2 text-violet-500"></i>Behavior Over Time (Last 4 Weeks)</h2>
+			<div id="behaviorTrendGraph" class="space-y-2 text-sm"></div>
+		</div>
+	</div>
+
+	<div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+		<div class="card p-6">
+			<div class="flex flex-wrap items-center justify-between gap-3">
+				<h2 class="text-xl font-bold"><i class="fa-solid fa-list-check text-emerald-500 mr-2"></i>Do &amp; Don't Guide</h2>
+				<div class="text-xs text-gray-500">Kids can tap these cards. Only Rachel/Mykal can save changes.</div>
+			</div>
+
+			<div class="card p-6">
+				<h2 class="text-lg font-bold mb-3"><i class="fa-solid fa-scroll mr-2 text-slate-500"></i>Star Event Records</h2>
+				<div id="rewardEventHistory" class="space-y-2 text-sm"></div>
+			</div>
+			<div class="grid grid-cols-1 gap-4 mt-4">
+				<div>
+					<h3 class="font-semibold text-emerald-700 dark:text-emerald-300 mb-2">✅ Do This</h3>
+					<div id="doRulesList" class="space-y-2"></div>
+				</div>
+				<div>
+					<h3 class="font-semibold text-rose-700 dark:text-rose-300 mb-2">🚫 Don't Do This</h3>
+					<div id="dontRulesList" class="space-y-2"></div>
+				</div>
+			</div>
+		</div>
+
+		<div class="card p-6 space-y-4">
+			<div class="flex items-center justify-between gap-3">
+				<h2 class="text-lg font-bold"><i class="fa-solid fa-wand-magic-sparkles mr-2 text-violet-500"></i>Celebration Effects</h2>
+				<span class="text-xs text-gray-500">Optional</span>
+			</div>
+			<label class="flex items-center justify-between text-sm border rounded-lg px-3 py-2 dark:border-gray-700">
+				<span>Confetti on positive progress</span>
+				<input id="confettiToggle" type="checkbox" class="h-4 w-4">
+			</label>
+			<label class="flex items-center justify-between text-sm border rounded-lg px-3 py-2 dark:border-gray-700">
+				<span>Celebration sound cue</span>
+				<input id="soundToggle" type="checkbox" class="h-4 w-4">
+			</label>
+			<div class="text-xs text-gray-500">These toggles are controlled by Rachel and Mykal.</div>
+
+			<div class="border-t dark:border-gray-700 pt-4">
+				<h3 class="font-semibold mb-2">Timeout defaults</h3>
+				<div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+					<label class="text-xs">Minutes
+						<input id="timeoutDefaultMinutes" type="number" min="1" max="30" class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
+					</label>
+					<label class="text-xs">Star loss
+						<input id="timeoutDefaultStarLoss" type="number" min="0" max="5" class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
+					</label>
+					<label class="text-xs">Reward-time loss (minutes)
+						<input id="timeoutDefaultRewardLoss" type="number" min="0" max="120" class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
+					</label>
+				</div>
+				<div class="flex justify-end mt-3">
+					<button id="saveSettingsBtn" type="button" class="btn btn-primary">Save Celebration & Timeout Settings</button>
+				</div>
+			</div>
+			<div id="rewardOptionsEditor" class="border-t dark:border-gray-700 pt-4 {% if (not rewards_state.can_manage) or kid_view %}hidden{% endif %}">
+				<h3 class="font-semibold mb-2"><i class="fa-solid fa-gift mr-1 text-amber-500"></i>Per-child reward options (up to 3 each)</h3>
+				<p class="text-xs text-gray-500 mb-3">Set different reward choices and star costs for Avery and Harley.</p>
+				<div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+					{% for member in ['Avery', 'Harley', 'Rachel', 'Mykal'] %}
+					<div class="rounded-lg border dark:border-gray-700 p-3 space-y-2">
+						<div class="font-semibold text-sm">{{ member }}</div>
+						{% for idx in [1, 2, 3] %}
+						<div class="grid grid-cols-[1fr_88px] gap-2">
+							<input id="rewardOption{{ member }}Label{{ idx }}" type="text" maxlength="256" placeholder="Reward {{ idx }} label" class="p-2 border rounded-lg text-sm dark:bg-gray-800 dark:border-gray-600">
+							<input id="rewardOption{{ member }}Stars{{ idx }}" type="number" min="1" max="100" placeholder="Stars" class="p-2 border rounded-lg text-sm dark:bg-gray-800 dark:border-gray-600">
+						</div>
+						{% endfor %}
+					</div>
+					{% endfor %}
+				</div>
+				<div class="flex justify-end mt-3">
+					<button id="saveRewardOptionsBtn" type="button" class="btn btn-secondary">Save Reward Options</button>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+		<div class="card p-6">
+			<h2 class="text-lg font-bold mb-3"><i class="fa-solid fa-gift mr-2 text-amber-500"></i>Redeem Reward</h2>
+			<div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+				<label class="text-sm">Child
+					<select id="redeemChild" class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
+						<option>Avery</option>
+						<option>Harley</option>
+						<option>Rachel</option>
+						<option>Mykal</option>
+					</select>
+				</label>
+				<label class="text-sm sm:col-span-2">Reward option
+					<select id="redeemRewardOption" class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600"></select>
+				</label>
+				<label class="text-sm sm:col-span-3">Stars required
+					<input id="redeemStars" type="number" class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/50" readonly>
+				</label>
+				<label class="text-sm sm:col-span-3 flex items-center gap-2 border rounded-lg px-3 py-2 dark:border-gray-700">
+					<input id="redeemRequiresParentAction" type="checkbox" class="h-4 w-4" checked>
+					<span>This reward needs Rachel/Mykal follow-through (adds check-off to-do task for each parent)</span>
+				</label>
+			</div>
+			<div class="flex justify-end mt-3">
+				<button id="redeemRewardBtn" type="button" class="btn btn-primary">Record Redemption</button>
+			</div>
+		</div>
+
+		<div class="card p-6">
+			<h2 class="text-lg font-bold mb-3"><i class="fa-solid fa-hourglass-half mr-2 text-rose-500"></i>Timeout & Consequence</h2>
+			<p class="text-xs text-gray-500 mb-3">Use brief, calm resets. Apply consequence, then return to positive coaching.</p>
+			<div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+				<label class="text-sm">Child
+					<select id="timeoutChild" class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
+						<option>Avery</option>
+						<option>Harley</option>
+						<option>Rachel</option>
+						<option>Mykal</option>
+					</select>
+				</label>
+				<label class="text-sm">Reason
+					<input id="timeoutReason" type="text" maxlength="256" placeholder="Unsafe play, yelling, refusal..." class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
+				</label>
+				<label class="text-sm">Timeout minutes
+					<input id="timeoutMinutes" type="number" min="1" max="30" class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
+				</label>
+				<label class="text-sm">Star loss
+					<input id="timeoutStarLoss" type="number" min="0" max="5" class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
+				</label>
+				<label class="text-sm sm:col-span-2">Won reward-time loss (minutes)
+					<input id="timeoutRewardLoss" type="number" min="0" max="120" class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
+				</label>
+				<label class="text-sm sm:col-span-2">Repair task required to unlock rewards
+					<input id="timeoutRepairTask" type="text" maxlength="256" placeholder="Apologize + help clean up..." class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
+				</label>
+			</div>
+			<div class="flex justify-end mt-3">
+				<button id="timeoutApplyBtn" type="button" class="btn btn-danger">Apply Timeout Consequence</button>
+			</div>
+		</div>
+	</div>
+
+	<div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+		<div class="card p-6">
+			<h2 class="text-lg font-bold mb-3"><i class="fa-solid fa-clock-rotate-left mr-2 text-amber-500"></i>Redeemed Rewards History</h2>
+			<div id="redemptionHistory" class="space-y-2 text-sm"></div>
+		</div>
+		<div class="card p-6">
+			<h2 class="text-lg font-bold mb-3"><i class="fa-solid fa-list-check mr-2 text-indigo-500"></i>Parent Follow-through Tasks</h2>
+			<div id="parentActionTasks" class="space-y-2 text-sm"></div>
+		</div>
+	</div>
+
+	<div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+		<div class="card p-6">
+			<h2 class="text-lg font-bold mb-3"><i class="fa-solid fa-shield-heart mr-2 text-blue-500"></i>Evidence-Based Discipline Notes</h2>
+			<ul id="disciplineMethodsList" class="list-disc pl-5 text-sm space-y-1 text-gray-700 dark:text-gray-200"></ul>
+			<div class="border-t dark:border-gray-700 mt-4 pt-3">
+				<h3 class="font-semibold mb-2">Repair task completion</h3>
+				<div id="repairTasksList" class="space-y-2 text-sm"></div>
+			</div>
+			<div class="border-t dark:border-gray-700 mt-4 pt-3">
+				<h3 class="font-semibold mb-2">Recent timeout log</h3>
+				<div id="timeoutHistory" class="space-y-2 text-sm"></div>
+			</div>
+		</div>
+	</div>
+
+	<div id="adminRulesEditor" class="card p-6 {% if (not rewards_state.can_manage) or kid_view %}hidden{% endif %}">
+		<h2 class="text-lg font-bold mb-3"><i class="fa-solid fa-pen-to-square mr-2 text-violet-500"></i>Admin: Edit Do &amp; Don't Rules</h2>
+		<p class="text-sm text-gray-600 dark:text-gray-300 mb-3">One rule per line using: <code>do|Used kind words|1|😊</code> or <code>dont|Hitting|-3|🚫</code></p>
+		<textarea id="rulesEditorText" class="w-full min-h-[220px] p-3 border rounded-xl dark:bg-gray-800 dark:border-gray-600 font-mono text-sm"></textarea>
+		<div class="flex justify-end mt-3">
+			<button id="saveRulesBtn" type="button" class="btn btn-primary">Save Reward Rules</button>
+		</div>
+	</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+	let currentState = {{ rewards_state|tojson }};
+	const kidView = {{ kid_view|tojson }};
+	const canManage = !!currentState.can_manage && !kidView;
+	const scoreGrid = document.getElementById('rewardScoreGrid');
+	const doRulesList = document.getElementById('doRulesList');
+	const dontRulesList = document.getElementById('dontRulesList');
+	const rulesEditorText = document.getElementById('rulesEditorText');
+	const saveRulesBtn = document.getElementById('saveRulesBtn');
+	const redemptionHistory = document.getElementById('redemptionHistory');
+	const parentActionTasks = document.getElementById('parentActionTasks');
+	const timeoutHistory = document.getElementById('timeoutHistory');
+	const repairTasksList = document.getElementById('repairTasksList');
+	const weeklyBehaviorSummary = document.getElementById('weeklyBehaviorSummary');
+	const behaviorTrendGraph = document.getElementById('behaviorTrendGraph');
+	const rewardEventHistory = document.getElementById('rewardEventHistory');
+	const disciplineMethodsList = document.getElementById('disciplineMethodsList');
+	const confettiToggle = document.getElementById('confettiToggle');
+	const soundToggle = document.getElementById('soundToggle');
+	const timeoutDefaultMinutes = document.getElementById('timeoutDefaultMinutes');
+	const timeoutDefaultStarLoss = document.getElementById('timeoutDefaultStarLoss');
+	const timeoutDefaultRewardLoss = document.getElementById('timeoutDefaultRewardLoss');
+	const saveSettingsBtn = document.getElementById('saveSettingsBtn');
+	const saveRewardOptionsBtn = document.getElementById('saveRewardOptionsBtn');
+	const redeemRewardBtn = document.getElementById('redeemRewardBtn');
+	const redeemRewardOption = document.getElementById('redeemRewardOption');
+	const timeoutApplyBtn = document.getElementById('timeoutApplyBtn');
+	const bedtimePlanReader = document.getElementById('bedtimePlanReader');
+	const bedtimePlanBook = document.getElementById('bedtimePlanBook');
+	const bedtimePlanMovie = document.getElementById('bedtimePlanMovie');
+
+	function normalizePoints(points) {
+		const amount = Number(points || 0);
+		return Number.isFinite(amount) ? amount : 0;
+	}
+
+	function formatDate(value) {
+		const dt = new Date(String(value || ''));
+		if (Number.isNaN(dt.getTime())) return '';
+		return dt.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+	}
+
+	function sparkleConfetti() {
+		if (!currentState?.settings?.confetti_enabled) return;
+		for (let i = 0; i < 24; i += 1) {
+			const piece = document.createElement('span');
+			piece.style.position = 'fixed';
+			piece.style.left = `${Math.random() * 100}vw`;
+			piece.style.top = '-8px';
+			piece.style.width = '8px';
+			piece.style.height = '12px';
+			piece.style.borderRadius = '2px';
+			piece.style.pointerEvents = 'none';
+			piece.style.background = `hsl(${Math.floor(Math.random() * 360)}, 92%, 62%)`;
+			piece.style.zIndex = '120';
+			piece.animate(
+				[
+					{ transform: 'translateY(0) rotate(0deg)', opacity: 1 },
+					{ transform: `translateY(${70 + Math.random() * 40}vh) rotate(${200 + Math.random() * 360}deg)`, opacity: 0.9 },
+				],
+				{ duration: 1200 + Math.random() * 600, easing: 'ease-out' }
+			);
+			document.body.appendChild(piece);
+			setTimeout(() => piece.remove(), 2100);
+		}
+	}
+
+	function playChime() {
+		if (!currentState?.settings?.sounds_enabled) return;
+		try {
+			const context = new (window.AudioContext || window.webkitAudioContext)();
+			const oscillator = context.createOscillator();
+			const gain = context.createGain();
+			oscillator.type = 'triangle';
+			oscillator.frequency.value = 660;
+			gain.gain.value = 0.0001;
+			oscillator.connect(gain);
+			gain.connect(context.destination);
+			const now = context.currentTime;
+			gain.gain.exponentialRampToValueAtTime(0.08, now + 0.02);
+			gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.28);
+			oscillator.start(now);
+			oscillator.stop(now + 0.3);
+		} catch (_) {}
+	}
+
+	function renderScores() {
+		const children = Array.isArray(currentState.children) ? currentState.children : [];
+		scoreGrid.innerHTML = children.map((child) => {
+			const progress = child.progress || {};
+			const remaining = Number(progress.remaining || 0);
+			const childLocks = currentState.child_locks || {};
+			const locked = !!childLocks[child.child_name];
+			const lockBanner = locked
+				? `<div class="mt-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 px-3 py-2 text-xs text-red-700 dark:text-red-300">${currentState.pending_repair_message || 'Complete repair task before reward flow resumes.'}</div>`
+				: '';
+			return `<div class="card p-5 border-2 border-yellow-200 dark:border-yellow-700 bg-white/90 dark:bg-gray-900/50">
+				<div class="flex items-center justify-between gap-3">
+					<div class="text-xl font-bold">${child.child_name}</div>
+					<div class="text-2xl font-extrabold text-yellow-600 dark:text-yellow-300">${Number(child.stars || 0)} ⭐</div>
+				</div>
+				<div class="mt-3">
+					<div class="flex justify-between text-xs text-gray-600 dark:text-gray-300">
+						<span>Next milestone</span>
+						<span>${Number(progress.next_target || 0)} ⭐ · ${progress.next_label || 'Keep going'}</span>
+					</div>
+					<div class="h-3 rounded-full bg-yellow-100 dark:bg-yellow-900/40 mt-1 overflow-hidden">
+						<div class="h-full bg-gradient-to-r from-yellow-400 to-orange-500" style="width: ${Math.max(0, Math.min(100, Number(progress.progress_percent || 0)))}%;"></div>
+					</div>
+					<div class="mt-2 text-xs text-gray-500">${remaining > 0 ? `${remaining} more stars to go!` : 'Milestone reached — awesome work!'}</div>
+				</div>
+				${lockBanner}
+				<div class="mt-4 flex flex-wrap gap-2 ${canManage ? '' : 'hidden'}">
+					<button type="button" class="btn btn-secondary reward-adjust-btn" data-child="${child.child_name}" data-delta="-1">-1 Star</button>
+					<button type="button" class="btn btn-secondary reward-adjust-btn" data-child="${child.child_name}" data-delta="-2">-2 Stars</button>
+					<button type="button" class="btn btn-primary reward-adjust-btn" data-child="${child.child_name}" data-delta="1" ${locked ? 'disabled' : ''}>+1 Star</button>
+					<button type="button" class="btn btn-primary reward-adjust-btn" data-child="${child.child_name}" data-delta="2" ${locked ? 'disabled' : ''}>+2 Stars</button>
+				</div>
+			</div>`;
+		}).join('');
+	}
+
+	function renderRules() {
+		const rules = Array.isArray(currentState.rules) ? currentState.rules : [];
+		const doRules = rules.filter(rule => String(rule.behavior_kind || '').toLowerCase() === 'do');
+		const dontRules = rules.filter(rule => String(rule.behavior_kind || '').toLowerCase() === 'dont');
+		const renderList = (target, rows, styleClass) => {
+			if (!target) return;
+			target.innerHTML = rows.length ? rows.map((rule) => {
+				const points = normalizePoints(rule.points);
+				const signed = points > 0 ? `+${points}` : `${points}`;
+				return `<button type="button" class="w-full text-left rounded-xl border px-3 py-2 ${styleClass} hover:scale-[1.01] transition-transform reward-rule-card">
+					<div class="flex items-center justify-between gap-2">
+						<div class="font-medium">${rule.emoji || '⭐'} ${rule.title || 'Rule'}</div>
+						<div class="text-sm font-semibold">${signed} ⭐</div>
+					</div>
+				</button>`;
+			}).join('') : '<p class="text-sm text-gray-500">No rules yet.</p>';
+		};
+		renderList(doRulesList, doRules, 'border-emerald-200 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20');
+		renderList(dontRulesList, dontRules, 'border-rose-200 dark:border-rose-700 bg-rose-50 dark:bg-rose-900/20');
+		if (rulesEditorText && canManage) {
+			rulesEditorText.value = rules.map(rule => `${rule.behavior_kind}|${rule.title}|${normalizePoints(rule.points)}|${rule.emoji || ''}`).join('\n');
+		}
+	}
+
+	function renderHistory() {
+		const redemptions = Array.isArray(currentState.recent_redemptions) ? currentState.recent_redemptions : [];
+		redemptionHistory.innerHTML = redemptions.length ? redemptions.map((entry) => (
+			`<div class="rounded-lg border px-3 py-2 dark:border-gray-700">
+				<div class="font-medium">${entry.child_name} redeemed: ${entry.reward_label}</div>
+				<div class="text-xs text-gray-500">-${Number(entry.stars_spent || 0)} ⭐ · by ${entry.redeemed_by} · ${formatDate(entry.created_at)}</div>
+			</div>`
+		)).join('') : '<p class="text-sm text-gray-500">No redemptions yet.</p>';
+		const parentTasks = Array.isArray(currentState.parent_action_tasks) ? currentState.parent_action_tasks : [];
+		parentActionTasks.innerHTML = parentTasks.length ? parentTasks.map((entry) => (
+			`<div class="rounded-lg border px-3 py-2 dark:border-gray-700 ${entry.done ? 'bg-emerald-50 dark:bg-emerald-900/20' : 'bg-amber-50 dark:bg-amber-900/20'}">
+				<div class="font-medium">${entry.parent_name}: ${entry.child_name} reward follow-through</div>
+				<div class="text-xs text-gray-500">${entry.reward_label} · ${entry.done ? 'Completed' : 'Pending'}${entry.chore_id ? ` · <a class="underline" href="/chores">Open To-Do</a>` : ''}</div>
+			</div>`
+		)).join('') : '<p class="text-sm text-gray-500">No parent follow-through tasks yet.</p>';
+
+		const timeouts = Array.isArray(currentState.recent_timeouts) ? currentState.recent_timeouts : [];
+		timeoutHistory.innerHTML = timeouts.length ? timeouts.map((entry) => (
+			`<div class="rounded-lg border px-3 py-2 dark:border-gray-700">
+				<div class="font-medium">${entry.child_name}: ${entry.reason}</div>
+				<div class="text-xs text-gray-500">${Number(entry.timeout_minutes || 0)} min timeout · -${Number(entry.stars_deducted || 0)} ⭐ · ${Number(entry.reward_minutes_lost || 0)} reward minutes lost · ${formatDate(entry.created_at)}</div>
+			</div>`
+		)).join('') : '<p class="text-sm text-gray-500">No timeout entries yet.</p>';
+
+		const repairs = Array.isArray(currentState.repair_tasks) ? currentState.repair_tasks : [];
+		repairTasksList.innerHTML = repairs.length ? repairs.map((entry) => (
+			`<div class="rounded-lg border px-3 py-2 dark:border-gray-700 ${entry.completed ? 'bg-emerald-50 dark:bg-emerald-900/20' : 'bg-amber-50 dark:bg-amber-900/20'}">
+				<div class="font-medium">${entry.child_name}: ${entry.task_text}</div>
+				<div class="text-xs text-gray-500">${entry.completed ? `Completed by ${entry.completed_by || 'Parent'} · ${formatDate(entry.completed_at)}` : `Pending · created ${formatDate(entry.created_at)}`}</div>
+				${(!entry.completed && canManage) ? `<div class="mt-2 flex justify-end"><button type="button" class="btn btn-secondary repair-complete-btn" data-repair-id="${entry.id}">Mark repair complete</button></div>` : ''}
+			</div>`
+		)).join('') : '<p class="text-sm text-gray-500">No repair tasks yet.</p>';
+	}
+
+	function renderAnalytics() {
+		const weekly = currentState.weekly_summary || {};
+		const byChild = Array.isArray(weekly.by_child) ? weekly.by_child : [];
+		const reasons = Array.isArray(weekly.consequence_reasons) ? weekly.consequence_reasons : [];
+		const awarded = Number(weekly.awarded_total || 0);
+		const taken = Number(weekly.taken_total || 0);
+		const maxWeekly = Math.max(1, awarded, taken);
+		if (weeklyBehaviorSummary) {
+			weeklyBehaviorSummary.innerHTML = `
+				<div class="text-xs text-gray-500">${weekly.week_label || 'Current week'}</div>
+				<div>
+					<div class="flex justify-between text-xs text-gray-600 dark:text-gray-300"><span>Awarded</span><span>${awarded} ⭐</span></div>
+					<div class="h-2.5 rounded-full bg-emerald-100 dark:bg-emerald-900/30 overflow-hidden mt-1"><div class="h-full bg-emerald-500" style="width:${Math.round((awarded / maxWeekly) * 100)}%;"></div></div>
+				</div>
+				<div>
+					<div class="flex justify-between text-xs text-gray-600 dark:text-gray-300"><span>Taken with consequences</span><span>${taken} ⭐</span></div>
+					<div class="h-2.5 rounded-full bg-rose-100 dark:bg-rose-900/30 overflow-hidden mt-1"><div class="h-full bg-rose-500" style="width:${Math.round((taken / maxWeekly) * 100)}%;"></div></div>
+				</div>
+				<div class="grid grid-cols-1 sm:grid-cols-2 gap-2">${byChild.map((child) => (
+					`<div class="rounded-lg border px-3 py-2 dark:border-gray-700">
+						<div class="font-medium">${child.child_name}</div>
+						<div class="text-xs text-gray-500">+${Number(child.awarded || 0)} awarded · -${Number(child.taken || 0)} taken</div>
+					</div>`
+				)).join('')}</div>
+				<div>
+					<div class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Consequence reasons this week</div>
+					${reasons.length ? `<ul class="mt-1 space-y-1 text-xs text-gray-600 dark:text-gray-300">${reasons.map((reason) => (
+						`<li>• ${reason.reason} <span class="text-gray-500">(${Number(reason.count || 0)} time${Number(reason.count || 0) === 1 ? '' : 's'}, ${Number(reason.stars_taken || 0)} ⭐)</span></li>`
+					)).join('')}</ul>` : '<div class="mt-1 text-xs text-gray-500">No consequence reasons logged this week.</div>'}
+				</div>
+			`;
+		}
+
+		const trend = currentState.behavior_trend || {};
+		const daily = Array.isArray(trend.daily) ? trend.daily : [];
+		const maxDaily = Math.max(1, ...daily.map((row) => Math.max(Number(row.awarded || 0), Number(row.taken || 0))));
+		if (behaviorTrendGraph) {
+			behaviorTrendGraph.innerHTML = daily.length ? `
+				<div class="text-xs text-gray-500">${trend.range_start || ''} to ${trend.range_end || ''}</div>
+				<div class="space-y-1 max-h-64 overflow-y-auto pr-1">
+					${daily.map((row) => {
+						const awardedWidth = Math.round((Number(row.awarded || 0) / maxDaily) * 100);
+						const takenWidth = Math.round((Number(row.taken || 0) / maxDaily) * 100);
+						return `<div class="rounded-lg border px-2 py-2 dark:border-gray-700">
+							<div class="text-[11px] text-gray-500 mb-1">${row.date}</div>
+							<div class="flex items-center gap-2">
+								<span class="w-12 text-[11px] text-emerald-600 dark:text-emerald-300">+${Number(row.awarded || 0)}</span>
+								<div class="flex-1 h-2 rounded-full bg-emerald-100 dark:bg-emerald-900/30 overflow-hidden"><div class="h-full bg-emerald-500" style="width:${awardedWidth}%;"></div></div>
+							</div>
+							<div class="flex items-center gap-2 mt-1">
+								<span class="w-12 text-[11px] text-rose-600 dark:text-rose-300">-${Number(row.taken || 0)}</span>
+								<div class="flex-1 h-2 rounded-full bg-rose-100 dark:bg-rose-900/30 overflow-hidden"><div class="h-full bg-rose-500" style="width:${takenWidth}%;"></div></div>
+							</div>
+						</div>`;
+					}).join('')}
+				</div>
+			` : '<p class="text-sm text-gray-500">No behavior trend data yet.</p>';
+		}
+
+		const eventHistory = Array.isArray(currentState.event_history) ? currentState.event_history : [];
+		if (rewardEventHistory) {
+			rewardEventHistory.innerHTML = eventHistory.length ? eventHistory.map((entry) => {
+				const delta = Number(entry.delta || 0);
+				const cls = delta >= 0 ? 'text-emerald-600 dark:text-emerald-300' : 'text-rose-600 dark:text-rose-300';
+				const sign = delta >= 0 ? '+' : '';
+				return `<div class="rounded-lg border px-3 py-2 dark:border-gray-700">
+					<div class="flex items-center justify-between gap-2">
+						<div class="font-medium">${entry.child_name} <span class="${cls}">${sign}${delta} ⭐</span></div>
+						<div class="text-xs text-gray-500">${formatDate(entry.created_at)}</div>
+					</div>
+					<div class="text-xs text-gray-600 dark:text-gray-300 mt-1">${entry.reason || 'No reason noted'} · by ${entry.created_by || 'Parent'}</div>
+				</div>`;
+			}).join('') : '<p class="text-sm text-gray-500">No star events yet.</p>';
+		}
+	}
+
+	function renderMethods() {
+		const methods = Array.isArray(currentState.discipline_methods) ? currentState.discipline_methods : [];
+		disciplineMethodsList.innerHTML = methods.map((item) => `<li>${item}</li>`).join('');
+	}
+
+	function collectRewardOptionsFromEditor(childName) {
+		const options = [];
+		for (let idx = 1; idx <= 3; idx += 1) {
+			const labelInput = document.getElementById(`rewardOption${childName}Label${idx}`);
+			const starsInput = document.getElementById(`rewardOption${childName}Stars${idx}`);
+			const reward_label = String(labelInput?.value || '').trim();
+			if (!reward_label) continue;
+			const stars_required = Number(starsInput?.value || 0);
+			options.push({ reward_label, stars_required });
+		}
+		return options;
+	}
+
+	function renderRewardOptionEditor() {
+		const byChild = currentState.reward_options_by_child || {};
+		['Avery', 'Harley', 'Rachel', 'Mykal'].forEach((childName) => {
+			const options = Array.isArray(byChild[childName]) ? byChild[childName] : [];
+			for (let idx = 1; idx <= 3; idx += 1) {
+				const entry = options[idx - 1] || {};
+				const labelInput = document.getElementById(`rewardOption${childName}Label${idx}`);
+				const starsInput = document.getElementById(`rewardOption${childName}Stars${idx}`);
+				if (labelInput) labelInput.value = String(entry.reward_label || '');
+				if (starsInput) starsInput.value = Number(entry.stars_required || '');
+				if (labelInput) labelInput.disabled = !canManage;
+				if (starsInput) starsInput.disabled = !canManage;
+			}
+		});
+		if (saveRewardOptionsBtn) saveRewardOptionsBtn.disabled = !canManage;
+	}
+
+	function renderRedeemOptions() {
+		const selectedChild = String(document.getElementById('redeemChild')?.value || '').trim();
+		const byChild = currentState.reward_options_by_child || {};
+		const options = Array.isArray(byChild[selectedChild]) ? byChild[selectedChild] : [];
+		if (redeemRewardOption) {
+			redeemRewardOption.innerHTML = options.length
+				? options.map((option) => `<option value="${Number(option.id || 0)}">${option.reward_label} (${Number(option.stars_required || 0)} ⭐)</option>`).join('')
+				: '<option value="">No reward options configured</option>';
+		}
+		const activeOption = options.find((option) => String(option.id) === String(redeemRewardOption?.value || '')) || options[0] || null;
+		const redeemStarsInput = document.getElementById('redeemStars');
+		if (redeemStarsInput) {
+			redeemStarsInput.value = activeOption ? Number(activeOption.stars_required || 0) : '';
+		}
+		const childLocks = currentState.child_locks || {};
+		const childLocked = !!childLocks[selectedChild];
+		if (!canManage) {
+			redeemRewardBtn.disabled = true;
+			redeemRewardBtn.title = '';
+			return;
+		}
+		if (childLocked) {
+			redeemRewardBtn.disabled = true;
+			redeemRewardBtn.title = currentState.pending_repair_message || 'Complete repair task first.';
+			return;
+		}
+		if (!activeOption) {
+			redeemRewardBtn.disabled = true;
+			redeemRewardBtn.title = 'Set at least one reward option for this child.';
+			return;
+		}
+		redeemRewardBtn.disabled = false;
+		redeemRewardBtn.title = '';
+	}
+
+	function renderSettings() {
+		const settings = currentState.settings || {};
+		confettiToggle.checked = !!settings.confetti_enabled;
+		soundToggle.checked = !!settings.sounds_enabled;
+		timeoutDefaultMinutes.value = Number(settings.timeout_default_minutes || 5);
+		timeoutDefaultStarLoss.value = Number(settings.timeout_default_star_loss || 1);
+		timeoutDefaultRewardLoss.value = Number(settings.timeout_default_reward_minutes_loss || 10);
+		[confettiToggle, soundToggle, timeoutDefaultMinutes, timeoutDefaultStarLoss, timeoutDefaultRewardLoss, saveSettingsBtn].forEach((node) => {
+			if (!node) return;
+			node.disabled = !canManage;
+		});
+		if (!canManage) {
+			redeemRewardBtn.disabled = true;
+			timeoutApplyBtn.disabled = true;
+		}
+		renderRewardOptionEditor();
+		renderRedeemOptions();
+		document.getElementById('timeoutMinutes').value = Number(settings.timeout_default_minutes || 5);
+		document.getElementById('timeoutStarLoss').value = Number(settings.timeout_default_star_loss || 1);
+		document.getElementById('timeoutRewardLoss').value = Number(settings.timeout_default_reward_minutes_loss || 10);
+		document.getElementById('timeoutRepairTask').value = String(document.getElementById('timeoutRepairTask').value || '').trim() || 'Apologize and help clean up the area.';
+	}
+
+	function attachFunCardInteraction() {
+		document.querySelectorAll('.reward-rule-card').forEach((button) => {
+			button.addEventListener('click', () => {
+				button.animate(
+					[{ transform: 'scale(1)' }, { transform: 'scale(1.04)' }, { transform: 'scale(1)' }],
+					{ duration: 260, easing: 'ease-out' }
+				);
+			});
+		});
+	}
+
+	async function refreshState() {
+		try {
+			const response = await fetch('/api/rewards/state');
+			const data = await response.json();
+			if (!response.ok || !data.ok || !data.state) return;
+			currentState = data.state;
+			renderAll();
+		} catch (_) {}
+	}
+
+	async function loadBedtimePlan() {
+		try {
+			const response = await fetch('/api/routines');
+			const data = await response.json();
+			if (!response.ok || !data.ok || !data.routines?.bedtime) return;
+			const bedtime = data.routines.bedtime;
+			bedtimePlanReader.textContent = bedtime.reader || 'Rachel';
+			bedtimePlanBook.textContent = bedtime.book_picker || 'Harley';
+			bedtimePlanMovie.textContent = bedtime.movie_picker || 'Avery';
+		} catch (_) {}
+	}
+
+	function renderAll() {
+		renderScores();
+		renderRules();
+		renderHistory();
+		renderAnalytics();
+		renderMethods();
+		renderSettings();
+		attachFunCardInteraction();
+	}
+
+	scoreGrid.addEventListener('click', async (event) => {
+		const button = event.target.closest('.reward-adjust-btn');
+		if (!button || !canManage) return;
+		const child = button.dataset.child;
+		const delta = Number(button.dataset.delta || 0);
+		button.disabled = true;
+		try {
+			const response = await fetch('/api/rewards/stars', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ child_name: child, delta }),
+			});
+			const data = await response.json();
+			if (!response.ok || !data.ok || !data.state) {
+				globalToast(data.error || 'Unable to update stars', 'error');
+				return;
+			}
+			currentState = data.state;
+			renderAll();
+			const reached = Array.isArray(data.effects?.milestones_reached) ? data.effects.milestones_reached : [];
+			if (delta > 0) {
+				sparkleConfetti();
+				playChime();
+			}
+			if (reached.length) {
+				sparkleConfetti();
+				playChime();
+				const names = reached.map(entry => entry.label || `${entry.stars} stars`).join(', ');
+				globalToast(`${child} reached a milestone: ${names}`, 'success');
+			} else {
+				globalToast('Reward stars updated', 'success');
+			}
+		} catch (_) {
+			globalToast('Unable to update stars right now', 'error');
+		} finally {
+			button.disabled = false;
+		}
+	});
+
+	saveRulesBtn?.addEventListener('click', async () => {
+		if (!canManage) return;
+		const rawLines = String(rulesEditorText?.value || '').split('\n').map(line => line.trim()).filter(Boolean);
+		if (!rawLines.length) {
+			globalToast('Add at least one rule', 'error');
+			return;
+		}
+		const rules = [];
+		for (const line of rawLines) {
+			const [behavior_kind, title, points, emoji] = line.split('|').map(part => String(part || '').trim());
+			rules.push({ behavior_kind, title, points: Number(points), emoji });
+		}
+		saveRulesBtn.disabled = true;
+		try {
+			const response = await fetch('/api/rewards/rules', {
+				method: 'PUT',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ rules }),
+			});
+			const data = await response.json();
+			if (!response.ok || !data.ok || !data.state) {
+				globalToast(data.error || 'Unable to save reward rules', 'error');
+				return;
+			}
+			currentState = data.state;
+			renderAll();
+			globalToast('Reward rules saved', 'success');
+		} catch (_) {
+			globalToast('Unable to save reward rules right now', 'error');
+		} finally {
+			saveRulesBtn.disabled = false;
+		}
+	});
+
+	saveSettingsBtn?.addEventListener('click', async () => {
+		if (!canManage) return;
+		saveSettingsBtn.disabled = true;
+		try {
+			const response = await fetch('/api/rewards/settings', {
+				method: 'PUT',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					confetti_enabled: !!confettiToggle.checked,
+					sounds_enabled: !!soundToggle.checked,
+					timeout_default_minutes: Number(timeoutDefaultMinutes.value || 5),
+					timeout_default_star_loss: Number(timeoutDefaultStarLoss.value || 1),
+					timeout_default_reward_minutes_loss: Number(timeoutDefaultRewardLoss.value || 10),
+				}),
+			});
+			const data = await response.json();
+			if (!response.ok || !data.ok || !data.state) {
+				globalToast(data.error || 'Unable to save settings', 'error');
+				return;
+			}
+			currentState = data.state;
+			renderAll();
+			globalToast('Settings saved', 'success');
+		} catch (_) {
+			globalToast('Unable to save settings right now', 'error');
+		} finally {
+			saveSettingsBtn.disabled = false;
+		}
+	});
+
+	document.getElementById('redeemRewardBtn')?.addEventListener('click', async () => {
+		if (!canManage) return;
+		const child_name = String(document.getElementById('redeemChild').value || '').trim();
+		const reward_option_id = Number(redeemRewardOption?.value || 0);
+		const requires_parent_action = !!document.getElementById('redeemRequiresParentAction').checked;
+		if (!reward_option_id) {
+			globalToast('Select a reward option first', 'error');
+			return;
+		}
+		try {
+			const response = await fetch('/api/rewards/redeem', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ child_name, reward_option_id, requires_parent_action }),
+			});
+			const data = await response.json();
+			if (!response.ok || !data.ok || !data.state) {
+				globalToast(data.error || 'Unable to redeem reward', 'error');
+				return;
+			}
+			currentState = data.state;
+			renderAll();
+			globalToast('Reward redemption saved', 'success');
+		} catch (_) {
+			globalToast('Unable to redeem reward right now', 'error');
+		}
+	});
+	document.getElementById('redeemChild')?.addEventListener('change', () => {
+		renderRedeemOptions();
+	});
+	redeemRewardOption?.addEventListener('change', () => renderRedeemOptions());
+
+	saveRewardOptionsBtn?.addEventListener('click', async () => {
+		if (!canManage) return;
+		const options = {
+			Avery: collectRewardOptionsFromEditor('Avery'),
+			Harley: collectRewardOptionsFromEditor('Harley'),
+			Rachel: collectRewardOptionsFromEditor('Rachel'),
+			Mykal: collectRewardOptionsFromEditor('Mykal'),
+		};
+		saveRewardOptionsBtn.disabled = true;
+		try {
+			const response = await fetch('/api/rewards/reward-options', {
+				method: 'PUT',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ options }),
+			});
+			const data = await response.json();
+			if (!response.ok || !data.ok || !data.state) {
+				globalToast(data.error || 'Unable to save reward options', 'error');
+				return;
+			}
+			currentState = data.state;
+			renderAll();
+			globalToast('Reward options saved', 'success');
+		} catch (_) {
+			globalToast('Unable to save reward options right now', 'error');
+		} finally {
+			saveRewardOptionsBtn.disabled = false;
+		}
+	});
+
+	document.getElementById('timeoutApplyBtn')?.addEventListener('click', async () => {
+		if (!canManage) return;
+		const child_name = String(document.getElementById('timeoutChild').value || '').trim();
+		const reason = String(document.getElementById('timeoutReason').value || '').trim();
+		const timeout_minutes = Number(document.getElementById('timeoutMinutes').value || 0);
+		const stars_deducted = Number(document.getElementById('timeoutStarLoss').value || 0);
+		const reward_minutes_lost = Number(document.getElementById('timeoutRewardLoss').value || 0);
+		const repair_task = String(document.getElementById('timeoutRepairTask').value || '').trim();
+		try {
+			const response = await fetch('/api/rewards/timeout', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ child_name, reason, timeout_minutes, stars_deducted, reward_minutes_lost, repair_task }),
+			});
+			const data = await response.json();
+			if (!response.ok || !data.ok || !data.state) {
+				globalToast(data.error || 'Unable to apply timeout', 'error');
+				return;
+			}
+			currentState = data.state;
+			renderAll();
+			globalToast('Timeout consequence recorded', 'success');
+		} catch (_) {
+			globalToast('Unable to apply timeout right now', 'error');
+		}
+	});
+	repairTasksList?.addEventListener('click', async (event) => {
+		const button = event.target.closest('.repair-complete-btn');
+		if (!button || !canManage) return;
+		button.disabled = true;
+		try {
+			const response = await fetch('/api/rewards/repair/complete', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ repair_id: Number(button.dataset.repairId) }),
+			});
+			const data = await response.json();
+			if (!response.ok || !data.ok || !data.state) {
+				globalToast(data.error || 'Unable to complete repair task', 'error');
+				return;
+			}
+			currentState = data.state;
+			renderAll();
+			globalToast('Repair task completed. Reward flow unlocked.', 'success');
+		} catch (_) {
+			globalToast('Unable to complete repair task right now', 'error');
+		} finally {
+			button.disabled = false;
+		}
+	});
+
+	renderAll();
+	loadBedtimePlan();
+	refreshState();
+})();
+</script>
+{% endblock %}

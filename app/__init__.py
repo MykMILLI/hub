@@ -518,6 +518,7 @@ def create_app(test_config: dict | None = None):
     from .blueprints import photos_sync  # noqa: F401
     from .blueprints import immich  # noqa: F401
     from .blueprints import home_assistant  # noqa: F401
+    from .blueprints import cameras  # noqa: F401
     from .blueprints import supabase  # noqa: F401
     app.register_blueprint(main_bp)
     app.register_blueprint(money.money_bp)
@@ -597,6 +598,7 @@ def create_app(test_config: dict | None = None):
             '/upload': 'shared_cloud',
             '/shopping': 'shopping_list',
             '/chores': 'chores',
+            '/gold-stars': 'reward_system',
             '/recipes': 'recipes',
             '/expiry': 'expiry_tracker',
             '/shorten': 'url_shortener',
@@ -612,11 +614,13 @@ def create_app(test_config: dict | None = None):
             '/messages': 'notifications',
             '/polls': 'notifications',
             '/home-assistant': 'home_assistant',
+            '/cameras': 'cameras',
             '/settings': 'settings',
         }
 
         prefix_route_map = {
             '/api/workspaces': 'shared_notes',
+            '/api/rewards': 'reward_system',
             '/api/expenses': 'expense_tracker',
             '/api/money': 'expense_tracker',
             '/money': 'expense_tracker',
@@ -635,6 +639,7 @@ def create_app(test_config: dict | None = None):
             '/api/menu-visibility': 'settings',
             '/api/settings': 'settings',
             '/api/member': 'settings',
+            '/api/cameras': 'cameras',
         }
 
         module_key = None

@@ -34,7 +34,7 @@
             <p class="text-sm text-gray-500">Tap a circle to mark a chore done.</p>
             <button id="addChoreBtn" type="button" class="btn btn-primary">+ Add chore</button>
         </div>
-        <div id="choreBoard" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+        <div id="choreBoard" class="flex flex-nowrap items-stretch gap-4 overflow-x-auto pb-2"></div>
     </section>
 
     <div id="completionCelebrationModal" class="hidden fixed inset-0 z-[90] bg-black/60 p-4 sm:p-6 items-center justify-center" role="dialog" aria-modal="true" aria-labelledby="completionCelebrationTitle">
@@ -205,7 +205,27 @@
     .circle-check:disabled { cursor: not-allowed; opacity: .42; }
     .completion-stamps { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .3rem; }
     .completion-stamp { display: inline-flex; align-items: center; gap: .3rem; font-size: .7rem; font-weight: 600; color: #047857; background: rgba(16,185,129,.12); border-radius: 9999px; padding: .12rem .5rem; }
-    .chore-col { border-radius: 1.25rem; overflow: hidden; }
+    .chore-col {
+        border-radius: 1.25rem;
+        overflow: hidden;
+        flex: 0 0 20rem;
+        max-width: 20rem;
+    }
+    .chore-col.drag-target { outline: 2px dashed #6366f1; outline-offset: 2px; }
+    .chore-col-drag-handle {
+        cursor: grab;
+        border: 0;
+        background: rgba(255,255,255,.7);
+        color: #374151;
+        border-radius: .6rem;
+        width: 2rem;
+        height: 2rem;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .chore-col-drag-handle:active { cursor: grabbing; }
+    .chore-col-dragging { opacity: .65; }
     .chore-card { display: flex; align-items: center; gap: .75rem; padding: .9rem 1rem; border-radius: 1rem; background: rgba(255,255,255,.75); color: #111827; cursor: pointer; }
     .chore-card .circle-check { width: 2rem; height: 2rem; border-width: 3px; }
     .chore-card .circle-check:checked::after { line-height: 1.7rem; font-size: 1.1rem; }
@@ -263,6 +283,7 @@
     let editingTaskId = null;
     let allTasks = [];
     let showCompleted = false;
+    let dragColumnKey = '';
 
     const $ = (id) => document.getElementById(id);
     const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -271,6 +292,87 @@
         const i = members.findIndex(m => sameUser(m, name));
         return i >= 0 ? i : Math.abs([...String(name)].reduce((h, c) => h * 31 + c.charCodeAt(0), 7)) % palette.length;
     };
+    const boardOrderStorageKey = () => `ui:choresBoardOrder:${String(currentUser || 'guest').replace(/[^a-z0-9_-]/gi, '_')}`;
+    const columnKey = (name) => {
+        const clean = String(name || '').trim().toLowerCase();
+        return clean ? `member:${clean}` : 'member:unassigned';
+    };
+    function loadSavedBoardOrder() {
+        try {
+            const parsed = JSON.parse(localStorage.getItem(boardOrderStorageKey()) || '[]');
+            return Array.isArray(parsed) ? parsed.map((item) => String(item || '')) : [];
+        } catch (_) {
+            return [];
+        }
+    }
+    function saveBoardOrder(order) {
+        try {
+            localStorage.setItem(boardOrderStorageKey(), JSON.stringify(order));
+        } catch (_) {}
+    }
+    function sortColumnsBySavedOrder(columns) {
+        const saved = loadSavedBoardOrder();
+        const rank = new Map(saved.map((key, index) => [key, index]));
+        return [...columns].sort((a, b) => {
+            const ar = rank.has(a.key) ? rank.get(a.key) : Number.MAX_SAFE_INTEGER;
+            const br = rank.has(b.key) ? rank.get(b.key) : Number.MAX_SAFE_INTEGER;
+            if (ar !== br) return ar - br;
+            return a.naturalIndex - b.naturalIndex;
+        });
+    }
+    function reorderBoardColumns(draggedKey, targetKey) {
+        if (!draggedKey || !targetKey || draggedKey === targetKey) return;
+        const board = $('choreBoard');
+        if (!board) return;
+        const order = [...board.querySelectorAll('.chore-col[data-col-key]')].map((node) => node.getAttribute('data-col-key'));
+        const from = order.indexOf(draggedKey);
+        const to = order.indexOf(targetKey);
+        if (from === -1 || to === -1) return;
+        const updated = [...order];
+        const [moved] = updated.splice(from, 1);
+        updated.splice(to, 0, moved);
+        saveBoardOrder(updated);
+    }
+    function attachChoreColumnDnD(list) {
+        const board = $('choreBoard');
+        if (!board || board.dataset.dndReady === '1') return;
+        board.dataset.dndReady = '1';
+        board.addEventListener('dragstart', (event) => {
+            const handle = event.target.closest('.chore-col-drag-handle');
+            if (!handle) return;
+            const col = handle.closest('.chore-col');
+            const key = col?.getAttribute('data-col-key') || '';
+            if (!key) return;
+            dragColumnKey = key;
+            if (event.dataTransfer) {
+                event.dataTransfer.effectAllowed = 'move';
+                event.dataTransfer.setData('text/plain', key);
+            }
+            col?.classList.add('chore-col-dragging');
+        });
+        board.addEventListener('dragover', (event) => {
+            const targetCol = event.target.closest('.chore-col');
+            if (!targetCol || !dragColumnKey) return;
+            event.preventDefault();
+            board.querySelectorAll('.chore-col.drag-target').forEach((node) => node.classList.remove('drag-target'));
+            targetCol.classList.add('drag-target');
+        });
+        board.addEventListener('drop', (event) => {
+            const targetCol = event.target.closest('.chore-col');
+            if (!targetCol) return;
+            event.preventDefault();
+            const droppedKey = (event.dataTransfer && event.dataTransfer.getData('text/plain')) || dragColumnKey;
+            const targetKey = targetCol.getAttribute('data-col-key') || '';
+            reorderBoardColumns(droppedKey, targetKey);
+            dragColumnKey = '';
+            board.querySelectorAll('.chore-col').forEach((node) => node.classList.remove('drag-target', 'chore-col-dragging'));
+            renderChores(list);
+        });
+        board.addEventListener('dragend', () => {
+            dragColumnKey = '';
+            board.querySelectorAll('.chore-col').forEach((node) => node.classList.remove('drag-target', 'chore-col-dragging'));
+        });
+    }
 
     // ---------- autocomplete ----------
     // mode: 'single' = whole value is a name (inline completion); 'mention' = @token in text; 'list' = comma separated names
@@ -645,12 +747,17 @@
         list.forEach(t => taskAssignees(t).forEach(assignee => {
             if (!names.some(name => sameUser(name, assignee))) names.push(assignee);
         }));
-        const cols = names.map(name => ({
+        const baseCols = names.map((name, naturalIndex) => ({
+            key: columnKey(name),
+            naturalIndex,
             name,
             items: list.filter(t => taskAssignees(t).some(assignee => sameUser(assignee, name))),
         }));
         const unassigned = list.filter(t => !taskAssignees(t).length);
-        if (unassigned.length) cols.push({ name: '', items: unassigned });
+        if (unassigned.length) {
+            baseCols.push({ key: columnKey(''), naturalIndex: baseCols.length, name: '', items: unassigned });
+        }
+        const cols = sortColumnsBySavedOrder(baseCols);
         $('choreBoard').innerHTML = cols.map(col => {
             const idx = memberIndex(col.name || 'x');
             const done = col.items.filter(t => taskCompletionState(t).done).length;
@@ -670,18 +777,22 @@
                     </div>
                 </div>`;
             }).join('') || '<div class="text-sm text-gray-600 px-2 py-3">No chores yet.</div>';
-            return `<div class="chore-col p-3 space-y-3" style="background:${pastel[idx % pastel.length]}">
+            return `<div class="chore-col p-3 space-y-3" data-col-key="${esc(col.key)}" style="background:${pastel[idx % pastel.length]}">
                 <div class="flex items-center gap-3">
                     <span class="avatar-dot" style="background:${palette[idx % palette.length]}">${esc((col.name || '?').charAt(0).toUpperCase())}</span>
                     <div class="flex-1 min-w-0">
                         <div class="font-bold text-gray-900 truncate">${esc(col.name || 'Unassigned')}</div>
                         <div class="text-xs text-gray-700">${done} of ${col.items.length} done</div>
                     </div>
+                    <button type="button" class="chore-col-drag-handle" draggable="true" aria-label="Drag to reorder ${esc(col.name || 'Unassigned')} column" title="Drag to reorder">
+                        <i class="fa-solid fa-grip"></i>
+                    </button>
                 </div>
                 <div class="h-2 rounded-full bg-white/70 overflow-hidden"><div class="h-full" style="width:${pct}%;background:${palette[idx % palette.length]}"></div></div>
                 <div class="space-y-2">${cards}</div>
             </div>`;
         }).join('');
+        attachChoreColumnDnD(list);
     }
 
     function renderTabs() {

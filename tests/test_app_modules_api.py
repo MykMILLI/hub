@@ -24,6 +24,7 @@ BASE_CONFIG = {
         'shared_calendar': True,
         'daily_agenda': True,
         'meal_planner': True,
+        'reward_system': True,
     },
 }
 
@@ -72,6 +73,8 @@ def test_app_modules_lists_visible_modules_in_sidebar_order(client):
     # Daily Agenda and Notice-adjacent modules must reach native clients.
     assert 'daily_agenda' in ids
     assert 'meal_planner' in ids
+    assert 'reward_system' in ids
+    assert 'cameras' in ids
 
 
 def test_app_modules_hides_hard_disabled_and_toggled_off_modules(client):
@@ -91,6 +94,10 @@ def test_app_modules_carry_label_path_and_icon(client):
     by_id = {m['id']: m for m in modules}
     assert by_id['daily_agenda']['path'] == '/daily-agenda'
     assert by_id['daily_agenda']['label'] == 'Daily Agenda'
+    assert by_id['reward_system']['path'] == '/gold-stars'
+    assert by_id['reward_system']['label'] == 'Gold Star Club'
+    assert by_id['cameras']['path'] == '/cameras'
+    assert by_id['cameras']['label'] == 'Cameras'
     assert by_id['chores']['path'] == '/chores'
     assert by_id['shared_notes']['path'] == '/notes'
     for module in modules:

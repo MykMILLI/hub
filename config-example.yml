@@ -20,12 +20,30 @@ feature_toggles:
   daily_agenda: true
   meal_planner: true
   home_assistant: true
+  cameras: true
 
 home_assistant:
   enabled: true
   url: "https://home.millitop.net"
   # Optional SSO/trusted-login URL. If set, HomeHub uses this first for iframe launch.
   auto_login_url: ""
+
+cameras:
+  enabled: true
+  admins:
+    - Rachel
+    - Mykal
+  items:
+    - id: "front-yard"
+      name: "Front Yard"
+      host: "192.168.1.120"
+      scheme: "http"
+      username: "admin"
+      password: "CHANGE_ME"
+      channel: 0
+      ptz_enabled: true
+      rtsp_url: "rtsp://192.168.1.120:554/h264Preview_01_main"
+      rtsp_sub_url: "rtsp://192.168.1.120:554/h264Preview_01_sub"
 
 family_members:
   - Mom
@@ -145,4 +163,5 @@ menu_visibility:
   meal_planner: true
   notifications: true
   home_assistant: true
+  cameras: true
   settings: true

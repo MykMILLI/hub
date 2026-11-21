@@ -131,6 +131,7 @@ APP_MODULE_LABELS = {
     'shared_cloud': 'Shared Cloud',
     'shopping_list': 'Shopping List',
     'chores': 'To-Do/Chores',
+    'reward_system': 'Gold Star Club',
     'recipes': 'Recipe Book',
     'expiry_tracker': 'Expiry Tracker',
     'url_shortener': 'URL Shortener',
@@ -144,6 +145,7 @@ APP_MODULE_LABELS = {
     'notifications': 'Messages, Polls & Notifications',
     'photos': 'Family Photos',
     'home_assistant': 'Home Assistant',
+    'cameras': 'Cameras',
     'settings': 'Settings',
 }
 
@@ -506,7 +508,7 @@ def api_toggle_menu_item(menu_item):
         # Valid menu items that can be toggled
         valid_items = [
             'welcome', 'timeline', 'shared_notes', 'shared_cloud', 'shopping_list',
-            'chores', 'recipes', 'expiry_tracker', 'url_shortener',
+            'chores', 'reward_system', 'recipes', 'expiry_tracker', 'url_shortener',
             'media_downloader', 'pdf_compressor', 'qr_generator',
             'expense_tracker', 'shared_calendar', 'meal_planner', 'notifications', 'photos', 'home_assistant', 'settings'
         ]

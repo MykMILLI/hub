@@ -50,4 +50,4 @@ RUN mkdir -p /app/data /app/uploads /app/media /app/pdfs /app/temp
 
 EXPOSE 5000
 
-CMD ["gunicorn", "wsgi:app", "-w", "1", "-k", "gthread", "--threads", "8", "--timeout", "120", "-b", "0.0.0.0:5000", "--access-logfile", "-", "--error-logfile", "-"]
+CMD ["gunicorn", "wsgi:app", "-w", "2", "-k", "gthread", "--threads", "12", "--timeout", "120", "-b", "0.0.0.0:5000", "--access-logfile", "-", "--error-logfile", "-"]

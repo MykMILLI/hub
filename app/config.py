@@ -38,6 +38,7 @@ def load_config():
     config['feature_toggles'].setdefault('notifications', True)
     config['feature_toggles'].setdefault('photos', True)
     config['feature_toggles'].setdefault('home_assistant', True)
+    config['feature_toggles'].setdefault('cameras', True)
     # Reminders defaults & calendar start day (supports sunday..saturday or 0-6)
     rem = config.setdefault('reminders', {})
     # Do not overwrite existing user value
@@ -158,5 +159,10 @@ def load_config():
     menu.setdefault('notifications', True)
     menu.setdefault('photos', True)
     menu.setdefault('home_assistant', True)
+    menu.setdefault('cameras', True)
     menu.setdefault('settings', True)
+    camera_cfg = config.setdefault('cameras', {})
+    camera_cfg.setdefault('enabled', True)
+    camera_cfg.setdefault('admins', ['Rachel', 'Mykal'])
+    camera_cfg.setdefault('items', [])
     return config

@@ -11,7 +11,7 @@ def run_due_notifications(app) -> None:
     with app.app_context():
         from ..models import FamilyMember, db
         from ..blueprints.family_calendar import emit_due_calendar_reminders_for_member
-        from ..blueprints.dashboard import emit_due_bath_day_notification, emit_due_bedtime_reader_notification_for_member
+        from ..blueprints.dashboard import emit_due_bath_day_notification, emit_due_bedtime_reader_notification_for_member, emit_due_parent_helper_notifications_for_member
         from ..blueprints.expiry import _ensure_due_reminders_for_member
 
         try:
@@ -23,7 +23,8 @@ def run_due_notifications(app) -> None:
         for name in names:
             for fn in (emit_due_calendar_reminders_for_member,
                        emit_due_bedtime_reader_notification_for_member,
-                       _ensure_due_reminders_for_member):
+                       _ensure_due_reminders_for_member,
+                       emit_due_parent_helper_notifications_for_member):
                 try:
                     fn(name)
                 except Exception as err:

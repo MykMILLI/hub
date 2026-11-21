@@ -1,14 +1,68 @@
 from flask import render_template, request, redirect, url_for, flash, jsonify, current_app, session
 from datetime import datetime, date, timedelta, time, timezone
 from zoneinfo import ZoneInfo
-from ..models import db, HomeStatus, MemberStatus, Notice, Reminder, RecurringReminder, FamilyMember, ActivityLog, FamilyNotice, FamilyNoticeAcknowledgement, HouseholdRoutineState, LibraryBookLoan, PhotoAsset, FamilyCalendarEvent, FamilyChatMessage, Chore, AppNotification
+from ..models import db, HomeStatus, MemberStatus, Notice, Reminder, RecurringReminder, FamilyMember, ActivityLog, FamilyNotice, FamilyNoticeAcknowledgement, HouseholdRoutineState, LibraryBookLoan, PhotoAsset, FamilyCalendarEvent, FamilyChatMessage, Chore, AppNotification, KidRewardProfile, KidRewardRule, KidRewardEvent, KidRewardRedemption, KidRewardTimeout, KidRewardRepairTask, KidRewardSetting
+from ..models import KidRewardParentActionTask
 from ..blueprints import main_bp
 from ..security import sanitize_html, sanitize_text
 from ..services.chore_recurrence import is_effectively_done
 from ..services.notification_service import publish_notification
 import json
+import hashlib
 
 _BATH_NOTIFICATION_MEMBERS = ('Mykal', 'Rachel')
+_KID_REWARD_ADMIN_NAMES = {'rachel', 'mykal'}
+_KID_MEMBERS = ('Avery', 'Harley', 'Rachel', 'Mykal')
+_KID_REWARD_MILESTONES = (
+    {'stars': 10, 'label': 'Choose dessert night'},
+    {'stars': 20, 'label': 'Pick a family game'},
+    {'stars': 30, 'label': 'Choose a weekend activity'},
+)
+_DEFAULT_KID_REWARD_RULES = (
+    {'behavior_kind': 'do', 'title': 'Used kind words', 'points': 1, 'emoji': '😊'},
+    {'behavior_kind': 'do', 'title': 'Helped clean up toys', 'points': 2, 'emoji': '🧸'},
+    {'behavior_kind': 'do', 'title': 'Followed directions the first time', 'points': 2, 'emoji': '👏'},
+    {'behavior_kind': 'dont', 'title': 'Yelling or hurtful words', 'points': -2, 'emoji': '🗣️'},
+    {'behavior_kind': 'dont', 'title': 'Hitting or rough play', 'points': -3, 'emoji': '🚫'},
+    {'behavior_kind': 'dont', 'title': 'Not helping with cleanup', 'points': -1, 'emoji': '🧹'},
+)
+_DEFAULT_KID_REWARD_OPTIONS_BY_CHILD = {
+    'Avery': (
+        {'reward_label': 'Choose dessert night', 'stars_required': 10},
+        {'reward_label': 'Pick bedtime movie', 'stars_required': 15},
+        {'reward_label': 'Paint + chalk board time', 'stars_required': 20},
+    ),
+    'Harley': (
+        {'reward_label': 'Choose dessert night', 'stars_required': 10},
+        {'reward_label': 'Pick bedtime movie', 'stars_required': 15},
+        {'reward_label': 'Play dough + snack choice', 'stars_required': 20},
+    ),
+    'Rachel': (
+        {'reward_label': 'Pick Friday dinner', 'stars_required': 12},
+        {'reward_label': 'Choose family game', 'stars_required': 18},
+        {'reward_label': 'Pick weekend outing', 'stars_required': 24},
+    ),
+    'Mykal': (
+        {'reward_label': 'Pick Friday dinner', 'stars_required': 12},
+        {'reward_label': 'Choose family game', 'stars_required': 18},
+        {'reward_label': 'Pick weekend outing', 'stars_required': 24},
+    ),
+}
+_PARENT_NOTIFICATION_TARGETS = ('Rachel', 'Mykal')
+_DISCIPLINE_METHODS = (
+    'Use immediate, calm feedback so kids connect action to outcome.',
+    'Keep consequences short, predictable, and age-appropriate.',
+    'Pair correction with a repair step, like helping clean up.',
+    'Return to positive reinforcement after timeout is complete.',
+)
+_DEFAULT_REPAIR_TASK = 'Apologize and help clean up the area.'
+_HELPER_INSPIRATION_QUOTES = (
+    'Small consistent steps today build a calmer home tomorrow.',
+    'Connection before correction works better than pressure.',
+    'You are building trust with every calm response.',
+    'Progress, not perfection, is the parenting win this week.',
+    'Teamwork at home starts with one helpful moment at a time.',
+)
 
 
 _FINANCE_ACTION_PREFIXES = (
@@ -41,6 +95,797 @@ def _parse_date_param(value, default=None):
         return datetime.strptime(value, '%Y-%m-%d').date()
     except Exception:
         return default
+
+
+def _current_actor_name() -> str:
+    member = sanitize_text(session.get('current_member') or '').strip()
+    if member:
+        return member
+    return sanitize_text(current_app.config.get('HOMEHUB_CONFIG', {}).get('admin_name', 'Administrator')).strip() or 'Administrator'
+
+
+def _can_manage_kid_rewards(actor_name: str) -> bool:
+    clean_name = sanitize_text(actor_name or '').strip()
+    if not clean_name:
+        return False
+    return sanitize_text(clean_name).strip().lower() in _KID_REWARD_ADMIN_NAMES
+
+
+def _bedtime_child_assignments_for_reader(reader_name: str) -> dict:
+    if sanitize_text(reader_name or '').strip().lower() == 'mykal':
+        return {'book_picker': 'Avery', 'movie_picker': 'Harley'}
+    return {'book_picker': 'Harley', 'movie_picker': 'Avery'}
+
+
+def _ensure_kid_reward_profiles(actor_name: str) -> list[KidRewardProfile]:
+    changed = False
+    existing = {sanitize_text(row.child_name or '').strip(): row for row in KidRewardProfile.query.all()}
+    for child in _KID_MEMBERS:
+        if child in existing:
+            continue
+        row = KidRewardProfile(child_name=child, stars=0, updated_by=actor_name)
+        db.session.add(row)
+        existing[child] = row
+        changed = True
+    if changed:
+        db.session.commit()
+    return [existing[name] for name in _KID_MEMBERS if name in existing]
+
+
+def _ensure_default_kid_reward_rules(actor_name: str) -> None:
+    if KidRewardRule.query.count() > 0:
+        return
+    for index, rule in enumerate(_DEFAULT_KID_REWARD_RULES):
+        db.session.add(KidRewardRule(
+            behavior_kind=rule['behavior_kind'],
+            title=rule['title'],
+            points=rule['points'],
+            emoji=rule['emoji'],
+            sort_order=index,
+            active=True,
+            created_by=actor_name,
+            updated_by=actor_name,
+        ))
+    db.session.commit()
+
+
+def _get_or_create_kid_reward_settings(actor_name: str) -> KidRewardSetting:
+    row = KidRewardSetting.query.first()
+    if row:
+        return row
+    row = KidRewardSetting(
+        confetti_enabled=True,
+        sounds_enabled=False,
+        timeout_default_minutes=5,
+        timeout_default_star_loss=1,
+        timeout_default_reward_minutes_loss=10,
+        updated_by=actor_name,
+    )
+    db.session.add(row)
+    db.session.commit()
+    return row
+
+
+def _default_reward_options_for_child(child_name: str) -> list[dict]:
+    options = _DEFAULT_KID_REWARD_OPTIONS_BY_CHILD.get(child_name, ())
+    normalized = []
+    for option in options[:3]:
+        normalized.append({
+            'reward_label': sanitize_text(option.get('reward_label') or '').strip()[:256],
+            'stars_required': max(1, min(100, int(option.get('stars_required') or 1))),
+        })
+    return [row for row in normalized if row['reward_label']]
+
+
+def _ensure_default_kid_reward_options(actor_name: str) -> None:
+    existing_rows = (
+        KidRewardRule.query
+        .filter(KidRewardRule.active.is_(True))
+        .filter(KidRewardRule.behavior_kind == 'reward_option')
+        .all()
+    )
+    present_by_child: dict[str, list[KidRewardRule]] = {child: [] for child in _KID_MEMBERS}
+    for row in existing_rows:
+        child_name = sanitize_text(row.emoji or '').strip()
+        if child_name in present_by_child:
+            present_by_child[child_name].append(row)
+
+    changed = False
+    for child_name in _KID_MEMBERS:
+        if present_by_child[child_name]:
+            continue
+        for index, option in enumerate(_default_reward_options_for_child(child_name)):
+            db.session.add(KidRewardRule(
+                behavior_kind='reward_option',
+                title=option['reward_label'],
+                points=int(option['stars_required']),
+                emoji=child_name,
+                sort_order=index,
+                active=True,
+                created_by=actor_name,
+                updated_by=actor_name,
+            ))
+            changed = True
+    if changed:
+        db.session.commit()
+
+
+def _reward_options_by_child() -> dict[str, list[dict]]:
+    rows = (
+        KidRewardRule.query
+        .filter(KidRewardRule.active.is_(True))
+        .filter(KidRewardRule.behavior_kind == 'reward_option')
+        .order_by(KidRewardRule.emoji.asc(), KidRewardRule.sort_order.asc(), KidRewardRule.id.asc())
+        .all()
+    )
+    by_child: dict[str, list[dict]] = {child: [] for child in _KID_MEMBERS}
+    for row in rows:
+        child_name = sanitize_text(row.emoji or '').strip()
+        if child_name not in by_child:
+            continue
+        if len(by_child[child_name]) >= 3:
+            continue
+        label = sanitize_text(row.title or '').strip()[:256]
+        if not label:
+            continue
+        by_child[child_name].append({
+            'id': row.id,
+            'reward_label': label,
+            'stars_required': max(1, min(100, int(row.points or 1))),
+        })
+    return by_child
+
+
+def _kid_reward_progress(stars: int, reward_options: list[dict] | None = None) -> dict:
+    current = max(0, int(stars or 0))
+    options = []
+    for option in (reward_options or []):
+        try:
+            stars_required = int(option.get('stars_required'))
+        except (TypeError, ValueError, AttributeError):
+            continue
+        label = sanitize_text((option or {}).get('reward_label') or '').strip()
+        if stars_required <= 0 or not label:
+            continue
+        options.append({'stars_required': stars_required, 'reward_label': label})
+    options.sort(key=lambda row: (row['stars_required'], row['reward_label']))
+
+    if options:
+        next_option = None
+        for option in options:
+            if current < option['stars_required']:
+                next_option = option
+                break
+        if not next_option:
+            final_target = options[-1]
+            return {
+                'stars': current,
+                'next_target': final_target['stars_required'],
+                'next_label': final_target['reward_label'],
+                'progress_percent': 100,
+                'remaining': 0,
+            }
+        target = int(next_option['stars_required'])
+        lower_bound = 0
+        for option in options:
+            if option['stars_required'] < target:
+                lower_bound = int(option['stars_required'])
+        span = max(1, target - lower_bound)
+        progressed = max(0, min(span, current - lower_bound))
+        return {
+            'stars': current,
+            'next_target': target,
+            'next_label': next_option['reward_label'],
+            'progress_percent': int((progressed / span) * 100),
+            'remaining': max(0, target - current),
+        }
+
+    next_milestone = None
+    for milestone in _KID_REWARD_MILESTONES:
+        if current < milestone['stars']:
+            next_milestone = milestone
+            break
+    if not next_milestone:
+        final_target = _KID_REWARD_MILESTONES[-1]
+        return {
+            'stars': current,
+            'next_target': final_target['stars'],
+            'next_label': final_target['label'],
+            'progress_percent': 100,
+            'remaining': 0,
+        }
+    target = int(next_milestone['stars'])
+    lower_bound = 0
+    for milestone in _KID_REWARD_MILESTONES:
+        if milestone['stars'] < target:
+            lower_bound = milestone['stars']
+    span = max(1, target - lower_bound)
+    progressed = max(0, min(span, current - lower_bound))
+    return {
+        'stars': current,
+        'next_target': target,
+        'next_label': next_milestone['label'],
+        'progress_percent': int((progressed / span) * 100),
+        'remaining': max(0, target - current),
+    }
+
+
+def _reward_milestones_crossed(before_stars: int, after_stars: int) -> list[dict]:
+    start = max(0, int(before_stars or 0))
+    end = max(0, int(after_stars or 0))
+    if end <= start:
+        return []
+    crossed = []
+    for milestone in _KID_REWARD_MILESTONES:
+        target = int(milestone['stars'])
+        if start < target <= end:
+            crossed.append(milestone)
+    return crossed
+
+
+def _pending_repair_tasks_for_child(child_name: str) -> list[KidRewardRepairTask]:
+    clean_child = sanitize_text(child_name or '').strip()
+    if clean_child not in _KID_MEMBERS:
+        return []
+    return (
+        KidRewardRepairTask.query
+        .filter_by(child_name=clean_child, completed=False)
+        .order_by(KidRewardRepairTask.created_at.asc(), KidRewardRepairTask.id.asc())
+        .all()
+    )
+
+
+def _child_has_pending_repair(child_name: str) -> bool:
+    return bool(_pending_repair_tasks_for_child(child_name))
+
+
+def _reward_follow_through_parents_for_child(child_name: str) -> list[str]:
+    clean_child = sanitize_text(child_name or '').strip()
+    if clean_child == 'Rachel':
+        return ['Mykal']
+    if clean_child == 'Mykal':
+        return ['Rachel']
+    return list(_PARENT_NOTIFICATION_TARGETS)
+
+
+def _reward_notification_targets() -> list[str]:
+    config_members = current_app.config.get('HOMEHUB_CONFIG', {}).get('family_members') or []
+    targets = []
+    for name in config_members:
+        clean_name = sanitize_text(name or '').strip()
+        if clean_name and clean_name not in targets:
+            targets.append(clean_name)
+    if targets:
+        return targets
+    return list(_KID_MEMBERS)
+
+
+def _publish_reward_event_notification(*, child_name: str, delta: int, actor_name: str, reason: str | None) -> None:
+    profile = KidRewardProfile.query.filter_by(child_name=child_name).first()
+    current_stars = max(0, int(getattr(profile, 'stars', 0) or 0))
+    progress = _kid_reward_progress(current_stars, _reward_options_by_child().get(child_name) or [])
+    remaining = max(0, int(progress.get('remaining') or 0))
+    next_label = sanitize_text(progress.get('next_label') or '').strip() or 'next reward'
+    clean_reason = sanitize_text(reason or '').strip()[:256]
+    if delta >= 0:
+        message = f"Way to go {child_name}! Only {remaining} more star{'s' if remaining != 1 else ''} to get {next_label}."
+        if clean_reason:
+            message = f"{message} Reason: {clean_reason}"
+        event_type = 'kid_reward_star_awarded'
+    else:
+        message = f"{child_name} had a consequence. We will work to improve in this area moving forward."
+        if clean_reason:
+            message = f"{message} Reason: {clean_reason}"
+        event_type = 'kid_reward_consequence'
+    publish_notification(
+        event_type=event_type,
+        title='Gold Star Update',
+        message=message,
+        target_members=_reward_notification_targets(),
+        created_by=actor_name,
+        payload={
+            'child_name': child_name,
+            'delta': int(delta),
+            'remaining_to_next_reward': remaining,
+            'next_reward_label': next_label,
+            'reason': clean_reason,
+        },
+        channels=['in_app'],
+    )
+
+
+def _create_parent_reward_tasks(*, redemption: KidRewardRedemption, actor_name: str) -> list[KidRewardParentActionTask]:
+    created_rows = []
+    for parent_name in _reward_follow_through_parents_for_child(redemption.child_name):
+        chore = Chore(
+            description=f"Reward follow-through for {redemption.child_name}: {redemption.reward_label}",
+            creator=actor_name,
+            done=False,
+            tags=json.dumps(['reward_support', redemption.child_name]),
+            task_type='todo',
+            assignee=parent_name,
+            assignees_json=json.dumps([parent_name]),
+            watchers_json=json.dumps([]),
+            days_of_week_json=json.dumps([]),
+            due_date=date.today(),
+            status='todo',
+            status_options_json=json.dumps(['todo', 'in_progress', 'completed']),
+            mentions_json=json.dumps([parent_name]),
+            details_html='',
+            checklist_json=json.dumps([]),
+            checklist_meta_json=json.dumps({}),
+            chart_data_json=json.dumps([]),
+            table_data_json=json.dumps({'headers': [], 'rows': []}),
+            completed_at=None,
+            reward=None,
+            updated_at=datetime.utcnow(),
+        )
+        db.session.add(chore)
+        db.session.flush()
+        row = KidRewardParentActionTask(
+            redemption_id=redemption.id,
+            child_name=redemption.child_name,
+            reward_label=redemption.reward_label,
+            parent_name=parent_name,
+            chore_id=chore.id,
+        )
+        db.session.add(row)
+        created_rows.append(row)
+        publish_notification(
+            event_type='reward_parent_task',
+            title='Reward follow-through task',
+            message=f"{redemption.child_name}'s reward needs your follow-through: {redemption.reward_label}",
+            target_members=[parent_name],
+            created_by=actor_name,
+            payload={'reward_child': redemption.child_name, 'reward': redemption.reward_label, 'task_id': chore.id},
+            channels=['in_app', 'mobile'],
+        )
+    return created_rows
+
+
+def _hash_bucket(*parts: str) -> int:
+    payload = '|'.join(str(part) for part in parts)
+    digest = hashlib.sha256(payload.encode('utf-8')).hexdigest()
+    return int(digest[:8], 16)
+
+
+def _next_sunday_on_or_after(day_value: date) -> date:
+    return day_value + timedelta(days=(6 - day_value.weekday()) % 7)
+
+
+def _meal_plan_helper_key(on_sunday: date, member_name: str) -> str:
+    return f"meal-plan:{on_sunday.isoformat()}:{sanitize_text(member_name or '').strip().lower()}"
+
+
+def _inspiration_window_for_member_on_date(member_name: str, on_date: date, tz: ZoneInfo) -> dict | None:
+    clean_member = sanitize_text(member_name or '').strip()
+    if clean_member not in _PARENT_NOTIFICATION_TARGETS:
+        return None
+    day_key = on_date.isoformat()
+    gate = _hash_bucket('inspiration-day', clean_member.lower(), day_key) % 100
+    if gate >= 45:
+        return None
+    random_minute = 9 * 60 + (_hash_bucket('inspiration-minute', clean_member.lower(), day_key) % (11 * 60))
+    hour = random_minute // 60
+    minute_of_hour = random_minute % 60
+    scheduled_eastern = datetime.combine(on_date, time(hour, minute_of_hour), tzinfo=tz)
+    scheduled_utc = scheduled_eastern.astimezone(timezone.utc)
+    return {
+        'member': clean_member,
+        'date': day_key,
+        'scheduled_eastern': scheduled_eastern,
+        'scheduled_utc': scheduled_utc,
+    }
+
+
+def _parent_helper_summary(actor_name: str, now_utc: datetime | None = None) -> dict:
+    clean_actor = sanitize_text(actor_name or '').strip()
+    eastern = ZoneInfo('America/New_York')
+    current_utc = now_utc or datetime.now(timezone.utc)
+    now_eastern = current_utc.astimezone(eastern)
+    sunday = _next_sunday_on_or_after(now_eastern.date())
+    sunday_due_eastern = datetime.combine(sunday, time(10, 0), tzinfo=eastern)
+    sunday_due_utc = sunday_due_eastern.astimezone(timezone.utc)
+
+    parent_task_rows = (
+        KidRewardParentActionTask.query
+        .order_by(KidRewardParentActionTask.created_at.desc(), KidRewardParentActionTask.id.desc())
+        .limit(200)
+        .all()
+    )
+    pending_by_parent = {}
+    for parent_name in _PARENT_NOTIFICATION_TARGETS:
+        pending_by_parent[parent_name] = []
+    for row in parent_task_rows:
+        parent_name = sanitize_text(row.parent_name or '').strip()
+        if parent_name not in pending_by_parent:
+            continue
+        chore_row = db.session.get(Chore, row.chore_id) if row.chore_id else None
+        is_done = bool(getattr(chore_row, 'done', False))
+        if is_done:
+            continue
+        pending_by_parent[parent_name].append({
+            'child_name': row.child_name,
+            'reward_label': row.reward_label,
+            'chore_id': row.chore_id,
+            'created_at': row.created_at.isoformat() if row.created_at else '',
+        })
+
+    meal_plan_by_parent = []
+    for parent_name in _PARENT_NOTIFICATION_TARGETS:
+        key = _meal_plan_helper_key(sunday, parent_name)
+        sent_row = (
+            AppNotification.query
+            .filter(AppNotification.event_type == 'meal_plan_helper')
+            .filter(AppNotification.target_member == parent_name)
+            .filter(AppNotification.payload_json.contains(key))
+            .first()
+        )
+        if sent_row:
+            status_label = 'Reminder sent'
+        elif current_utc >= sunday_due_utc:
+            status_label = 'Due now (pending reminder send)'
+        else:
+            status_label = 'Scheduled'
+        meal_plan_by_parent.append({
+            'parent_name': parent_name,
+            'status': status_label,
+            'sent': bool(sent_row),
+        })
+
+    show_debug_windows = _can_manage_kid_rewards(clean_actor)
+    next_windows = []
+    if show_debug_windows:
+        for parent_name in _PARENT_NOTIFICATION_TARGETS:
+            found = None
+            for offset in range(0, 8):
+                target_date = now_eastern.date() + timedelta(days=offset)
+                window = _inspiration_window_for_member_on_date(parent_name, target_date, eastern)
+                if not window:
+                    continue
+                if window['scheduled_utc'] <= current_utc:
+                    continue
+                found = window
+                break
+            next_windows.append({
+                'parent_name': parent_name,
+                'scheduled_at': found['scheduled_eastern'].isoformat() if found else '',
+                'scheduled_display': (
+                    found['scheduled_eastern'].strftime('%a %b %d, %I:%M %p ET')
+                    if found else 'No window in next 7 days'
+                ),
+            })
+
+    return {
+        'pending_by_parent': [
+            {
+                'parent_name': parent_name,
+                'pending_count': len(items),
+                'task_items': items[:3],
+            }
+            for parent_name, items in pending_by_parent.items()
+        ],
+        'meal_plan': {
+            'sunday_date': sunday.isoformat(),
+            'due_display': sunday_due_eastern.strftime('%a %b %d, %I:%M %p ET'),
+            'by_parent': meal_plan_by_parent,
+        },
+        'show_debug_windows': show_debug_windows,
+        'next_inspiration_windows': next_windows,
+    }
+
+
+def emit_due_parent_helper_notifications_for_member(member_name: str, now_utc: datetime | None = None) -> int:
+    clean_member = sanitize_text(member_name or '').strip()
+    if clean_member not in _PARENT_NOTIFICATION_TARGETS:
+        return 0
+    eastern = ZoneInfo('America/New_York')
+    current_utc = now_utc or datetime.now(timezone.utc)
+    now_eastern = current_utc.astimezone(eastern)
+    sent = 0
+
+    if now_eastern.weekday() == 6:
+        scheduled_meal_utc = datetime.combine(now_eastern.date(), time(10, 0), tzinfo=eastern).astimezone(timezone.utc)
+        if scheduled_meal_utc <= current_utc <= scheduled_meal_utc + timedelta(minutes=20):
+            meal_key = _meal_plan_helper_key(now_eastern.date(), clean_member)
+            already = (
+                AppNotification.query
+                .filter(AppNotification.event_type == 'meal_plan_helper')
+                .filter(AppNotification.target_member == clean_member)
+                .filter(AppNotification.payload_json.contains(meal_key))
+                .first()
+            )
+            if not already:
+                publish_notification(
+                    event_type='meal_plan_helper',
+                    title='Meal planning reminder',
+                    message='Quick weekly reset: plan meals for the week today.',
+                    target_members=[clean_member],
+                    created_by='HomeHub',
+                    payload={'reminder_key': meal_key},
+                    channels=['in_app', 'mobile'],
+                )
+                sent += 1
+
+    day_key = now_eastern.date().isoformat()
+    inspiration_window = _inspiration_window_for_member_on_date(clean_member, now_eastern.date(), eastern)
+    if inspiration_window:
+        scheduled_inspiration_utc = inspiration_window['scheduled_utc']
+        if scheduled_inspiration_utc <= current_utc <= scheduled_inspiration_utc + timedelta(minutes=20):
+            insp_key = f"inspiration:{day_key}:{clean_member.lower()}"
+            already = (
+                AppNotification.query
+                .filter(AppNotification.event_type == 'parent_inspiration')
+                .filter(AppNotification.target_member == clean_member)
+                .filter(AppNotification.payload_json.contains(insp_key))
+                .first()
+            )
+            if not already:
+                quote_idx = _hash_bucket('inspiration-quote', clean_member.lower(), day_key) % len(_HELPER_INSPIRATION_QUOTES)
+                publish_notification(
+                    event_type='parent_inspiration',
+                    title='Parent helper note',
+                    message=_HELPER_INSPIRATION_QUOTES[quote_idx],
+                    target_members=[clean_member],
+                    created_by='HomeHub',
+                    payload={'reminder_key': insp_key},
+                    channels=['in_app', 'mobile'],
+                )
+                sent += 1
+
+    return sent
+
+
+def _publish_kid_reward_milestone_notification(child_name: str, stars: int, milestone: dict, actor_name: str) -> None:
+    milestone_stars = int(milestone.get('stars') or 0)
+    key = f"kid-reward-milestone:{child_name.lower()}:{milestone_stars}"
+    already_sent = (
+        AppNotification.query
+        .filter(AppNotification.event_type == 'kid_reward_milestone')
+        .filter(AppNotification.payload_json.contains(key))
+        .first()
+    )
+    if already_sent:
+        return
+    publish_notification(
+        event_type='kid_reward_milestone',
+        title='Gold Star Milestone',
+        message=f'{child_name} reached {milestone_stars} stars: {milestone.get("label", "Milestone")}!',
+        target_members=_PARENT_NOTIFICATION_TARGETS,
+        created_by=actor_name,
+        payload={
+            'reminder_key': key,
+            'child_name': child_name,
+            'stars': stars,
+            'milestone': milestone.get('label', ''),
+        },
+        channels=['in_app', 'mobile'],
+    )
+
+
+def _kid_reward_analytics_payload() -> dict:
+    eastern = ZoneInfo('America/New_York')
+    now_eastern = datetime.now(timezone.utc).astimezone(eastern)
+    today_eastern = now_eastern.date()
+    week_start = today_eastern - timedelta(days=today_eastern.weekday())
+    week_end = week_start + timedelta(days=6)
+    week_start_utc = datetime.combine(week_start, time(0, 0), tzinfo=eastern).astimezone(timezone.utc).replace(tzinfo=None)
+    next_week_start_utc = datetime.combine(week_start + timedelta(days=7), time(0, 0), tzinfo=eastern).astimezone(timezone.utc).replace(tzinfo=None)
+    trend_start_day = today_eastern - timedelta(days=27)
+    trend_start_utc = datetime.combine(trend_start_day, time(0, 0), tzinfo=eastern).astimezone(timezone.utc).replace(tzinfo=None)
+
+    weekly_events = (
+        KidRewardEvent.query
+        .filter(KidRewardEvent.created_at >= week_start_utc)
+        .filter(KidRewardEvent.created_at < next_week_start_utc)
+        .order_by(KidRewardEvent.created_at.desc(), KidRewardEvent.id.desc())
+        .all()
+    )
+    trend_events = (
+        KidRewardEvent.query
+        .filter(KidRewardEvent.created_at >= trend_start_utc)
+        .order_by(KidRewardEvent.created_at.asc(), KidRewardEvent.id.asc())
+        .all()
+    )
+    recent_events = (
+        KidRewardEvent.query
+        .order_by(KidRewardEvent.created_at.desc(), KidRewardEvent.id.desc())
+        .limit(120)
+        .all()
+    )
+
+    weekly_awarded = sum(max(0, int(row.delta or 0)) for row in weekly_events)
+    weekly_taken = sum(abs(min(0, int(row.delta or 0))) for row in weekly_events)
+    by_child = []
+    for child_name in _KID_MEMBERS:
+        child_events = [row for row in weekly_events if sanitize_text(row.child_name or '').strip() == child_name]
+        by_child.append({
+            'child_name': child_name,
+            'awarded': sum(max(0, int(row.delta or 0)) for row in child_events),
+            'taken': sum(abs(min(0, int(row.delta or 0))) for row in child_events),
+        })
+
+    consequence_reason_map: dict[str, dict] = {}
+    for row in weekly_events:
+        delta = int(row.delta or 0)
+        if delta >= 0:
+            continue
+        reason = sanitize_text(row.reason or '').strip()[:256] or 'Consequence recorded'
+        item = consequence_reason_map.get(reason)
+        if not item:
+            item = {'reason': reason, 'count': 0, 'stars_taken': 0}
+            consequence_reason_map[reason] = item
+        item['count'] += 1
+        item['stars_taken'] += abs(delta)
+    weekly_consequence_reasons = sorted(
+        consequence_reason_map.values(),
+        key=lambda row: (-int(row['stars_taken']), -int(row['count']), row['reason']),
+    )[:10]
+
+    trend_by_day = {}
+    for offset in range(28):
+        day = trend_start_day + timedelta(days=offset)
+        trend_by_day[day.isoformat()] = {'date': day.isoformat(), 'awarded': 0, 'taken': 0}
+    for row in trend_events:
+        created_at = row.created_at
+        if not isinstance(created_at, datetime):
+            continue
+        day_key = created_at.replace(tzinfo=timezone.utc).astimezone(eastern).date().isoformat()
+        if day_key not in trend_by_day:
+            continue
+        delta = int(row.delta or 0)
+        if delta >= 0:
+            trend_by_day[day_key]['awarded'] += delta
+        else:
+            trend_by_day[day_key]['taken'] += abs(delta)
+    trend_daily = [trend_by_day[key] for key in sorted(trend_by_day.keys())]
+
+    return {
+        'weekly_summary': {
+            'week_start': week_start.isoformat(),
+            'week_end': week_end.isoformat(),
+            'week_label': f"Week of {week_start.strftime('%b %d')}–{week_end.strftime('%b %d')}",
+            'awarded_total': weekly_awarded,
+            'taken_total': weekly_taken,
+            'by_child': by_child,
+            'consequence_reasons': weekly_consequence_reasons,
+        },
+        'behavior_trend': {
+            'range_start': trend_start_day.isoformat(),
+            'range_end': today_eastern.isoformat(),
+            'daily': trend_daily,
+        },
+        'event_history': [{
+            'id': row.id,
+            'child_name': row.child_name,
+            'delta': int(row.delta or 0),
+            'reason': sanitize_text(row.reason or '').strip()[:256] or '',
+            'created_by': row.created_by,
+            'created_at': row.created_at.isoformat() if row.created_at else '',
+        } for row in recent_events],
+    }
+
+
+def _kid_reward_state_payload(actor_name: str) -> dict:
+    _ensure_default_kid_reward_rules(actor_name)
+    _ensure_default_kid_reward_options(actor_name)
+    profiles = _ensure_kid_reward_profiles(actor_name)
+    settings = _get_or_create_kid_reward_settings(actor_name)
+    all_rules = (
+        KidRewardRule.query
+        .filter(KidRewardRule.active.is_(True))
+        .order_by(KidRewardRule.behavior_kind.asc(), KidRewardRule.sort_order.asc(), KidRewardRule.id.asc())
+        .all()
+    )
+    rules = [row for row in all_rules if sanitize_text(row.behavior_kind or '').strip().lower() in {'do', 'dont'}]
+    reward_options_by_child = _reward_options_by_child()
+    analytics = _kid_reward_analytics_payload()
+    entries = []
+    for profile in profiles:
+        child_name = sanitize_text(profile.child_name or '').strip()
+        progress = _kid_reward_progress(profile.stars, reward_options_by_child.get(child_name) or [])
+        entries.append({
+            'child_name': child_name,
+            'stars': max(0, int(profile.stars or 0)),
+            'progress': progress,
+        })
+    redemptions = (
+        KidRewardRedemption.query
+        .order_by(KidRewardRedemption.created_at.desc(), KidRewardRedemption.id.desc())
+        .limit(20)
+        .all()
+    )
+    timeouts = (
+        KidRewardTimeout.query
+        .order_by(KidRewardTimeout.created_at.desc(), KidRewardTimeout.id.desc())
+        .limit(20)
+        .all()
+    )
+    repairs = (
+        KidRewardRepairTask.query
+        .order_by(KidRewardRepairTask.completed.asc(), KidRewardRepairTask.created_at.desc(), KidRewardRepairTask.id.desc())
+        .limit(30)
+        .all()
+    )
+    parent_action_rows = (
+        KidRewardParentActionTask.query
+        .order_by(KidRewardParentActionTask.created_at.desc(), KidRewardParentActionTask.id.desc())
+        .limit(30)
+        .all()
+    )
+    pending_repair_children = {
+        row.child_name
+        for row in KidRewardRepairTask.query.filter_by(completed=False).all()
+        if sanitize_text(row.child_name or '').strip() in _KID_MEMBERS
+    }
+    return {
+        'children': entries,
+        'rules': [{
+            'id': row.id,
+            'behavior_kind': row.behavior_kind,
+            'title': row.title,
+            'points': int(row.points or 0),
+            'emoji': row.emoji or '⭐',
+            'sort_order': int(row.sort_order or 0),
+        } for row in rules],
+        'milestones': list(_KID_REWARD_MILESTONES),
+        'reward_options_by_child': reward_options_by_child,
+        'weekly_summary': analytics['weekly_summary'],
+        'behavior_trend': analytics['behavior_trend'],
+        'event_history': analytics['event_history'],
+        'settings': {
+            'confetti_enabled': bool(settings.confetti_enabled),
+            'sounds_enabled': bool(settings.sounds_enabled),
+            'timeout_default_minutes': max(1, int(settings.timeout_default_minutes or 5)),
+            'timeout_default_star_loss': max(0, int(settings.timeout_default_star_loss or 1)),
+            'timeout_default_reward_minutes_loss': max(0, int(settings.timeout_default_reward_minutes_loss or 10)),
+        },
+        'recent_redemptions': [{
+            'id': row.id,
+            'child_name': row.child_name,
+            'reward_label': row.reward_label,
+            'stars_spent': int(row.stars_spent or 0),
+            'redeemed_by': row.redeemed_by,
+            'created_at': row.created_at.isoformat() if row.created_at else '',
+        } for row in redemptions],
+        'recent_timeouts': [{
+            'id': row.id,
+            'child_name': row.child_name,
+            'reason': row.reason,
+            'timeout_minutes': int(row.timeout_minutes or 0),
+            'stars_deducted': int(row.stars_deducted or 0),
+            'reward_minutes_lost': int(row.reward_minutes_lost or 0),
+            'created_by': row.created_by,
+            'created_at': row.created_at.isoformat() if row.created_at else '',
+        } for row in timeouts],
+        'repair_tasks': [{
+            'id': row.id,
+            'timeout_id': row.timeout_id,
+            'child_name': row.child_name,
+            'task_text': row.task_text,
+            'completed': bool(row.completed),
+            'completed_by': row.completed_by or '',
+            'completed_at': row.completed_at.isoformat() if row.completed_at else '',
+            'created_at': row.created_at.isoformat() if row.created_at else '',
+        } for row in repairs],
+        'parent_action_tasks': [{
+            'id': row.id,
+            'redemption_id': row.redemption_id,
+            'child_name': row.child_name,
+            'reward_label': row.reward_label,
+            'parent_name': row.parent_name,
+            'chore_id': row.chore_id,
+            'done': bool(getattr(db.session.get(Chore, row.chore_id), 'done', False)) if row.chore_id else False,
+            'created_at': row.created_at.isoformat() if row.created_at else '',
+        } for row in parent_action_rows],
+        'child_locks': {
+            child_name: child_name in pending_repair_children
+            for child_name in _KID_MEMBERS
+        },
+        'pending_repair_message': 'Complete the repair task before rewards and privilege redemptions resume.',
+        'discipline_methods': list(_DISCIPLINE_METHODS),
+        'can_manage': _can_manage_kid_rewards(actor_name),
+    }
 
 
 def _get_or_create_household_routine_state(actor: str | None = None) -> HouseholdRoutineState:
@@ -83,6 +928,7 @@ def _build_routine_payload(state: HouseholdRoutineState) -> dict:
         state.bedtime_anchor_reader or 'Rachel',
         today,
     )
+    bedtime_child_assignments = _bedtime_child_assignments_for_reader(bedtime_reader)
     completed_at = None
     if state.updated_at:
         completed_at = state.updated_at.replace(microsecond=0).isoformat() + 'Z'
@@ -93,6 +939,8 @@ def _build_routine_payload(state: HouseholdRoutineState) -> dict:
         'bedtime': {
             'for_date': today.isoformat(),
             'reader': bedtime_reader,
+            'book_picker': bedtime_child_assignments['book_picker'],
+            'movie_picker': bedtime_child_assignments['movie_picker'],
             'anchor_date': (state.bedtime_anchor_date or today).isoformat(),
             'anchor_reader': state.bedtime_anchor_reader or 'Rachel',
             'alternates_with': 'Mykal' if bedtime_reader == 'Rachel' else 'Rachel',
@@ -246,13 +1094,16 @@ def _coalesce_timestamp(*values):
 @main_bp.route('/')
 def index():
     config = current_app.config['HOMEHUB_CONFIG']
-    current_member_name = sanitize_text(session.get('current_member') or '').strip() or sanitize_text(config.get('admin_name', 'Administrator'))
+    current_member_name = _current_actor_name()
     current_member_row = FamilyMember.query.filter_by(name=current_member_name).first()
     routine_state = _get_or_create_household_routine_state(current_member_name)
     routines = _build_routine_payload(routine_state)
+    rewards_state = _kid_reward_state_payload(current_member_name)
+    parent_helper_summary = _parent_helper_summary(current_member_name)
     current_member_status_text = ''
     if current_member_row and (current_member_row.status or '').strip():
         current_member_status_text = current_member_row.status
+    can_manage_kid_rewards = _can_manage_kid_rewards(current_member_name)
     assigned_open_tasks = [
         row for row in (
             Chore.query.filter(Chore.done.is_(False))
@@ -414,6 +1265,9 @@ def index():
         current_member_mini_slideshow_enabled=bool(getattr(current_member_row, 'mini_slideshow_enabled', False)),
         family_notice_summary=family_notice_summary,
         routines=routines,
+        rewards_summary=rewards_state,
+        can_manage_kid_rewards=can_manage_kid_rewards,
+        parent_helper_summary=parent_helper_summary,
         timeline_media_items=timeline_media_items,
     )
 
@@ -632,9 +1486,380 @@ def api_routine_bath_complete():
 
 @main_bp.route('/api/routines', methods=['GET'])
 def api_routine_snapshot():
-    actor = sanitize_text(session.get('current_member') or '').strip() or sanitize_text(current_app.config.get('HOMEHUB_CONFIG', {}).get('admin_name', 'Administrator'))
+    actor = _current_actor_name()
     row = _get_or_create_household_routine_state(actor)
     return jsonify({'ok': True, 'routines': _build_routine_payload(row)})
+
+
+@main_bp.route('/gold-stars', methods=['GET'])
+def gold_stars_dashboard():
+    actor = _current_actor_name()
+    kid_view = str(request.args.get('kid_view') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
+    return render_template(
+        'rewards.html',
+        rewards_state=_kid_reward_state_payload(actor),
+        actor_name=actor,
+        kid_view=kid_view,
+    )
+
+
+@main_bp.route('/api/rewards/state', methods=['GET'])
+def api_rewards_state():
+    actor = _current_actor_name()
+    return jsonify({'ok': True, 'state': _kid_reward_state_payload(actor)})
+
+
+@main_bp.route('/api/rewards/stars', methods=['POST'])
+def api_rewards_adjust_stars():
+    actor = _current_actor_name()
+    if not _can_manage_kid_rewards(actor):
+        return jsonify({'ok': False, 'error': 'Only Rachel or Mykal can change rewards right now.'}), 403
+
+    data = request.get_json(silent=True) or {}
+    child_name = sanitize_text(data.get('child_name') or '').strip()
+    if child_name not in _KID_MEMBERS:
+        return jsonify({'ok': False, 'error': 'Choose Avery or Harley'}), 400
+    try:
+        delta = int(data.get('delta'))
+    except (TypeError, ValueError):
+        return jsonify({'ok': False, 'error': 'delta must be an integer'}), 400
+    if delta == 0:
+        return jsonify({'ok': False, 'error': 'delta must not be 0'}), 400
+    if delta < -10 or delta > 10:
+        return jsonify({'ok': False, 'error': 'delta must be between -10 and 10'}), 400
+    if delta > 0 and sanitize_text(child_name).strip().lower() == sanitize_text(actor).strip().lower():
+        return jsonify({'ok': False, 'error': 'You cannot give yourself stars.'}), 403
+    if delta > 0 and _child_has_pending_repair(child_name):
+        return jsonify({'ok': False, 'error': 'Repair task must be completed before adding stars.'}), 409
+
+    profile = KidRewardProfile.query.filter_by(child_name=child_name).first()
+    if not profile:
+        _ensure_kid_reward_profiles(actor)
+        profile = KidRewardProfile.query.filter_by(child_name=child_name).first()
+    if not profile:
+        return jsonify({'ok': False, 'error': 'Could not load reward profile'}), 500
+
+    previous = max(0, int(profile.stars or 0))
+    profile.stars = max(0, previous + delta)
+    milestones_reached = _reward_milestones_crossed(previous, profile.stars)
+    profile.updated_by = actor
+    db.session.add(profile)
+    reason = sanitize_text(data.get('reason') or '').strip()[:256] or None
+    db.session.add(KidRewardEvent(
+        child_name=child_name,
+        delta=delta,
+        reason=reason,
+        created_by=actor,
+    ))
+    _publish_reward_event_notification(
+        child_name=child_name,
+        delta=delta,
+        actor_name=actor,
+        reason=reason,
+    )
+    for milestone in milestones_reached:
+        _publish_kid_reward_milestone_notification(child_name, profile.stars, milestone, actor)
+    db.session.commit()
+    return jsonify({
+        'ok': True,
+        'state': _kid_reward_state_payload(actor),
+        'effects': {
+            'child_name': child_name,
+            'delta': delta,
+            'milestones_reached': milestones_reached,
+        },
+    })
+
+
+@main_bp.route('/api/rewards/rules', methods=['PUT'])
+def api_rewards_update_rules():
+    actor = _current_actor_name()
+    if not _can_manage_kid_rewards(actor):
+        return jsonify({'ok': False, 'error': 'Only Rachel or Mykal can change rewards right now.'}), 403
+
+    data = request.get_json(silent=True) or {}
+    incoming_rules = data.get('rules')
+    if not isinstance(incoming_rules, list) or not incoming_rules:
+        return jsonify({'ok': False, 'error': 'rules must be a non-empty list'}), 400
+
+    sanitized_rules = []
+    for index, raw in enumerate(incoming_rules):
+        if not isinstance(raw, dict):
+            return jsonify({'ok': False, 'error': 'Each rule must be an object'}), 400
+        behavior_kind = sanitize_text(raw.get('behavior_kind') or '').strip().lower()
+        if behavior_kind not in {'do', 'dont'}:
+            return jsonify({'ok': False, 'error': 'behavior_kind must be do or dont'}), 400
+        title = sanitize_text(raw.get('title') or '').strip()
+        if not title:
+            return jsonify({'ok': False, 'error': 'Each rule needs a title'}), 400
+        try:
+            points = int(raw.get('points'))
+        except (TypeError, ValueError):
+            return jsonify({'ok': False, 'error': 'Each rule needs numeric points'}), 400
+        points = max(-10, min(10, points))
+        emoji = sanitize_text(raw.get('emoji') or '').strip()[:16] or ('⭐' if behavior_kind == 'do' else '🚫')
+        sanitized_rules.append({
+            'behavior_kind': behavior_kind,
+            'title': title[:256],
+            'points': points,
+            'emoji': emoji,
+            'sort_order': index,
+        })
+
+    (
+        KidRewardRule.query
+        .filter(KidRewardRule.behavior_kind.in_(['do', 'dont']))
+        .delete(synchronize_session=False)
+    )
+    for rule in sanitized_rules:
+        db.session.add(KidRewardRule(
+            behavior_kind=rule['behavior_kind'],
+            title=rule['title'],
+            points=rule['points'],
+            emoji=rule['emoji'],
+            sort_order=rule['sort_order'],
+            active=True,
+            created_by=actor,
+            updated_by=actor,
+        ))
+    db.session.commit()
+    return jsonify({'ok': True, 'state': _kid_reward_state_payload(actor)})
+
+
+@main_bp.route('/api/rewards/settings', methods=['PUT'])
+def api_rewards_update_settings():
+    actor = _current_actor_name()
+    if not _can_manage_kid_rewards(actor):
+        return jsonify({'ok': False, 'error': 'Only Rachel or Mykal can change rewards right now.'}), 403
+    data = request.get_json(silent=True) or {}
+    row = _get_or_create_kid_reward_settings(actor)
+    row.confetti_enabled = bool(data.get('confetti_enabled', row.confetti_enabled))
+    row.sounds_enabled = bool(data.get('sounds_enabled', row.sounds_enabled))
+    try:
+        timeout_minutes = int(data.get('timeout_default_minutes', row.timeout_default_minutes))
+        timeout_star_loss = int(data.get('timeout_default_star_loss', row.timeout_default_star_loss))
+        timeout_reward_minutes_loss = int(data.get('timeout_default_reward_minutes_loss', row.timeout_default_reward_minutes_loss))
+    except (TypeError, ValueError):
+        return jsonify({'ok': False, 'error': 'Timeout defaults must be numbers'}), 400
+    row.timeout_default_minutes = max(1, min(30, timeout_minutes))
+    row.timeout_default_star_loss = max(0, min(5, timeout_star_loss))
+    row.timeout_default_reward_minutes_loss = max(0, min(120, timeout_reward_minutes_loss))
+    row.updated_by = actor
+    db.session.add(row)
+    db.session.commit()
+    return jsonify({'ok': True, 'state': _kid_reward_state_payload(actor)})
+
+
+@main_bp.route('/api/rewards/reward-options', methods=['PUT'])
+def api_rewards_update_reward_options():
+    actor = _current_actor_name()
+    if not _can_manage_kid_rewards(actor):
+        return jsonify({'ok': False, 'error': 'Only Rachel or Mykal can change rewards right now.'}), 403
+    data = request.get_json(silent=True) or {}
+    incoming_options = data.get('options')
+    if not isinstance(incoming_options, dict):
+        return jsonify({'ok': False, 'error': 'options must be an object keyed by child name'}), 400
+
+    sanitized_by_child: dict[str, list[dict]] = {}
+    for child_name in _KID_MEMBERS:
+        raw_options = incoming_options.get(child_name, [])
+        if not isinstance(raw_options, list):
+            return jsonify({'ok': False, 'error': f'options for {child_name} must be a list'}), 400
+        if len(raw_options) > 3:
+            return jsonify({'ok': False, 'error': f'{child_name} can only have up to 3 reward options'}), 400
+        normalized = []
+        for raw in raw_options:
+            if not isinstance(raw, dict):
+                return jsonify({'ok': False, 'error': f'Each reward option for {child_name} must be an object'}), 400
+            reward_label = sanitize_text(raw.get('reward_label') or '').strip()[:256]
+            if not reward_label:
+                continue
+            try:
+                stars_required = int(raw.get('stars_required'))
+            except (TypeError, ValueError):
+                return jsonify({'ok': False, 'error': f'Stars required for {child_name} must be a number'}), 400
+            normalized.append({
+                'reward_label': reward_label,
+                'stars_required': max(1, min(100, stars_required)),
+            })
+        if not normalized:
+            return jsonify({'ok': False, 'error': f'{child_name} must have at least 1 reward option'}), 400
+        sanitized_by_child[child_name] = normalized[:3]
+
+    (
+        KidRewardRule.query
+        .filter(KidRewardRule.behavior_kind == 'reward_option')
+        .delete(synchronize_session=False)
+    )
+    for child_name in _KID_MEMBERS:
+        for index, option in enumerate(sanitized_by_child[child_name]):
+            db.session.add(KidRewardRule(
+                behavior_kind='reward_option',
+                title=option['reward_label'],
+                points=option['stars_required'],
+                emoji=child_name,
+                sort_order=index,
+                active=True,
+                created_by=actor,
+                updated_by=actor,
+            ))
+    db.session.commit()
+    return jsonify({'ok': True, 'state': _kid_reward_state_payload(actor)})
+
+
+@main_bp.route('/api/rewards/redeem', methods=['POST'])
+def api_rewards_redeem():
+    actor = _current_actor_name()
+    if not _can_manage_kid_rewards(actor):
+        return jsonify({'ok': False, 'error': 'Only Rachel or Mykal can change rewards right now.'}), 403
+    data = request.get_json(silent=True) or {}
+    child_name = sanitize_text(data.get('child_name') or '').strip()
+    if child_name not in _KID_MEMBERS:
+        return jsonify({'ok': False, 'error': 'Choose Avery or Harley'}), 400
+    requires_parent_action = bool(data.get('requires_parent_action', True))
+    reward_option_id = data.get('reward_option_id')
+    reward_label = ''
+    stars_spent = 0
+    if reward_option_id is not None:
+        try:
+            option_id = int(reward_option_id)
+        except (TypeError, ValueError):
+            return jsonify({'ok': False, 'error': 'reward_option_id must be an integer'}), 400
+        option = db.session.get(KidRewardRule, option_id)
+        if not option or (not bool(option.active)) or sanitize_text(option.behavior_kind or '').strip().lower() != 'reward_option':
+            return jsonify({'ok': False, 'error': 'Reward option not found'}), 404
+        if sanitize_text(option.emoji or '').strip() != child_name:
+            return jsonify({'ok': False, 'error': f'Reward option does not belong to {child_name}'}), 400
+        reward_label = sanitize_text(option.title or '').strip()[:256]
+        stars_spent = max(1, min(100, int(option.points or 1)))
+    else:
+        reward_label = sanitize_text(data.get('reward_label') or '').strip()
+        if not reward_label:
+            return jsonify({'ok': False, 'error': 'Reward label is required'}), 400
+        try:
+            stars_spent = int(data.get('stars_spent'))
+        except (TypeError, ValueError):
+            return jsonify({'ok': False, 'error': 'stars_spent must be an integer'}), 400
+        if stars_spent <= 0:
+            return jsonify({'ok': False, 'error': 'stars_spent must be greater than 0'}), 400
+    if _child_has_pending_repair(child_name):
+        return jsonify({'ok': False, 'error': 'Repair task must be completed before redeeming rewards.'}), 409
+
+    profile = KidRewardProfile.query.filter_by(child_name=child_name).first()
+    if not profile:
+        _ensure_kid_reward_profiles(actor)
+        profile = KidRewardProfile.query.filter_by(child_name=child_name).first()
+    if not profile:
+        return jsonify({'ok': False, 'error': 'Could not load reward profile'}), 500
+    available = max(0, int(profile.stars or 0))
+    if stars_spent > available:
+        return jsonify({'ok': False, 'error': f'{child_name} only has {available} stars available'}), 400
+    profile.stars = available - stars_spent
+    profile.updated_by = actor
+    db.session.add(profile)
+    redemption = KidRewardRedemption(
+        child_name=child_name,
+        reward_label=reward_label[:256],
+        stars_spent=stars_spent,
+        redeemed_by=actor,
+    )
+    db.session.add(redemption)
+    db.session.flush()
+    if requires_parent_action:
+        _create_parent_reward_tasks(redemption=redemption, actor_name=actor)
+    db.session.add(KidRewardEvent(
+        child_name=child_name,
+        delta=-stars_spent,
+        reason=f"Redeemed: {reward_label[:200]}",
+        created_by=actor,
+    ))
+    db.session.commit()
+    return jsonify({'ok': True, 'state': _kid_reward_state_payload(actor)})
+
+
+@main_bp.route('/api/rewards/timeout', methods=['POST'])
+def api_rewards_timeout():
+    actor = _current_actor_name()
+    if not _can_manage_kid_rewards(actor):
+        return jsonify({'ok': False, 'error': 'Only Rachel or Mykal can change rewards right now.'}), 403
+    data = request.get_json(silent=True) or {}
+    child_name = sanitize_text(data.get('child_name') or '').strip()
+    if child_name not in _KID_MEMBERS:
+        return jsonify({'ok': False, 'error': 'Choose Avery or Harley'}), 400
+    reason = sanitize_text(data.get('reason') or '').strip()
+    if not reason:
+        return jsonify({'ok': False, 'error': 'Reason is required for timeout'}), 400
+    repair_task_text = sanitize_text(data.get('repair_task') or '').strip()[:256] or _DEFAULT_REPAIR_TASK
+
+    settings = _get_or_create_kid_reward_settings(actor)
+    try:
+        timeout_minutes = int(data.get('timeout_minutes', settings.timeout_default_minutes))
+        stars_deducted = int(data.get('stars_deducted', settings.timeout_default_star_loss))
+        reward_minutes_lost = int(data.get('reward_minutes_lost', settings.timeout_default_reward_minutes_loss))
+    except (TypeError, ValueError):
+        return jsonify({'ok': False, 'error': 'Timeout values must be numbers'}), 400
+    timeout_minutes = max(1, min(30, timeout_minutes))
+    stars_deducted = max(0, min(5, stars_deducted))
+    reward_minutes_lost = max(0, min(120, reward_minutes_lost))
+
+    profile = KidRewardProfile.query.filter_by(child_name=child_name).first()
+    if not profile:
+        _ensure_kid_reward_profiles(actor)
+        profile = KidRewardProfile.query.filter_by(child_name=child_name).first()
+    if not profile:
+        return jsonify({'ok': False, 'error': 'Could not load reward profile'}), 500
+
+    profile.stars = max(0, int(profile.stars or 0) - stars_deducted)
+    profile.updated_by = actor
+    db.session.add(profile)
+    timeout_row = KidRewardTimeout(
+        child_name=child_name,
+        reason=reason[:256],
+        timeout_minutes=timeout_minutes,
+        stars_deducted=stars_deducted,
+        reward_minutes_lost=reward_minutes_lost,
+        created_by=actor,
+    )
+    db.session.add(timeout_row)
+    db.session.flush()
+    db.session.add(KidRewardRepairTask(
+        timeout_id=timeout_row.id,
+        child_name=child_name,
+        task_text=repair_task_text,
+        completed=False,
+    ))
+    if stars_deducted > 0:
+        db.session.add(KidRewardEvent(
+            child_name=child_name,
+            delta=-stars_deducted,
+            reason=f"Timeout: {reason[:200]}",
+            created_by=actor,
+        ))
+    db.session.commit()
+    return jsonify({'ok': True, 'state': _kid_reward_state_payload(actor)})
+
+
+@main_bp.route('/api/rewards/repair/complete', methods=['POST'])
+def api_rewards_complete_repair():
+    actor = _current_actor_name()
+    if not _can_manage_kid_rewards(actor):
+        return jsonify({'ok': False, 'error': 'Only Rachel or Mykal can change rewards right now.'}), 403
+    data = request.get_json(silent=True) or {}
+    try:
+        repair_id = int(data.get('repair_id'))
+    except (TypeError, ValueError):
+        return jsonify({'ok': False, 'error': 'repair_id must be an integer'}), 400
+    repair = db.session.get(KidRewardRepairTask, repair_id)
+    if not repair:
+        return jsonify({'ok': False, 'error': 'Repair task not found'}), 404
+    if repair.completed:
+        return jsonify({'ok': True, 'state': _kid_reward_state_payload(actor)})
+    repair.completed = True
+    repair.completed_at = datetime.utcnow()
+    repair.completed_by = actor
+    db.session.add(repair)
+    db.session.commit()
+    return jsonify({'ok': True, 'state': _kid_reward_state_payload(actor)})
 
 
 def _serialize_library_book(row: LibraryBookLoan) -> dict:
