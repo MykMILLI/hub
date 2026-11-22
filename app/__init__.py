@@ -553,6 +553,7 @@ def create_app(test_config: dict | None = None):
 
     @app.before_request
     def enforce_module_permissions():
+        kiosk_admin_names = {'rachel', 'mykal'}
         path = (request.path or '').rstrip('/') or '/'
         if path.startswith('/static/') or path.startswith('/uploads/') or path.startswith('/sw.js') or path.startswith('/manifest.webmanifest'):
             return None
@@ -567,7 +568,7 @@ def create_app(test_config: dict | None = None):
         if path.startswith('/api/supabase/auth/') or path.startswith('/api/supabase/client-config'):
             return None
 
-        if current_app.config.get('TESTING') and not path.startswith('/api/app-modules'):
+        if current_app.config.get('TESTING') and not path.startswith('/api/app-modules') and not session.get('kid_kiosk_mode'):
             return None
 
         # Feature hard-disables (kept in codebase, but intentionally turned off).
@@ -589,6 +590,24 @@ def create_app(test_config: dict | None = None):
                 return {'ok': False, 'error': 'Authentication required'}, 401
             return redirect(url_for('main.login'))
 
+        current_member_name = str(session.get('current_member') or '').strip().lower()
+        kiosk_mode_enabled = bool(session.get('kid_kiosk_mode'))
+        if kiosk_mode_enabled and current_member_name not in kiosk_admin_names:
+            allowed_exact_paths = {
+                '/kids-stars',
+                '/api/current-member',
+                '/api/member-logout',
+            }
+            allowed_prefixes = (
+                '/api/rewards/state',
+                '/api/rewards/claim',
+            )
+            if path in allowed_exact_paths or any(path == prefix or path.startswith(prefix + '/') for prefix in allowed_prefixes):
+                return None
+            if path.startswith('/api/'):
+                return {'ok': False, 'error': 'This tablet is locked to Kid Star Board mode.'}, 403
+            return redirect(url_for('main.kids_stars_tablet'))
+
         exact_route_map = {
             '/': 'welcome',
             '/timeline': 'timeline',
@@ -599,6 +618,7 @@ def create_app(test_config: dict | None = None):
             '/shopping': 'shopping_list',
             '/chores': 'chores',
             '/gold-stars': 'reward_system',
+            '/kids-stars': 'reward_system',
             '/recipes': 'recipes',
             '/expiry': 'expiry_tracker',
             '/shorten': 'url_shortener',

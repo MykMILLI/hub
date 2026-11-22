@@ -1,101 +1,70 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="max-w-screen-2xl mx-auto space-y-6">
-	<div class="card p-6">
+	<div class="card p-5 md:p-6">
 		<div class="flex flex-wrap items-center justify-between gap-3">
 			<div>
 				<h1 class="text-2xl font-bold"><i class="fa-solid fa-video mr-2 text-indigo-500"></i>Camera Center</h1>
-				<p class="text-sm text-gray-600 dark:text-gray-300">Watch camera previews, control PTZ, and capture snapshots or recordings.</p>
+				<p class="text-sm text-gray-600 dark:text-gray-300">Live views first, focused controls on demand, and safer PTZ stop behavior.</p>
 			</div>
-			<div class="flex flex-wrap items-center gap-2">
-				<div class="inline-flex rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden text-xs">
-					<button type="button" class="px-2.5 py-1.5 bg-white dark:bg-gray-900/40 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 split-layout-btn" data-layout="1">1-up</button>
-					<button type="button" class="px-2.5 py-1.5 bg-white dark:bg-gray-900/40 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 split-layout-btn" data-layout="2">2-up</button>
-					<button type="button" class="px-2.5 py-1.5 bg-white dark:bg-gray-900/40 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 split-layout-btn" data-layout="4">4-up</button>
-				</div>
-				<div class="text-xs rounded-lg px-3 py-1 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-700">
-					Signed in as {{ current_member_name }}
-				</div>
-			</div>
+			<div class="text-xs text-gray-500 dark:text-gray-400">Camera controls require a configured camera admin account.</div>
 		</div>
 	</div>
 
 	{% if cameras %}
 	<div id="cameraGrid" class="grid grid-cols-1 xl:grid-cols-2 gap-4">
 		{% for camera in cameras %}
-		<section class="card p-5 space-y-4" data-camera-id="{{ camera.id }}">
-			<div class="flex items-center justify-between gap-2">
+		<section class="card p-4 md:p-5 space-y-3" data-camera-id="{{ camera.id }}">
+			<div class="flex items-start justify-between gap-3">
 				<div>
 					<h2 class="text-lg font-semibold">{{ camera.name }}</h2>
-					<div class="text-xs text-gray-500">Host: {{ camera.host or 'Not configured' }}</div>
+					<div class="text-xs text-gray-500 dark:text-gray-400">Stream: <span id="streamState_{{ camera.id }}">Connecting…</span></div>
+					<div class="text-xs text-gray-500 dark:text-gray-400">Controls: <span id="controlState_{{ camera.id }}">{{ 'Ready' if can_manage_cameras else 'View only' }}</span></div>
 				</div>
-				<div class="flex flex-wrap gap-2">
-					<button type="button" class="btn btn-secondary text-xs focus-camera-btn" data-camera-id="{{ camera.id }}">
-						<i class="fa-solid fa-expand mr-1"></i>Fullscreen
-					</button>
-					<button type="button" class="btn btn-secondary text-xs refresh-frame-btn" data-camera-id="{{ camera.id }}">
-						<i class="fa-solid fa-rotate mr-1"></i>Reconnect
-					</button>
+				<div class="flex flex-wrap gap-1.5 text-[11px]">
+					{% if camera.capabilities.pan %}<span class="px-2 py-1 rounded-full bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-200">Pan</span>{% endif %}
+					{% if camera.capabilities.tilt %}<span class="px-2 py-1 rounded-full bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-200">Tilt</span>{% endif %}
+					{% if camera.capabilities.optical_zoom %}<span class="px-2 py-1 rounded-full bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-200">Optical Zoom</span>{% endif %}
+					{% if camera.capabilities.digital_zoom %}<span class="px-2 py-1 rounded-full bg-cyan-50 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-200">Digital Zoom</span>{% endif %}
 				</div>
-			</div>
-			<div id="cameraViewport_{{ camera.id }}" class="rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 bg-black min-h-[220px] flex items-center justify-center">
-				<img id="cameraFrame_{{ camera.id }}" src="{{ camera.stream_url }}?stream=sub&fps=8&quality=5&t={{ loop.index }}" alt="Live view for {{ camera.name }}" class="w-full h-full object-contain">
-			</div>
-			<div id="cameraStatus_{{ camera.id }}" class="text-xs text-gray-500">Live stream is connecting...</div>
-			<div class="flex flex-wrap items-end gap-2">
-				<label class="text-xs text-gray-600 dark:text-gray-300">View Mode
-					<select id="cameraLiveMode_{{ camera.id }}" class="mt-1 p-1.5 border rounded dark:bg-gray-800 dark:border-gray-600 text-xs">
-						<option value="balanced">Balanced</option>
-						<option value="smooth">Smooth motion</option>
-						<option value="quality">Higher quality</option>
-					</select>
-				</label>
-				<button type="button" class="btn btn-secondary text-xs audio-toggle-btn" data-camera-id="{{ camera.id }}">
-					<i class="fa-solid fa-volume-high mr-1"></i>Play Audio
-				</button>
-				<span id="cameraAudioStatus_{{ camera.id }}" class="text-xs text-gray-500">Audio off.</span>
 			</div>
 
-			{% if can_manage_cameras and camera.ptz_enabled %}
-			<div class="rounded-xl border border-gray-200 dark:border-gray-700 p-3">
-				<div class="text-xs uppercase tracking-wide text-gray-500 mb-2">PTZ Controls</div>
-				<div class="grid grid-cols-3 gap-2 max-w-xs">
-					<button type="button" class="btn btn-secondary text-xs ptz-btn" data-camera-id="{{ camera.id }}" data-action="left_up">↖</button>
-					<button type="button" class="btn btn-secondary text-xs ptz-btn" data-camera-id="{{ camera.id }}" data-action="up">↑</button>
-					<button type="button" class="btn btn-secondary text-xs ptz-btn" data-camera-id="{{ camera.id }}" data-action="right_up">↗</button>
-					<button type="button" class="btn btn-secondary text-xs ptz-btn" data-camera-id="{{ camera.id }}" data-action="left">←</button>
-					<button type="button" class="btn btn-secondary text-xs ptz-btn" data-camera-id="{{ camera.id }}" data-action="stop">■</button>
-					<button type="button" class="btn btn-secondary text-xs ptz-btn" data-camera-id="{{ camera.id }}" data-action="right">→</button>
-					<button type="button" class="btn btn-secondary text-xs ptz-btn" data-camera-id="{{ camera.id }}" data-action="left_down">↙</button>
-					<button type="button" class="btn btn-secondary text-xs ptz-btn" data-camera-id="{{ camera.id }}" data-action="down">↓</button>
-					<button type="button" class="btn btn-secondary text-xs ptz-btn" data-camera-id="{{ camera.id }}" data-action="right_down">↘</button>
-				</div>
-				<div class="flex gap-2 mt-2">
-					<button type="button" class="btn btn-secondary text-xs ptz-btn" data-camera-id="{{ camera.id }}" data-action="zoom_in">Zoom +</button>
-					<button type="button" class="btn btn-secondary text-xs ptz-btn" data-camera-id="{{ camera.id }}" data-action="zoom_out">Zoom -</button>
-				</div>
+			<div id="cameraViewport_{{ camera.id }}" class="aspect-video rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 bg-black flex items-center justify-center">
+				<img id="cameraFrame_{{ camera.id }}" alt="Live view for {{ camera.name }}" class="w-full h-full object-contain">
 			</div>
-			{% endif %}
 
-			{% if can_manage_cameras %}
-			<div class="rounded-xl border border-gray-200 dark:border-gray-700 p-3 space-y-3">
-				<div class="text-xs uppercase tracking-wide text-gray-500">Capture Tools</div>
-				<div class="flex flex-wrap gap-2">
-					<button type="button" class="btn btn-primary text-sm snapshot-btn" data-camera-id="{{ camera.id }}"><i class="fa-solid fa-camera mr-1"></i>Capture Snapshot</button>
-					<button type="button" class="btn btn-secondary text-sm record-btn" data-camera-id="{{ camera.id }}"><i class="fa-solid fa-record-vinyl mr-1"></i>Record Clip</button>
-				</div>
-				<div class="flex flex-wrap items-center gap-2">
-					<label class="text-xs">Duration (seconds)
-						<input id="recordDuration_{{ camera.id }}" type="number" min="5" max="300" value="20" class="mt-1 w-24 p-1.5 border rounded dark:bg-gray-800 dark:border-gray-600">
+			<div class="flex flex-wrap items-center gap-2">
+				<button type="button" class="btn btn-secondary text-xs audio-toggle-btn" data-camera-id="{{ camera.id }}"><i class="fa-solid fa-volume-high mr-1"></i>Sound</button>
+				{% if can_manage_cameras %}
+				<button type="button" class="btn btn-secondary text-xs snapshot-btn" data-camera-id="{{ camera.id }}"><i class="fa-solid fa-camera mr-1"></i>Snapshot</button>
+				{% endif %}
+				<button type="button" class="btn btn-secondary text-xs focus-camera-btn" data-camera-id="{{ camera.id }}"><i class="fa-solid fa-expand mr-1"></i>Expand</button>
+				{% if can_manage_cameras and camera.ptz_enabled %}
+				<button type="button" class="btn btn-primary text-xs open-control-btn" data-camera-id="{{ camera.id }}"><i class="fa-solid fa-gamepad mr-1"></i>Control</button>
+				{% endif %}
+				<button type="button" class="btn btn-secondary text-xs reconnect-btn ml-auto" data-camera-id="{{ camera.id }}"><i class="fa-solid fa-rotate mr-1"></i>Retry</button>
+			</div>
+
+			<div id="cameraCaptureResult_{{ camera.id }}" class="text-xs text-gray-500 dark:text-gray-400 min-h-[1.25rem]"></div>
+
+			<details class="rounded-xl border border-gray-200 dark:border-gray-700 p-3">
+				<summary class="cursor-pointer text-xs font-semibold uppercase tracking-wide text-gray-500">Connection and diagnostics</summary>
+				<div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+					<label class="text-gray-600 dark:text-gray-300">Live mode
+						<select id="cameraLiveMode_{{ camera.id }}" class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
+							<option value="balanced">Balanced</option>
+							<option value="smooth">Smooth motion</option>
+							<option value="quality">Higher quality</option>
+						</select>
 					</label>
-					<select id="recordStream_{{ camera.id }}" class="mt-4 p-1.5 border rounded dark:bg-gray-800 dark:border-gray-600 text-xs">
-						<option value="main">Main stream</option>
-						<option value="sub">Sub stream</option>
-					</select>
+					<div class="space-y-1">
+						<div><span class="font-semibold">Host:</span> {{ camera.host or 'Not configured' }}</div>
+						<div><span class="font-semibold">Protocol:</span> {{ camera.control_protocol }}</div>
+						<div><span class="font-semibold">Channel:</span> {{ camera.channel }}</div>
+					</div>
+					<div class="sm:col-span-2 text-gray-500 dark:text-gray-400" id="cameraDiag_{{ camera.id }}">No diagnostics yet.</div>
 				</div>
-				<div id="cameraCaptureResult_{{ camera.id }}" class="text-xs text-gray-500"></div>
-			</div>
-			{% endif %}
+			</details>
 		</section>
 		{% endfor %}
 	</div>
@@ -106,340 +75,770 @@
 	{% endif %}
 </div>
 
-<div id="cameraFocusModal" class="fixed inset-0 z-[80] hidden p-4 md:p-8 bg-black/70">
-	<div class="mx-auto w-full h-full max-w-screen-2xl rounded-2xl bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-700 shadow-xl overflow-hidden flex flex-col">
-		<div class="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-			<div>
-				<h3 id="cameraFocusTitle" class="text-sm font-semibold">Focused Camera</h3>
-				<p id="cameraFocusStatus" class="text-xs text-gray-500">Connecting...</p>
+<div id="cameraFocusModal" class="fixed inset-0 z-[90] hidden p-4 md:p-6 bg-black/75">
+	<div class="mx-auto w-full h-full max-w-screen-2xl max-h-[calc(100dvh-2rem)] rounded-2xl bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-700 shadow-xl overflow-hidden flex flex-col lg:flex-row">
+		<div class="flex-1 min-h-0 p-3 md:p-4 space-y-3 flex flex-col">
+			<div class="flex items-center justify-between gap-2">
+				<div>
+					<h3 id="cameraFocusTitle" class="text-sm font-semibold">Focused Camera</h3>
+					<div class="text-xs text-gray-500 dark:text-gray-400">Stream: <span id="cameraFocusStreamState">Connecting…</span> · Controls: <span id="cameraFocusControlState">Idle</span></div>
+				</div>
+				<div class="flex items-center gap-2">
+					<button type="button" id="cameraFocusReconnectBtn" class="btn btn-secondary text-xs"><i class="fa-solid fa-rotate mr-1"></i>Retry</button>
+					<button type="button" id="cameraFocusFullscreenBtn" class="btn btn-secondary text-xs"><i class="fa-solid fa-expand mr-1"></i>Fullscreen</button>
+					<button type="button" id="cameraFocusCloseBtn" class="btn btn-secondary text-xs"><i class="fa-solid fa-xmark mr-1"></i>Close</button>
+				</div>
 			</div>
-			<div class="flex items-center gap-2">
-				<button type="button" id="cameraFocusReconnectBtn" class="btn btn-secondary text-xs"><i class="fa-solid fa-rotate mr-1"></i>Reconnect</button>
-				<button type="button" id="cameraFocusCloseBtn" class="btn btn-secondary text-xs"><i class="fa-solid fa-xmark mr-1"></i>Close</button>
+			<div id="cameraFocusViewport" class="flex-1 min-h-[280px] rounded-xl overflow-hidden bg-black border border-gray-200 dark:border-gray-700 flex items-center justify-center relative">
+				<img id="cameraFocusFrame" alt="Focused camera stream" class="w-full h-full object-contain select-none" draggable="false">
 			</div>
+			<div id="cameraFocusDiagnostics" class="text-xs text-gray-500 dark:text-gray-400">No diagnostics yet.</div>
 		</div>
-		<div class="flex-1 p-2 md:p-4 overflow-auto">
-			<div id="cameraFocusViewport" class="w-full h-full min-h-[320px] rounded-xl overflow-hidden bg-black border border-gray-200 dark:border-gray-700 flex items-center justify-center">
-				<img id="cameraFocusFrame" alt="Focused camera stream" class="w-full h-full object-contain">
+		<div class="w-full lg:w-[360px] border-t lg:border-t-0 lg:border-l border-gray-200 dark:border-gray-700 p-3 md:p-4 overflow-y-auto space-y-4">
+			<div>
+				<div class="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Directional controls</div>
+				<div id="focusJoystickWrap" class="rounded-xl border border-gray-200 dark:border-gray-700 p-3">
+					<div class="flex justify-center">
+						<div id="focusJoystickBase" class="relative w-44 h-44 rounded-full border border-gray-300 dark:border-gray-600 bg-gray-100/80 dark:bg-slate-800/70 touch-none select-none">
+							<div class="absolute inset-1/2 w-24 h-[1px] -translate-x-1/2 -translate-y-1/2 bg-gray-300 dark:bg-gray-600"></div>
+							<div class="absolute inset-1/2 h-24 w-[1px] -translate-x-1/2 -translate-y-1/2 bg-gray-300 dark:bg-gray-600"></div>
+							<div id="focusJoystickStick" class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-14 h-14 rounded-full bg-indigo-500 text-white shadow-md flex items-center justify-center text-lg">
+								<i class="fa-solid fa-gamepad"></i>
+							</div>
+						</div>
+					</div>
+					<div class="mt-2 text-xs text-gray-500 dark:text-gray-400 text-center">Drag and hold the joystick to move the camera. Release to stop.</div>
+				</div>
+				<button type="button" id="focusStopBtn" class="btn btn-danger h-12 w-full mt-2 justify-center">Stop</button>
+				<div id="focusZoomRow" class="mt-2 grid grid-cols-2 gap-2">
+					<button type="button" class="btn btn-secondary justify-center ptz-hold-btn" data-action="zoom_in" data-requires="optical_zoom">Zoom +</button>
+					<button type="button" class="btn btn-secondary justify-center ptz-hold-btn" data-action="zoom_out" data-requires="optical_zoom">Zoom −</button>
+				</div>
+				<label id="focusSpeedWrap" class="mt-3 block text-xs text-gray-600 dark:text-gray-300">Speed
+					<input id="focusSpeedInput" type="range" min="1" max="64" value="32" class="w-full mt-2">
+				</label>
+				<div id="focusUnsupportedHint" class="mt-2 text-xs text-amber-700 dark:text-amber-300 hidden">Some controls are unavailable for this camera.</div>
 			</div>
+
+			<div class="rounded-xl border border-gray-200 dark:border-gray-700 p-3 space-y-2">
+				<div class="flex items-center justify-between">
+					<div class="text-xs font-semibold uppercase tracking-wide text-gray-500">Digital zoom</div>
+					<div id="digitalZoomFactor" class="text-xs text-gray-500 dark:text-gray-300">1.0×</div>
+				</div>
+				<p class="text-xs text-gray-500 dark:text-gray-400">Enlarges the view only</p>
+				<div class="flex items-center gap-2">
+					<button type="button" id="digitalZoomOutBtn" class="btn btn-secondary text-xs">−</button>
+					<input id="digitalZoomSlider" type="range" min="1" max="4" step="0.1" value="1" class="flex-1">
+					<button type="button" id="digitalZoomInBtn" class="btn btn-secondary text-xs">+</button>
+					<button type="button" id="digitalZoomResetBtn" class="btn btn-secondary text-xs">Reset</button>
+				</div>
+				<div class="text-[11px] text-gray-500 dark:text-gray-400">Drag inside the video area to pan only the enlarged view. The joystick physically moves the camera.</div>
+			</div>
+
+			<details class="rounded-xl border border-gray-200 dark:border-gray-700 p-3">
+				<summary class="cursor-pointer text-xs font-semibold uppercase tracking-wide text-gray-500">Capture settings</summary>
+				<div class="mt-3 space-y-3">
+					<div class="grid grid-cols-2 gap-2">
+						<label class="text-xs text-gray-600 dark:text-gray-300">Duration (sec)
+							<input id="focusRecordDuration" type="number" min="5" max="300" value="20" class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
+						</label>
+						<label class="text-xs text-gray-600 dark:text-gray-300">Quality source
+							<select id="focusRecordStream" class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
+								<option value="main">Main stream</option>
+								<option value="sub">Sub stream</option>
+							</select>
+						</label>
+					</div>
+					<div class="flex flex-wrap gap-2">
+						<button type="button" id="focusSnapshotBtn" class="btn btn-primary text-xs"><i class="fa-solid fa-camera mr-1"></i>Snapshot</button>
+						<button type="button" id="focusRecordBtn" class="btn btn-secondary text-xs"><i class="fa-solid fa-record-vinyl mr-1"></i>Record</button>
+					</div>
+					<div id="focusCaptureResult" class="text-xs text-gray-500 dark:text-gray-400 min-h-[1.25rem]"></div>
+				</div>
+			</details>
 		</div>
 	</div>
 </div>
-{% endblock %}
+<script type="module">
+import { createDigitalZoomController, createPtzHoldController, mapJoystickVectorToAction } from "{{ url_for('static', filename='js/camera_focus_controls.js') }}";
 
-{% block scripts %}
-<script>
-(() => {
-	const cameras = Array.from(document.querySelectorAll('[data-camera-id]')).map(node => node.dataset.cameraId);
-	const cameraGrid = document.getElementById('cameraGrid');
-	const splitButtons = Array.from(document.querySelectorAll('.split-layout-btn'));
-	const cameraFocusModal = document.getElementById('cameraFocusModal');
-	const cameraFocusFrame = document.getElementById('cameraFocusFrame');
-	const cameraFocusTitle = document.getElementById('cameraFocusTitle');
-	const cameraFocusStatus = document.getElementById('cameraFocusStatus');
-	const cameraFocusReconnectBtn = document.getElementById('cameraFocusReconnectBtn');
-	const cameraFocusCloseBtn = document.getElementById('cameraFocusCloseBtn');
-	const liveAudio = new Audio();
-	let activeAudioCameraId = null;
-	let focusedCameraId = null;
-
-	function applySplitLayout(layout) {
-		if (!cameraGrid) return;
-		cameraGrid.classList.remove('grid-cols-1', 'md:grid-cols-2', 'xl:grid-cols-2', 'xl:grid-cols-3', 'xl:grid-cols-4');
-		if (layout === '1') {
-			cameraGrid.classList.add('grid-cols-1');
-		} else if (layout === '4') {
-			cameraGrid.classList.add('grid-cols-1', 'md:grid-cols-2', 'xl:grid-cols-4');
-		} else {
-			cameraGrid.classList.add('grid-cols-1', 'md:grid-cols-2', 'xl:grid-cols-2');
-		}
-		splitButtons.forEach((btn) => {
-			const active = btn.dataset.layout === layout;
-			btn.classList.toggle('bg-indigo-100', active);
-			btn.classList.toggle('dark:bg-indigo-900/30', active);
-		});
-		localStorage.setItem('camera-split-layout', layout);
-	}
-
-	splitButtons.forEach((button) => {
-		button.addEventListener('click', () => applySplitLayout(button.dataset.layout || '2'));
-	});
-	applySplitLayout(localStorage.getItem('camera-split-layout') || '2');
-
-	const reconnectTimers = new Map();
-
-	const getCameraMode = (cameraId) => {
-		const modeInput = document.getElementById(`cameraLiveMode_${cameraId}`);
-		const mode = String(modeInput?.value || 'balanced');
-		if (mode === 'quality') return { stream: 'main', fps: 10, quality: 4, label: 'Higher quality (main stream)' };
-		if (mode === 'smooth') return { stream: 'sub', fps: 12, quality: 5, label: 'Smooth motion (sub stream)' };
-		return { stream: 'sub', fps: 8, quality: 5, label: 'Balanced (sub stream)' };
-	};
-
-	const streamUrl = (cameraId) => {
-		const mode = getCameraMode(cameraId);
-		const base = `/api/cameras/${encodeURIComponent(cameraId)}/stream?stream=${encodeURIComponent(mode.stream)}&fps=${mode.fps}&quality=${mode.quality}`;
-		return `${base}&t=${Date.now()}`;
-	};
-
-	const setCameraStatus = (cameraId, message) => {
-		const status = document.getElementById(`cameraStatus_${cameraId}`);
-		if (status) status.textContent = message;
-	};
-
-	const setAudioStatus = (cameraId, message) => {
-		const status = document.getElementById(`cameraAudioStatus_${cameraId}`);
-		if (status) status.textContent = message;
-	};
-
-	const updateAudioButtons = () => {
-		document.querySelectorAll('.audio-toggle-btn').forEach((button) => {
-			const cameraId = String(button.dataset.cameraId || '');
-			const isActive = activeAudioCameraId === cameraId && !liveAudio.paused;
-			button.innerHTML = isActive
-				? '<i class="fa-solid fa-volume-xmark mr-1"></i>Stop Audio'
-				: '<i class="fa-solid fa-volume-high mr-1"></i>Play Audio';
-			if (!isActive) setAudioStatus(cameraId, 'Audio off.');
-		});
-		if (activeAudioCameraId && !liveAudio.paused) {
-			setAudioStatus(activeAudioCameraId, 'Audio live.');
-		}
-	};
-
-	const cameraName = (cameraId) => {
-		const section = document.querySelector(`[data-camera-id="${cameraId}"]`);
-		const heading = section?.querySelector('h2');
-		return String(heading?.textContent || cameraId || 'Camera');
-	};
-
-	const connectStream = (cameraId) => {
-		const image = document.getElementById(`cameraFrame_${cameraId}`);
-		if (!image) return;
-		const mode = getCameraMode(cameraId);
-		setCameraStatus(cameraId, `Connecting live stream (${mode.label})...`);
-		image.src = streamUrl(cameraId);
-	};
-
-	cameras.forEach((cameraId) => {
-		const image = document.getElementById(`cameraFrame_${cameraId}`);
-		if (!image) return;
-		const modeInput = document.getElementById(`cameraLiveMode_${cameraId}`);
-		if (modeInput) {
-			const saved = localStorage.getItem(`camera-live-mode-${cameraId}`);
-			if (saved) modeInput.value = saved;
-			modeInput.addEventListener('change', () => {
-				localStorage.setItem(`camera-live-mode-${cameraId}`, String(modeInput.value || 'balanced'));
-				connectStream(cameraId);
-			});
-		}
-		image.addEventListener('load', () => {
-			setCameraStatus(cameraId, 'Live stream active.');
-		});
-		image.addEventListener('error', () => {
-			setCameraStatus(cameraId, 'Stream interrupted. Reconnecting...');
-			const existing = reconnectTimers.get(cameraId);
-			if (existing) clearTimeout(existing);
-			const timerId = setTimeout(() => connectStream(cameraId), 1500);
-			reconnectTimers.set(cameraId, timerId);
-		});
-		connectStream(cameraId);
-	});
-
-	document.querySelectorAll('.refresh-frame-btn').forEach((button) => {
-		button.addEventListener('click', () => {
-			connectStream(button.dataset.cameraId);
-		});
-	});
-
-	const focusStreamUrl = (cameraId) => {
-		const base = `/api/cameras/${encodeURIComponent(cameraId)}/stream?stream=main&fps=12&quality=4`;
-		return `${base}&t=${Date.now()}`;
-	};
-
-	const openFocusModal = (cameraId) => {
-		if (!cameraFocusModal || !cameraFocusFrame) return;
-		focusedCameraId = cameraId;
-		cameraFocusTitle.textContent = `${cameraName(cameraId)} (Focused)`;
-		cameraFocusStatus.textContent = 'Connecting focused stream...';
-		cameraFocusFrame.src = focusStreamUrl(cameraId);
-		cameraFocusModal.classList.remove('hidden');
-	};
-
-	const closeFocusModal = () => {
-		if (!cameraFocusModal || !cameraFocusFrame) return;
-		cameraFocusFrame.src = '';
-		cameraFocusModal.classList.add('hidden');
-		focusedCameraId = null;
-	};
-
-	if (cameraFocusFrame) {
-		cameraFocusFrame.addEventListener('load', () => {
-			if (cameraFocusStatus) cameraFocusStatus.textContent = 'Focused stream active.';
-		});
-		cameraFocusFrame.addEventListener('error', () => {
-			if (cameraFocusStatus) cameraFocusStatus.textContent = 'Focused stream interrupted. Use reconnect.';
-		});
-	}
-	if (cameraFocusReconnectBtn) {
-		cameraFocusReconnectBtn.addEventListener('click', () => {
-			if (!focusedCameraId || !cameraFocusFrame) return;
-			cameraFocusStatus.textContent = 'Reconnecting focused stream...';
-			cameraFocusFrame.src = focusStreamUrl(focusedCameraId);
-		});
-	}
-	if (cameraFocusCloseBtn) {
-		cameraFocusCloseBtn.addEventListener('click', () => closeFocusModal());
-	}
-	if (cameraFocusModal) {
-		cameraFocusModal.addEventListener('click', (event) => {
-			if (event.target === cameraFocusModal) closeFocusModal();
-		});
-	}
-
-	document.querySelectorAll('.focus-camera-btn').forEach((button) => {
-		button.addEventListener('click', () => {
-			const cameraId = button.dataset.cameraId;
-			const target = document.getElementById(`cameraViewport_${cameraId}`);
-			const requestFullscreen = target?.requestFullscreen
-				|| target?.webkitRequestFullscreen
-				|| target?.mozRequestFullScreen
-				|| target?.msRequestFullscreen;
-			if (requestFullscreen) {
-				try {
-					requestFullscreen.call(target);
-					setCameraStatus(cameraId, 'Fullscreen mode active.');
-					return;
-				} catch (error) {}
-			}
-			openFocusModal(cameraId);
-			setCameraStatus(cameraId, 'Focused camera mode active.');
-		});
-	});
-
-	const fetchJson = async (url, options = {}, timeoutMs = 12000) => {
-		const controller = new AbortController();
-		const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-		try {
-			const response = await fetch(url, { ...options, signal: controller.signal });
-			const data = await response.json();
-			if (!response.ok || !data.ok) throw new Error(data.error || `Request failed (${response.status})`);
-			return data;
-		} finally {
-			clearTimeout(timeoutId);
-		}
-	};
-
-	document.querySelectorAll('.audio-toggle-btn').forEach((button) => {
-		button.addEventListener('click', async () => {
-			const cameraId = String(button.dataset.cameraId || '');
-			if (!cameraId) return;
-			if (activeAudioCameraId === cameraId && !liveAudio.paused) {
-				liveAudio.pause();
-				liveAudio.src = '';
-				activeAudioCameraId = null;
-				updateAudioButtons();
-				return;
-			}
-			try {
-				const src = `/api/cameras/${encodeURIComponent(cameraId)}/audio?stream=main&bitrate=96&t=${Date.now()}`;
-				liveAudio.src = src;
-				liveAudio.autoplay = true;
-				await liveAudio.play();
-				activeAudioCameraId = cameraId;
-				updateAudioButtons();
-			} catch (error) {
-				setAudioStatus(cameraId, 'Audio failed. Tap Play Audio again.');
-				globalToast('Unable to start camera audio', 'error');
-			}
-		});
-	});
-
-	liveAudio.addEventListener('error', () => {
-		if (activeAudioCameraId) {
-			setAudioStatus(activeAudioCameraId, 'Audio interrupted. Tap Play Audio to reconnect.');
-		}
-	});
-
-	document.querySelectorAll('.ptz-btn').forEach((button) => {
-		button.addEventListener('click', async () => {
-			const cameraId = button.dataset.cameraId;
-			const action = button.dataset.action;
-			button.disabled = true;
-			try {
-				await fetchJson(`/api/cameras/${encodeURIComponent(cameraId)}/ptz`, {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ action, speed: 32 }),
-				});
-				if (action !== 'stop') {
-					setTimeout(() => {
-						fetchJson(`/api/cameras/${encodeURIComponent(cameraId)}/ptz`, {
-							method: 'POST',
-							headers: { 'Content-Type': 'application/json' },
-							body: JSON.stringify({ action: 'stop', speed: 32 }),
-						}, 6000).catch(() => {});
-					}, 300);
-				}
-				globalToast('PTZ command sent', 'success');
-			} catch (error) {
-				globalToast(error.message || 'Unable to send PTZ command', 'error');
-			} finally {
-				button.disabled = false;
-			}
-		});
-	});
-
-	document.querySelectorAll('.snapshot-btn').forEach((button) => {
-		button.addEventListener('click', async () => {
-			const cameraId = button.dataset.cameraId;
-			const result = document.getElementById(`cameraCaptureResult_${cameraId}`);
-			button.disabled = true;
-			if (result) result.textContent = 'Capturing snapshot...';
-			try {
-				const data = await fetchJson(`/api/cameras/${encodeURIComponent(cameraId)}/snapshot`, {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ stream: 'main' }),
-				}, 20000);
-				if (result) result.innerHTML = `Snapshot saved: <a class="underline" href="${data.url}" target="_blank" rel="noreferrer">${data.filename}</a>`;
-				globalToast('Snapshot captured', 'success');
-			} catch (error) {
-				if (result) result.textContent = error.message || 'Unable to capture snapshot';
-				globalToast(error.message || 'Unable to capture snapshot', 'error');
-			} finally {
-				button.disabled = false;
-			}
-		});
-	});
-
-	document.querySelectorAll('.record-btn').forEach((button) => {
-		button.addEventListener('click', async () => {
-			const cameraId = button.dataset.cameraId;
-			const durationInput = document.getElementById(`recordDuration_${cameraId}`);
-			const streamInput = document.getElementById(`recordStream_${cameraId}`);
-			const result = document.getElementById(`cameraCaptureResult_${cameraId}`);
-			const duration_seconds = Number(durationInput?.value || 20);
-			const stream = String(streamInput?.value || 'main');
-			button.disabled = true;
-			if (result) result.textContent = `Recording clip (${duration_seconds}s)...`;
-			try {
-				const data = await fetchJson(`/api/cameras/${encodeURIComponent(cameraId)}/record`, {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ duration_seconds, stream }),
-				}, (Math.max(duration_seconds, 5) * 1000) + 20000);
-				if (result) result.innerHTML = `Recording saved: <a class="underline" href="${data.url}" target="_blank" rel="noreferrer">${data.filename}</a>`;
-				globalToast('Recording completed', 'success');
-			} catch (error) {
-				if (result) result.textContent = error.message || 'Unable to record clip';
-				globalToast(error.message || 'Unable to record clip', 'error');
-			} finally {
-				button.disabled = false;
-			}
-		});
-	});
-
-	updateAudioButtons();
+const cameras = {{ cameras|tojson }};
+const canManage = {{ 'true' if can_manage_cameras else 'false' }};
+const streamStates = new Map();
+const reconnectTimers = new Map();
+const liveAudio = new Audio();
+let activeAudioCameraId = null;
+let focusedCameraId = null;
+const MAX_STREAM_RETRIES = 3;
+const ptzClientIdKey = 'camera-ptz-client-id';
+const ptzClientId = sessionStorage.getItem(ptzClientIdKey) || (() => {
+	const value = `cam-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+	sessionStorage.setItem(ptzClientIdKey, value);
+	return value;
 })();
+
+const cameraFocusModal = document.getElementById('cameraFocusModal');
+const cameraFocusFrame = document.getElementById('cameraFocusFrame');
+const cameraFocusTitle = document.getElementById('cameraFocusTitle');
+const cameraFocusStreamState = document.getElementById('cameraFocusStreamState');
+const cameraFocusControlState = document.getElementById('cameraFocusControlState');
+const cameraFocusDiagnostics = document.getElementById('cameraFocusDiagnostics');
+const cameraFocusReconnectBtn = document.getElementById('cameraFocusReconnectBtn');
+const cameraFocusFullscreenBtn = document.getElementById('cameraFocusFullscreenBtn');
+const cameraFocusCloseBtn = document.getElementById('cameraFocusCloseBtn');
+const focusSpeedInput = document.getElementById('focusSpeedInput');
+const focusSpeedWrap = document.getElementById('focusSpeedWrap');
+const focusUnsupportedHint = document.getElementById('focusUnsupportedHint');
+const focusSnapshotBtn = document.getElementById('focusSnapshotBtn');
+const focusRecordBtn = document.getElementById('focusRecordBtn');
+const focusCaptureResult = document.getElementById('focusCaptureResult');
+const focusJoystickWrap = document.getElementById('focusJoystickWrap');
+const focusJoystickBase = document.getElementById('focusJoystickBase');
+const focusJoystickStick = document.getElementById('focusJoystickStick');
+const digitalZoomFactor = document.getElementById('digitalZoomFactor');
+const digitalZoomSlider = document.getElementById('digitalZoomSlider');
+const digitalZoomOutBtn = document.getElementById('digitalZoomOutBtn');
+const digitalZoomInBtn = document.getElementById('digitalZoomInBtn');
+const digitalZoomResetBtn = document.getElementById('digitalZoomResetBtn');
+const cameraFocusViewport = document.getElementById('cameraFocusViewport');
+
+const cameraById = new Map(cameras.map((camera) => [String(camera.id), camera]));
+const controlStateByCamera = new Map();
+let focusCapabilities = {};
+const allowedJoystickActions = new Set();
+
+const setDiagnostics = (cameraId, message) => {
+	const diagEl = document.getElementById(`cameraDiag_${cameraId}`);
+	if (diagEl) diagEl.textContent = message;
+	if (focusedCameraId === cameraId && cameraFocusDiagnostics) cameraFocusDiagnostics.textContent = message;
+};
+
+const setStreamState = (cameraId, state, message) => {
+	streamStates.set(cameraId, { state, message });
+	const target = document.getElementById(`streamState_${cameraId}`);
+	if (target) target.textContent = message;
+	if (focusedCameraId === cameraId && cameraFocusStreamState) cameraFocusStreamState.textContent = message;
+};
+
+const setControlState = (cameraId, message) => {
+	const target = document.getElementById(`controlState_${cameraId}`);
+	if (target) target.textContent = message;
+	if (focusedCameraId === cameraId && cameraFocusControlState) cameraFocusControlState.textContent = message;
+};
+
+const getControlState = (cameraId) => {
+	if (!controlStateByCamera.has(cameraId)) {
+		controlStateByCamera.set(cameraId, { blocked: false });
+	}
+	return controlStateByCamera.get(cameraId);
+};
+
+const fetchJson = async (url, options = {}, timeoutMs = 12000) => {
+	const controller = new AbortController();
+	const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+	try {
+		const response = await fetch(url, { ...options, signal: controller.signal });
+		const data = await response.json();
+		if (!response.ok || !data.ok) {
+			const error = new Error(data.error || `Request failed (${response.status})`);
+			error.payload = data;
+			throw error;
+		}
+		return data;
+	} finally {
+		clearTimeout(timeoutId);
+	}
+};
+
+const getLiveMode = (cameraId) => {
+	const modeInput = document.getElementById(`cameraLiveMode_${cameraId}`);
+	const mode = String(modeInput?.value || 'balanced');
+	if (mode === 'quality') return { stream: 'main', fps: 10, quality: 4, label: 'Higher quality (main stream)' };
+	if (mode === 'smooth') return { stream: 'sub', fps: 12, quality: 5, label: 'Smooth motion (sub stream)' };
+	return { stream: 'sub', fps: 8, quality: 5, label: 'Balanced (sub stream)' };
+};
+
+const cardStreamUrl = (cameraId) => {
+	const mode = getLiveMode(cameraId);
+	return `/api/cameras/${encodeURIComponent(cameraId)}/stream?stream=${encodeURIComponent(mode.stream)}&fps=${mode.fps}&quality=${mode.quality}&t=${Date.now()}`;
+};
+
+const focusStreamUrl = (cameraId) => `/api/cameras/${encodeURIComponent(cameraId)}/stream?stream=main&fps=12&quality=4&t=${Date.now()}`;
+const cameraName = (cameraId) => String((cameraById.get(cameraId) || {}).name || cameraId || 'Camera');
+
+const connectCardStream = (cameraId, manualRetry = false) => {
+	const image = document.getElementById(`cameraFrame_${cameraId}`);
+	if (!image) return;
+	const mode = getLiveMode(cameraId);
+	const existing = streamStates.get(cameraId) || { retries: 0 };
+	const nextRetries = manualRetry ? 0 : (existing.retries || 0);
+	streamStates.set(cameraId, { ...existing, retries: nextRetries });
+	setStreamState(cameraId, 'connecting', manualRetry ? `Retrying (${mode.label})...` : `Connecting (${mode.label})...`);
+	image.src = cardStreamUrl(cameraId);
+};
+
+const scheduleReconnect = (cameraId) => {
+	const state = streamStates.get(cameraId) || { retries: 0 };
+	const retries = (state.retries || 0) + 1;
+	streamStates.set(cameraId, { ...state, retries });
+	if (retries > MAX_STREAM_RETRIES) {
+		setStreamState(cameraId, 'offline', 'Offline. Retry to reconnect.');
+		setDiagnostics(cameraId, 'Stream retries exhausted. Verify host reachability and stream settings.');
+		return;
+	}
+	setStreamState(cameraId, 'reconnecting', `Reconnecting attempt ${retries}/${MAX_STREAM_RETRIES}...`);
+	const delay = 900 + (retries * 450);
+	const timer = setTimeout(() => connectCardStream(cameraId), delay);
+	const prev = reconnectTimers.get(cameraId);
+	if (prev) clearTimeout(prev);
+	reconnectTimers.set(cameraId, timer);
+};
+
+const updateAudioButtons = () => {
+	document.querySelectorAll('.audio-toggle-btn').forEach((button) => {
+		const cameraId = String(button.dataset.cameraId || '');
+		const isActive = activeAudioCameraId === cameraId && !liveAudio.paused;
+		button.innerHTML = isActive
+			? '<i class="fa-solid fa-volume-xmark mr-1"></i>Mute'
+			: '<i class="fa-solid fa-volume-high mr-1"></i>Sound';
+	});
+};
+
+const doSnapshot = async (cameraId, resultElement) => {
+	if (!cameraId) return;
+	if (resultElement) resultElement.textContent = 'Capturing snapshot...';
+	try {
+		const data = await fetchJson(`/api/cameras/${encodeURIComponent(cameraId)}/snapshot`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ stream: 'main' }),
+		}, 20000);
+		if (resultElement) resultElement.innerHTML = `Snapshot saved: <a class="underline" href="${data.url}" target="_blank" rel="noreferrer">${data.filename}</a>`;
+		globalToast(`Snapshot saved: ${data.filename}`, 'success');
+	} catch (error) {
+		if (resultElement) resultElement.textContent = error.message || 'Unable to capture snapshot';
+		globalToast(error.message || 'Unable to capture snapshot', 'error');
+	}
+};
+
+const doRecord = async (cameraId) => {
+	if (!cameraId) return;
+	const duration_seconds = Number(document.getElementById('focusRecordDuration')?.value || 20);
+	const stream = String(document.getElementById('focusRecordStream')?.value || 'main');
+	if (focusCaptureResult) focusCaptureResult.textContent = `Recording clip (${duration_seconds}s)...`;
+	try {
+		const data = await fetchJson(`/api/cameras/${encodeURIComponent(cameraId)}/record`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ duration_seconds, stream }),
+		}, (Math.max(duration_seconds, 5) * 1000) + 20000);
+		if (focusCaptureResult) focusCaptureResult.innerHTML = `Recording saved: <a class="underline" href="${data.url}" target="_blank" rel="noreferrer">${data.filename}</a>`;
+		globalToast('Recording completed', 'success');
+	} catch (error) {
+		if (focusCaptureResult) focusCaptureResult.textContent = error.message || 'Unable to record clip';
+		globalToast(error.message || 'Unable to record clip', 'error');
+	}
+};
+
+const sendPtz = async (cameraId, payload, timeoutMs = 8000) => fetchJson(`/api/cameras/${encodeURIComponent(cameraId)}/ptz`, {
+	method: 'POST',
+	headers: { 'Content-Type': 'application/json' },
+	body: JSON.stringify({ ...payload, client_id: ptzClientId }),
+}, timeoutMs);
+
+const ptzController = createPtzHoldController({
+	startMove: async ({ cameraId, action }) => {
+		const state = getControlState(cameraId);
+		if (state.blocked) throw new Error('Previous stop failed. Press Stop to recover first.');
+		let result;
+		try {
+			result = await sendPtz(cameraId, {
+				action,
+				phase: 'start',
+				speed: Number(focusSpeedInput?.value || 32),
+			});
+		} catch (error) {
+			if (error?.payload?.takeover_required) {
+				const approve = window.confirm('This camera is controlled in another session. Take over control?');
+				if (approve) {
+					result = await sendPtz(cameraId, {
+						action,
+						phase: 'start',
+						force_takeover: true,
+						speed: Number(focusSpeedInput?.value || 32),
+					});
+				} else {
+					throw new Error('Camera control takeover canceled.');
+				}
+			} else {
+				throw error;
+			}
+		}
+		state.blocked = false;
+		setControlState(cameraId, `Moving ${action.replace('_', ' ')}...`);
+		return { leaseId: result.lease_id, leaseSeconds: result.lease_seconds };
+	},
+	stopMove: async ({ cameraId, leaseId, reason }) => {
+		const state = getControlState(cameraId);
+		try {
+			const response = await sendPtz(cameraId, {
+				action: 'stop',
+				phase: 'stop',
+				lease_id: leaseId || undefined,
+				force_stop: reason !== 'release' && reason !== 'queued-release',
+				speed: Number(focusSpeedInput?.value || 32),
+			});
+			state.blocked = false;
+			setControlState(cameraId, reason === 'emergency' ? 'Stopped after interruption.' : 'Stopped.');
+			return response;
+		} catch (error) {
+			if (error?.payload?.ownership_mismatch) {
+				setControlState(cameraId, 'Another control session owns this lease.');
+			} else {
+				state.blocked = true;
+				setControlState(cameraId, 'Stop failed. Resolve stop before moving again.');
+			}
+			setDiagnostics(cameraId, error.message || 'Stop command failed');
+			throw error;
+		}
+	},
+	renewMove: async ({ cameraId, action, leaseId }) => sendPtz(cameraId, {
+		action,
+		phase: 'renew',
+		lease_id: leaseId,
+		speed: Number(focusSpeedInput?.value || 32),
+	}),
+});
+
+const joystickState = {
+	pointerId: null,
+	activeAction: '',
+	commandQueue: Promise.resolve(),
+	maxRadius: 62,
+	deadzone: 0.28,
+};
+
+const queueJoystickCommand = (task) => {
+	joystickState.commandQueue = joystickState.commandQueue
+		.then(task)
+		.catch((error) => {
+			if (focusedCameraId) {
+				setDiagnostics(focusedCameraId, error?.message || 'Joystick PTZ command failed');
+			}
+		});
+	return joystickState.commandQueue;
+};
+
+const resetJoystickVisual = () => {
+	if (focusJoystickStick) {
+		focusJoystickStick.style.transform = 'translate(-50%, -50%)';
+	}
+};
+
+const stopJoystickMovement = (reason = 'joystick-release') => queueJoystickCommand(async () => {
+	if (!joystickState.activeAction || joystickState.pointerId === null) return;
+	await ptzController.pointerRelease({ pointerId: joystickState.pointerId, reason });
+	joystickState.activeAction = '';
+	setControlState(String(focusedCameraId || ''), 'Stopped.');
+});
+
+const normalizeJoystickVector = (event) => {
+	if (!focusJoystickBase) return { dx: 0, dy: 0, px: 0, py: 0 };
+	const rect = focusJoystickBase.getBoundingClientRect();
+	const centerX = rect.left + (rect.width / 2);
+	const centerY = rect.top + (rect.height / 2);
+	let px = event.clientX - centerX;
+	let py = event.clientY - centerY;
+	const distance = Math.hypot(px, py);
+	if (distance > joystickState.maxRadius) {
+		const scale = joystickState.maxRadius / distance;
+		px *= scale;
+		py *= scale;
+	}
+	const dx = px / joystickState.maxRadius;
+	const dy = py / joystickState.maxRadius;
+	return { dx, dy, px, py };
+};
+
+const resolveJoystickAction = (dx, dy) => {
+	const allowDiagonal = allowedJoystickActions.has('left_up') && allowedJoystickActions.has('right_down');
+	let action = mapJoystickVectorToAction(dx, dy, { deadzone: joystickState.deadzone, allowDiagonal });
+	if (action && !allowedJoystickActions.has(action)) {
+		action = mapJoystickVectorToAction(dx, dy, { deadzone: joystickState.deadzone, allowDiagonal: false });
+	}
+	if (action && !allowedJoystickActions.has(action)) return '';
+	return action;
+};
+
+const applyJoystickAction = (nextAction) => queueJoystickCommand(async () => {
+	if (!focusedCameraId || joystickState.pointerId === null) return;
+	const cameraId = String(focusedCameraId);
+	if (nextAction === joystickState.activeAction) return;
+	if (joystickState.activeAction) {
+		await ptzController.pointerRelease({ pointerId: joystickState.pointerId, reason: 'joystick-direction-change' });
+		joystickState.activeAction = '';
+	}
+	if (nextAction) {
+		await ptzController.pointerDown({ pointerId: joystickState.pointerId, cameraId, action: nextAction });
+		joystickState.activeAction = nextAction;
+		setControlState(cameraId, `Moving ${nextAction.replace('_', ' ')}...`);
+	} else {
+		setControlState(cameraId, 'Stopped.');
+	}
+});
+
+const digitalZoom = createDigitalZoomController({
+	minZoom: 1,
+	maxZoom: 4,
+	step: 0.1,
+	onUpdate: ({ zoom, offsetX, offsetY }) => {
+		if (!cameraFocusFrame) return;
+		cameraFocusFrame.style.transformOrigin = 'center center';
+		cameraFocusFrame.style.transform = `scale(${zoom}) translate(${offsetX}%, ${offsetY}%)`;
+		cameraFocusFrame.style.cursor = zoom > 1 ? 'grab' : 'default';
+		if (digitalZoomFactor) digitalZoomFactor.textContent = `${zoom.toFixed(1)}×`;
+		if (digitalZoomSlider) digitalZoomSlider.value = String(zoom);
+	},
+});
+
+const applyCapabilitiesToFocus = (camera) => {
+	const caps = camera?.capabilities || {};
+	focusCapabilities = caps;
+	allowedJoystickActions.clear();
+	if (caps.pan) {
+		allowedJoystickActions.add('left');
+		allowedJoystickActions.add('right');
+	}
+	if (caps.tilt) {
+		allowedJoystickActions.add('up');
+		allowedJoystickActions.add('down');
+	}
+	if (caps.diagonal && caps.pan && caps.tilt) {
+		allowedJoystickActions.add('left_up');
+		allowedJoystickActions.add('right_up');
+		allowedJoystickActions.add('left_down');
+		allowedJoystickActions.add('right_down');
+	}
+	let unsupportedShown = false;
+	if (focusJoystickWrap) {
+		const joystickSupported = allowedJoystickActions.size > 0;
+		focusJoystickWrap.classList.toggle('opacity-40', !joystickSupported || !canManage);
+		focusJoystickWrap.classList.toggle('pointer-events-none', !joystickSupported || !canManage);
+		if (!joystickSupported) unsupportedShown = true;
+	}
+	document.querySelectorAll('#focusZoomRow .ptz-hold-btn').forEach((button) => {
+		const requirement = button.dataset.requires || '';
+		let supported = true;
+		if (requirement === 'optical_zoom') supported = Boolean(caps.optical_zoom);
+		button.disabled = !supported || !canManage;
+		button.classList.toggle('opacity-40', !supported);
+		button.classList.toggle('pointer-events-none', !supported);
+		if (!supported) unsupportedShown = true;
+	});
+	if (focusUnsupportedHint) focusUnsupportedHint.classList.toggle('hidden', !unsupportedShown);
+	if (focusSpeedWrap) {
+		const speedControl = Boolean(caps.speed_control);
+		focusSpeedWrap.classList.toggle('hidden', !speedControl);
+		if (speedControl && focusSpeedInput) {
+			focusSpeedInput.min = String(caps.speed_min || 1);
+			focusSpeedInput.max = String(caps.speed_max || 64);
+			focusSpeedInput.value = String(caps.speed_default || 32);
+		}
+	}
+};
+
+const openFocusModal = (cameraId) => {
+	const camera = cameraById.get(cameraId);
+	if (!camera || !cameraFocusModal || !cameraFocusFrame) return;
+	focusedCameraId = cameraId;
+	digitalZoom.reset();
+	joystickState.activeAction = '';
+	joystickState.pointerId = null;
+	resetJoystickVisual();
+	cameraFocusTitle.textContent = `${cameraName(cameraId)} controls`;
+	cameraFocusFrame.src = focusStreamUrl(cameraId);
+	cameraFocusStreamState.textContent = streamStates.get(cameraId)?.message || 'Connecting...';
+	cameraFocusControlState.textContent = document.getElementById(`controlState_${cameraId}`)?.textContent || 'Idle';
+	cameraFocusDiagnostics.textContent = document.getElementById(`cameraDiag_${cameraId}`)?.textContent || 'No diagnostics yet.';
+	applyCapabilitiesToFocus(camera);
+	cameraFocusModal.classList.remove('hidden');
+};
+
+const closeFocusModal = async () => {
+	if (!cameraFocusModal) return;
+	const current = focusedCameraId;
+	focusedCameraId = null;
+	digitalZoom.reset();
+	joystickState.activeAction = '';
+	joystickState.pointerId = null;
+	resetJoystickVisual();
+	try {
+		await ptzController.forceStop('emergency');
+	} catch (error) {}
+	if (cameraFocusFrame) cameraFocusFrame.src = '';
+	cameraFocusModal.classList.add('hidden');
+	if (current) setControlState(current, 'Idle');
+};
+
+const emergencyStopFocused = async () => {
+	if (!focusedCameraId) return;
+	joystickState.activeAction = '';
+	joystickState.pointerId = null;
+	resetJoystickVisual();
+	try {
+		await ptzController.forceStop('emergency');
+	} catch (error) {}
+};
+
+cameras.forEach((camera) => {
+	const cameraId = String(camera.id);
+	const image = document.getElementById(`cameraFrame_${cameraId}`);
+	if (!image) return;
+	const modeInput = document.getElementById(`cameraLiveMode_${cameraId}`);
+	if (modeInput) {
+		const saved = localStorage.getItem(`camera-live-mode-${cameraId}`);
+		if (saved) modeInput.value = saved;
+		modeInput.addEventListener('change', () => {
+			localStorage.setItem(`camera-live-mode-${cameraId}`, String(modeInput.value || 'balanced'));
+			connectCardStream(cameraId, true);
+		});
+	}
+	image.addEventListener('load', () => {
+		streamStates.set(cameraId, { state: 'live', retries: 0, message: 'Live stream active.' });
+		setStreamState(cameraId, 'live', 'Live stream active.');
+	});
+	image.addEventListener('error', () => {
+		setDiagnostics(cameraId, 'Stream source returned an error. Attempting reconnect.');
+		scheduleReconnect(cameraId);
+	});
+	connectCardStream(cameraId);
+});
+
+document.querySelectorAll('.reconnect-btn').forEach((button) => {
+	button.addEventListener('click', () => connectCardStream(String(button.dataset.cameraId || ''), true));
+});
+
+document.querySelectorAll('.audio-toggle-btn').forEach((button) => {
+	button.addEventListener('click', async () => {
+		const cameraId = String(button.dataset.cameraId || '');
+		if (!cameraId) return;
+		if (activeAudioCameraId === cameraId && !liveAudio.paused) {
+			liveAudio.pause();
+			liveAudio.src = '';
+			activeAudioCameraId = null;
+			updateAudioButtons();
+			return;
+		}
+		try {
+			const src = `/api/cameras/${encodeURIComponent(cameraId)}/audio?stream=main&bitrate=96&t=${Date.now()}`;
+			liveAudio.src = src;
+			liveAudio.autoplay = true;
+			await liveAudio.play();
+			activeAudioCameraId = cameraId;
+			updateAudioButtons();
+		} catch (error) {
+			setDiagnostics(cameraId, 'Audio stream failed. Try again.');
+			globalToast('Unable to start camera audio', 'error');
+		}
+	});
+});
+
+liveAudio.addEventListener('error', () => {
+	if (activeAudioCameraId) setDiagnostics(activeAudioCameraId, 'Audio stream interrupted.');
+});
+
+document.querySelectorAll('.focus-camera-btn').forEach((button) => {
+	button.addEventListener('click', () => {
+		const cameraId = String(button.dataset.cameraId || '');
+		const target = document.getElementById(`cameraViewport_${cameraId}`);
+		const requestFullscreen = target?.requestFullscreen || target?.webkitRequestFullscreen || target?.msRequestFullscreen;
+		if (requestFullscreen) {
+			try {
+				requestFullscreen.call(target);
+				setDiagnostics(cameraId, 'Fullscreen video opened.');
+				return;
+			} catch (error) {}
+		}
+		openFocusModal(cameraId);
+	});
+});
+
+document.querySelectorAll('.open-control-btn').forEach((button) => {
+	button.addEventListener('click', () => openFocusModal(String(button.dataset.cameraId || '')));
+});
+
+document.querySelectorAll('.snapshot-btn').forEach((button) => {
+	button.addEventListener('click', () => doSnapshot(String(button.dataset.cameraId || ''), document.getElementById(`cameraCaptureResult_${button.dataset.cameraId}`)));
+});
+
+if (focusSnapshotBtn) {
+	focusSnapshotBtn.addEventListener('click', () => doSnapshot(String(focusedCameraId || ''), focusCaptureResult));
+}
+if (focusRecordBtn) {
+	focusRecordBtn.addEventListener('click', () => doRecord(String(focusedCameraId || '')));
+}
+
+if (cameraFocusFrame) {
+	cameraFocusFrame.addEventListener('load', () => {
+		if (!focusedCameraId) return;
+		setStreamState(focusedCameraId, 'live', 'Live stream active.');
+	});
+	cameraFocusFrame.addEventListener('error', () => {
+		if (!focusedCameraId) return;
+		setStreamState(focusedCameraId, 'error', 'Focused stream failed. Retry to reconnect.');
+		setDiagnostics(focusedCameraId, 'Focused stream failed. Confirm host, credentials, and stream profile.');
+	});
+}
+
+if (cameraFocusReconnectBtn) {
+	cameraFocusReconnectBtn.addEventListener('click', () => {
+		if (!focusedCameraId || !cameraFocusFrame) return;
+		setStreamState(focusedCameraId, 'reconnecting', 'Reconnecting focused stream...');
+		cameraFocusFrame.src = focusStreamUrl(focusedCameraId);
+	});
+}
+
+if (cameraFocusFullscreenBtn) {
+	cameraFocusFullscreenBtn.addEventListener('click', () => {
+		const requestFullscreen = cameraFocusViewport?.requestFullscreen || cameraFocusViewport?.webkitRequestFullscreen || cameraFocusViewport?.msRequestFullscreen;
+		if (!requestFullscreen) return;
+		try {
+			requestFullscreen.call(cameraFocusViewport);
+		} catch (error) {}
+	});
+}
+
+if (cameraFocusCloseBtn) {
+	cameraFocusCloseBtn.addEventListener('click', () => closeFocusModal());
+}
+if (cameraFocusModal) {
+	cameraFocusModal.addEventListener('click', (event) => {
+		if (event.target === cameraFocusModal) closeFocusModal();
+	});
+}
+
+if (focusJoystickBase) {
+	focusJoystickBase.style.touchAction = 'none';
+	const releaseJoystick = async (event, reason) => {
+		if (joystickState.pointerId !== event.pointerId) return;
+		await stopJoystickMovement(reason);
+		joystickState.pointerId = null;
+		joystickState.activeAction = '';
+		resetJoystickVisual();
+	};
+	focusJoystickBase.addEventListener('pointerdown', async (event) => {
+		if (!focusedCameraId || event.button !== 0 || !canManage || allowedJoystickActions.size === 0) return;
+		event.preventDefault();
+		joystickState.pointerId = event.pointerId;
+		joystickState.activeAction = '';
+		try {
+			focusJoystickBase.setPointerCapture(event.pointerId);
+		} catch (error) {}
+		const { dx, dy, px, py } = normalizeJoystickVector(event);
+		if (focusJoystickStick) {
+			focusJoystickStick.style.transform = `translate(calc(-50% + ${px}px), calc(-50% + ${py}px))`;
+		}
+		await applyJoystickAction(resolveJoystickAction(dx, dy));
+	});
+	focusJoystickBase.addEventListener('pointermove', (event) => {
+		if (joystickState.pointerId !== event.pointerId) return;
+		event.preventDefault();
+		const { dx, dy, px, py } = normalizeJoystickVector(event);
+		if (focusJoystickStick) {
+			focusJoystickStick.style.transform = `translate(calc(-50% + ${px}px), calc(-50% + ${py}px))`;
+		}
+		applyJoystickAction(resolveJoystickAction(dx, dy));
+	});
+	focusJoystickBase.addEventListener('pointerup', (event) => releaseJoystick(event, 'release'));
+	focusJoystickBase.addEventListener('pointercancel', (event) => releaseJoystick(event, 'pointercancel'));
+	focusJoystickBase.addEventListener('lostpointercapture', (event) => releaseJoystick(event, 'lostcapture'));
+}
+
+document.querySelectorAll('.ptz-hold-btn').forEach((button) => {
+	button.style.touchAction = 'none';
+	const action = String(button.dataset.action || '');
+	if (!action) return;
+	button.addEventListener('pointerdown', async (event) => {
+		if (!focusedCameraId || event.button !== 0) return;
+		event.preventDefault();
+		try {
+			button.setPointerCapture(event.pointerId);
+		} catch (error) {}
+		try {
+			await ptzController.pointerDown({ pointerId: event.pointerId, cameraId: focusedCameraId, action });
+		} catch (error) {
+			setDiagnostics(focusedCameraId, error.message || 'Unable to start movement');
+			globalToast(error.message || 'Unable to send movement command', 'error');
+		}
+	});
+	const release = async (event, reason) => {
+		try {
+			await ptzController.pointerRelease({ pointerId: event.pointerId, reason });
+		} catch (error) {
+			globalToast(error.message || 'Unable to stop movement', 'error');
+		}
+	};
+	button.addEventListener('pointerup', (event) => release(event, 'release'));
+	button.addEventListener('pointercancel', (event) => release(event, 'pointercancel'));
+	button.addEventListener('lostpointercapture', (event) => release(event, 'lostcapture'));
+});
+
+const stopBtn = document.getElementById('focusStopBtn');
+if (stopBtn) {
+	stopBtn.addEventListener('click', async () => {
+		if (!focusedCameraId) return;
+		try {
+			await stopJoystickMovement('manual-stop');
+			await ptzController.forceStop('manual-stop');
+			joystickState.pointerId = null;
+			joystickState.activeAction = '';
+			resetJoystickVisual();
+			setControlState(focusedCameraId, 'Stopped.');
+			globalToast('Camera movement stopped', 'success');
+		} catch (error) {
+			globalToast(error.message || 'Unable to stop camera movement', 'error');
+		}
+	});
+}
+
+if (digitalZoomOutBtn) digitalZoomOutBtn.addEventListener('click', () => digitalZoom.nudgeZoom(-0.1));
+if (digitalZoomInBtn) digitalZoomInBtn.addEventListener('click', () => digitalZoom.nudgeZoom(0.1));
+if (digitalZoomResetBtn) digitalZoomResetBtn.addEventListener('click', () => digitalZoom.reset());
+if (digitalZoomSlider) digitalZoomSlider.addEventListener('input', (event) => digitalZoom.setZoom(Number(event.target.value || 1)));
+
+if (cameraFocusViewport) {
+	cameraFocusViewport.addEventListener('pointerdown', (event) => {
+		if (!focusedCameraId) return;
+		const zoomState = digitalZoom.getState();
+		if (zoomState.zoom <= 1) return;
+		event.preventDefault();
+		cameraFocusFrame.style.cursor = 'grabbing';
+		digitalZoom.beginDrag(event.pointerId, event.clientX, event.clientY);
+		try {
+			cameraFocusViewport.setPointerCapture(event.pointerId);
+		} catch (error) {}
+	});
+	cameraFocusViewport.addEventListener('pointermove', (event) => {
+		if (digitalZoom.moveDrag(event.pointerId, event.clientX, event.clientY)) {
+			event.preventDefault();
+		}
+	});
+	const endDrag = (event) => {
+		digitalZoom.endDrag(event.pointerId);
+		const zoomState = digitalZoom.getState();
+		cameraFocusFrame.style.cursor = zoomState.zoom > 1 ? 'grab' : 'default';
+	};
+	cameraFocusViewport.addEventListener('pointerup', endDrag);
+	cameraFocusViewport.addEventListener('pointercancel', endDrag);
+	cameraFocusViewport.addEventListener('lostpointercapture', endDrag);
+}
+
+document.addEventListener('visibilitychange', () => {
+	if (document.hidden) emergencyStopFocused();
+});
+window.addEventListener('blur', () => emergencyStopFocused());
+window.addEventListener('beforeunload', () => emergencyStopFocused());
+
+updateAudioButtons();
 </script>
 {% endblock %}

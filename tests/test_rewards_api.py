@@ -4,7 +4,7 @@ from app import create_app, db
 from datetime import datetime, timezone
 
 from app.blueprints.dashboard import emit_due_parent_helper_notifications_for_member
-from app.models import AppNotification, Chore, KidRewardParentActionTask
+from app.models import AppNotification, Chore, FamilyMember, KidRewardParentActionTask, KidRewardPendingGrant
 
 
 @pytest.fixture()
@@ -322,6 +322,16 @@ def test_gold_stars_kid_view_hides_admin_controls(client):
     assert 'id="rewardOptionsEditor" class="border-t dark:border-gray-700 pt-4 hidden"' in html
 
 
+def test_kids_stars_tablet_view_renders(client):
+    with client.session_transaction() as session:
+        session['current_member'] = 'Avery'
+    response = client.get('/kids-stars')
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert 'Kid Star Board' in html
+    assert 'Tap claim when a parent dispenses stars to you.' in html
+
+
 def test_rewards_options_can_be_set_per_child_with_up_to_three(client):
     with client.session_transaction() as session:
         session['current_member'] = 'Rachel'
@@ -357,3 +367,113 @@ def test_rewards_options_can_be_set_per_child_with_up_to_three(client):
     assert len(mykal_options) == 1
     assert avery_options[0]['reward_label'] == 'Pick family dance party song'
     assert avery_options[0]['stars_required'] == 6
+
+
+def test_link_existing_local_member_to_supabase_workflow(client):
+    with client.session_transaction() as session:
+        session['current_member'] = 'Rachel'
+    created = client.post('/api/family-members', json={'name': 'LocalKid', 'role': 'child', 'password': 'secret12'})
+    assert created.status_code == 200
+    member_id = created.get_json()['member']['id']
+
+    linked = client.post(
+        f'/api/family-members/{member_id}/link-supabase',
+        json={'email': 'localkid@example.com', 'password': 'secret12'},
+    )
+    assert linked.status_code == 200
+    payload = linked.get_json()
+    assert payload['ok'] is True
+    assert payload['member']['email'] == 'localkid@example.com'
+    assert payload['member']['supabase_linked'] is True
+
+
+def test_kiosk_mode_locks_non_admin_to_kids_view(client):
+    with client.application.app_context():
+        rachel = FamilyMember.query.filter_by(name='Rachel').first()
+        if not rachel:
+            rachel = FamilyMember(name='Rachel', role='admin')
+            db.session.add(rachel)
+        rachel.pin = '1234'
+        db.session.commit()
+
+    with client.session_transaction() as session:
+        session['current_member'] = 'Rachel'
+    enabled = client.post('/api/rewards/kiosk-mode', json={'enabled': True})
+    assert enabled.status_code == 200
+    assert enabled.get_json()['enabled'] is True
+
+    with client.session_transaction() as session:
+        session['current_member'] = 'Avery'
+    blocked_api = client.get('/api/chores')
+    assert blocked_api.status_code == 403
+    blocked_page = client.get('/settings')
+    assert blocked_page.status_code in {301, 302}
+    assert '/kids-stars' in (blocked_page.headers.get('Location') or '')
+    kids_page = client.get('/kids-stars')
+    assert kids_page.status_code == 200
+
+    with client.session_transaction() as session:
+        session['current_member'] = 'Rachel'
+    disabled_without_pin = client.post('/api/rewards/kiosk-mode', json={'enabled': False})
+    assert disabled_without_pin.status_code == 400
+    disabled_bad_pin = client.post('/api/rewards/kiosk-mode', json={'enabled': False, 'parent_name': 'Rachel', 'unlock_pin': '0000'})
+    assert disabled_bad_pin.status_code == 403
+    disabled = client.post('/api/rewards/kiosk-mode', json={'enabled': False, 'parent_name': 'Rachel', 'unlock_pin': '1234'})
+    assert disabled.status_code == 200
+    assert disabled.get_json()['enabled'] is False
+
+
+def test_rewards_catalog_adds_reward_with_slider_and_applies_to_members(client):
+    with client.session_transaction() as session:
+        session['current_member'] = 'Rachel'
+    update = client.put('/api/rewards/reward-options', json={
+        'rewards': [
+            {
+                'reward_label': 'Pick family dance party song',
+                'stars_required': 6,
+                'applies_to': ['Avery', 'Harley'],
+            },
+            {
+                'reward_label': 'Pick Friday dinner',
+                'stars_required': 12,
+                'applies_to': ['Rachel', 'Mykal'],
+            },
+        ],
+    })
+    assert update.status_code == 200
+    payload = update.get_json()
+    assert payload['ok'] is True
+    catalog = payload['state']['reward_options']
+    assert len(catalog) == 2
+    assert catalog[0]['stars_required'] == 6
+    assert sorted(catalog[0]['applies_to']) == ['Avery', 'Harley']
+    assert payload['state']['reward_options_by_child']['Avery'][0]['reward_label'] == 'Pick family dance party song'
+    assert payload['state']['reward_options_by_child']['Mykal'][0]['reward_label'] == 'Pick Friday dinner'
+
+
+def test_rewards_dispense_then_child_claims_stars(client, app):
+    with client.session_transaction() as session:
+        session['current_member'] = 'Rachel'
+    dispense = client.post('/api/rewards/dispense', json={'child_name': 'Avery', 'stars_awarded': 2, 'reason': 'Great listening'})
+    assert dispense.status_code == 200
+    state = dispense.get_json()['state']
+    grants = state['pending_star_grants']
+    assert grants
+    assert grants[0]['child_name'] == 'Avery'
+    with app.app_context():
+        rows = KidRewardPendingGrant.query.filter_by(child_name='Avery', claimed=False).all()
+        assert len(rows) == 1
+
+    with client.session_transaction() as session:
+        session['current_member'] = 'Avery'
+    claim = client.post('/api/rewards/claim', json={'grant_id': grants[0]['id']})
+    assert claim.status_code == 200
+    payload = claim.get_json()
+    avery = next((row for row in payload['state']['children'] if row['child_name'] == 'Avery'), None)
+    assert avery is not None
+    assert avery['stars'] == 2
+    assert avery['pending_stars'] == 0
+    with app.app_context():
+        row = KidRewardPendingGrant.query.get(grants[0]['id'])
+        assert row is not None
+        assert bool(row.claimed) is True

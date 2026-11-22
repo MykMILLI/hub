@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="mx-auto max-w-3xl space-y-4">
+	<div class="card p-5 bg-gradient-to-r from-sky-100 via-indigo-100 to-purple-100 dark:from-sky-900/30 dark:via-indigo-900/20 dark:to-purple-900/30">
+		<div class="flex items-center justify-between gap-2">
+			<div>
+				<h1 class="text-2xl font-extrabold text-gray-900 dark:text-white"><i class="fa-solid fa-star text-yellow-500 mr-2"></i>Kid Star Board</h1>
+				<p class="text-sm text-gray-700 dark:text-gray-200">Tap claim when a parent dispenses stars to you.</p>
+			</div>
+			<div class="text-xs uppercase tracking-wide rounded-lg px-3 py-1 bg-white/70 dark:bg-gray-900/40 text-gray-700 dark:text-gray-200">
+				{{ actor_name }}
+			</div>
+		</div>
+		<div class="mt-2 text-xs text-gray-600 dark:text-gray-300">When kiosk mode is enabled, this tablet is locked to this page for kid accounts.</div>
+		{% if rewards_state.can_manage %}
+		<div class="mt-3 flex gap-2">
+			<a href="/gold-stars" class="btn btn-secondary">Back to Rewards</a>
+			<button id="disableKioskModeBtn" type="button" class="btn btn-secondary">Disable Kiosk Lock</button>
+		</div>
+		{% endif %}
+	</div>
+
+	<div id="kidStarsGrid" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+	<div class="card p-4">
+		<h2 class="font-bold mb-2">Recent Reward History</h2>
+		<div id="kidRewardHistory" class="space-y-2 text-sm"></div>
+	</div>
+</div>
+
+<div id="kioskUnlockModal" class="hidden fixed inset-0 z-[80] flex items-center justify-center p-4 sm:p-6">
+	<div id="kioskUnlockModalBackdrop" class="absolute inset-0 bg-black/60"></div>
+	<div class="relative w-full max-w-sm max-h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-3rem)] overflow-y-auto card p-4 sm:p-5">
+		<div class="flex items-center justify-between gap-2">
+			<h3 class="text-lg font-bold">Parent PIN Required</h3>
+			<button id="closeKioskUnlockModalBtn" type="button" class="btn btn-secondary">Close</button>
+		</div>
+		<form id="kioskUnlockForm" class="mt-3 space-y-3">
+			<label class="block text-sm">
+				<span class="text-xs text-gray-600 dark:text-gray-300">Parent</span>
+				<select id="kioskUnlockParent" class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600">
+					<option>Rachel</option>
+					<option>Mykal</option>
+				</select>
+			</label>
+			<label class="block text-sm">
+				<span class="text-xs text-gray-600 dark:text-gray-300">PIN</span>
+				<input id="kioskUnlockPin" type="password" inputmode="numeric" maxlength="4" class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600 text-center tracking-widest" placeholder="••••" required>
+			</label>
+			<div class="flex justify-end gap-2 pt-1">
+				<button id="cancelKioskUnlockBtn" type="button" class="btn btn-secondary">Cancel</button>
+				<button id="confirmKioskUnlockBtn" type="submit" class="btn btn-primary">Unlock Kiosk</button>
+			</div>
+		</form>
+	</div>
+</div>
+
+<script>
+(() => {
+	let currentState = {{ rewards_state|tojson }};
+	const actorName = {{ actor_name|tojson }};
+	const grid = document.getElementById('kidStarsGrid');
+	const history = document.getElementById('kidRewardHistory');
+	const disableKioskModeBtn = document.getElementById('disableKioskModeBtn');
+	const kioskUnlockModal = document.getElementById('kioskUnlockModal');
+	const kioskUnlockForm = document.getElementById('kioskUnlockForm');
+	const kioskUnlockParent = document.getElementById('kioskUnlockParent');
+	const kioskUnlockPin = document.getElementById('kioskUnlockPin');
+	const confirmKioskUnlockBtn = document.getElementById('confirmKioskUnlockBtn');
+
+	function formatDate(value) {
+		const dt = new Date(String(value || ''));
+		if (Number.isNaN(dt.getTime())) return '';
+		return dt.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+	}
+
+	function actorMatches(childName) {
+		return String(actorName || '').trim().toLowerCase() === String(childName || '').trim().toLowerCase();
+	}
+
+	function renderGrid() {
+		const children = Array.isArray(currentState.children) ? currentState.children : [];
+		grid.innerHTML = children.map((child) => {
+			const progress = child.progress || {};
+			const pending = Array.isArray(child.pending_grants) ? child.pending_grants : [];
+			const canClaim = actorMatches(child.child_name) || !!currentState.can_manage;
+			return `<div class="card p-4 border border-yellow-200 dark:border-yellow-700">
+				<div class="flex items-center justify-between gap-2">
+					<div class="font-bold text-lg">${child.child_name}</div>
+					<div class="text-xl font-extrabold text-yellow-600 dark:text-yellow-300">${Number(child.stars || 0)} ⭐</div>
+				</div>
+				<div class="mt-2 text-xs text-gray-600 dark:text-gray-300">${Number(progress.next_target || 0)} ⭐ goal · ${progress.next_label || 'Keep going'}</div>
+				<div class="h-3 rounded-full bg-yellow-100 dark:bg-yellow-900/40 mt-1 overflow-hidden">
+					<div class="h-full bg-gradient-to-r from-yellow-400 to-orange-500" style="width:${Math.max(0, Math.min(100, Number(progress.progress_percent || 0)))}%"></div>
+				</div>
+				<div class="mt-2 text-xs text-gray-500">${Number(progress.remaining || 0)} stars left</div>
+				<div class="mt-3 space-y-2">
+					${pending.length ? pending.map((entry) => (
+						`<button type="button" class="btn btn-primary w-full kid-claim-btn" data-grant-id="${Number(entry.id || 0)}" ${canClaim ? '' : 'disabled'}>
+							Claim +${Number(entry.stars_awarded || 1)} ⭐${entry.reason ? ` · ${entry.reason}` : ''}
+						</button>`
+					)).join('') : '<div class="text-xs text-gray-500">No stars waiting to claim.</div>'}
+				</div>
+			</div>`;
+		}).join('');
+	}
+
+	function renderHistory() {
+		const redemptions = Array.isArray(currentState.recent_redemptions) ? currentState.recent_redemptions : [];
+		history.innerHTML = redemptions.length
+			? redemptions.slice(0, 12).map((entry) => (
+				`<div class="rounded-lg border px-3 py-2 dark:border-gray-700">
+					<div class="font-medium">${entry.child_name} redeemed ${entry.reward_label}</div>
+					<div class="text-xs text-gray-500">-${Number(entry.stars_spent || 0)} ⭐ · ${formatDate(entry.created_at)}</div>
+				</div>`
+			)).join('')
+			: '<div class="text-sm text-gray-500">No redemptions yet.</div>';
+	}
+
+	function renderAll() {
+		renderGrid();
+		renderHistory();
+	}
+
+	function openKioskUnlockModal() {
+		if (!kioskUnlockModal) return;
+		kioskUnlockPin.value = '';
+		kioskUnlockParent.value = String(actorName || '').trim().toLowerCase() === 'mykal' ? 'Mykal' : 'Rachel';
+		kioskUnlockModal.classList.remove('hidden');
+		setTimeout(() => kioskUnlockPin.focus(), 20);
+	}
+
+	function closeKioskUnlockModal() {
+		kioskUnlockModal?.classList.add('hidden');
+	}
+
+	disableKioskModeBtn?.addEventListener('click', () => {
+		openKioskUnlockModal();
+	});
+	['closeKioskUnlockModalBtn', 'cancelKioskUnlockBtn', 'kioskUnlockModalBackdrop'].forEach((id) => {
+		document.getElementById(id)?.addEventListener('click', closeKioskUnlockModal);
+	});
+	kioskUnlockForm?.addEventListener('submit', async (event) => {
+		event.preventDefault();
+		confirmKioskUnlockBtn.disabled = true;
+		try {
+			const response = await fetch('/api/rewards/kiosk-mode', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					enabled: false,
+					parent_name: String(kioskUnlockParent.value || '').trim(),
+					unlock_pin: String(kioskUnlockPin.value || '').trim(),
+				}),
+			});
+			const data = await response.json();
+			if (!response.ok || !data.ok) {
+				globalToast(data.error || 'Unable to disable kiosk lock', 'error');
+				return;
+			}
+			window.location.href = '/gold-stars';
+		} catch (_) {
+			globalToast('Unable to disable kiosk lock right now', 'error');
+		} finally {
+			confirmKioskUnlockBtn.disabled = false;
+		}
+	});
+
+	grid.addEventListener('click', async (event) => {
+		const button = event.target.closest('.kid-claim-btn');
+		if (!button) return;
+		const grantId = Number(button.dataset.grantId || 0);
+		if (!grantId) return;
+		button.disabled = true;
+		try {
+			const response = await fetch('/api/rewards/claim', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ grant_id: grantId }),
+			});
+			const data = await response.json();
+			if (!response.ok || !data.ok || !data.state) {
+				globalToast(data.error || 'Unable to claim stars', 'error');
+				return;
+			}
+			currentState = data.state;
+			renderAll();
+			globalToast('Stars claimed!', 'success');
+		} catch (_) {
+			globalToast('Unable to claim stars right now', 'error');
+		} finally {
+			button.disabled = false;
+		}
+	});
+
+	renderAll();
+})();
+</script>
+{% endblock %}

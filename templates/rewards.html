@@ -10,9 +10,15 @@
 			<div class="text-xs uppercase tracking-wide rounded-lg px-3 py-1 bg-white/70 dark:bg-gray-900/40 text-gray-700 dark:text-gray-200">
 				Signed in as {{ actor_name }}
 			</div>
+			<div class="flex gap-2">
+				<a href="/kids-stars" class="btn btn-secondary">Kid Tablet View</a>
+				{% if rewards_state.can_manage and (not kid_view) %}
+				<button id="enableKioskModeBtn" type="button" class="btn btn-secondary">Lock Tablet to Kids View</button>
+				{% endif %}
+			</div>
 			{% if kid_view %}
 			<div class="mt-3 rounded-xl border border-sky-200 dark:border-sky-700 bg-sky-50/80 dark:bg-sky-900/20 px-3 py-2 text-sm text-sky-800 dark:text-sky-200">
-				<i class="fa-solid fa-child-reaching mr-1"></i>Kid-safe mode is on. Kids can explore and tap around, but reward changes are locked in this view.
+				<i class="fa-solid fa-child-reaching mr-1"></i>Kid-safe mode is on. Kids can claim stars that were dispensed by a parent, but only Rachel/Mykal can configure rewards or dispense new stars.
 			</div>
 			{% endif %}
 		</div>
@@ -105,24 +111,14 @@
 				</div>
 			</div>
 			<div id="rewardOptionsEditor" class="border-t dark:border-gray-700 pt-4 {% if (not rewards_state.can_manage) or kid_view %}hidden{% endif %}">
-				<h3 class="font-semibold mb-2"><i class="fa-solid fa-gift mr-1 text-amber-500"></i>Per-child reward options (up to 3 each)</h3>
-				<p class="text-xs text-gray-500 mb-3">Set different reward choices and star costs for Avery and Harley.</p>
-				<div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
-					{% for member in ['Avery', 'Harley', 'Rachel', 'Mykal'] %}
-					<div class="rounded-lg border dark:border-gray-700 p-3 space-y-2">
-						<div class="font-semibold text-sm">{{ member }}</div>
-						{% for idx in [1, 2, 3] %}
-						<div class="grid grid-cols-[1fr_88px] gap-2">
-							<input id="rewardOption{{ member }}Label{{ idx }}" type="text" maxlength="256" placeholder="Reward {{ idx }} label" class="p-2 border rounded-lg text-sm dark:bg-gray-800 dark:border-gray-600">
-							<input id="rewardOption{{ member }}Stars{{ idx }}" type="number" min="1" max="100" placeholder="Stars" class="p-2 border rounded-lg text-sm dark:bg-gray-800 dark:border-gray-600">
-						</div>
-						{% endfor %}
-					</div>
-					{% endfor %}
+				<div class="flex items-center justify-between gap-2 mb-2">
+					<h3 class="font-semibold"><i class="fa-solid fa-gift mr-1 text-amber-500"></i>Reward Catalog</h3>
+					<button id="openRewardCatalogModalBtn" type="button" class="btn btn-secondary">
+						<i class="fa-solid fa-plus mr-1"></i>Add reward
+					</button>
 				</div>
-				<div class="flex justify-end mt-3">
-					<button id="saveRewardOptionsBtn" type="button" class="btn btn-secondary">Save Reward Options</button>
-				</div>
+				<p class="text-xs text-gray-500 mb-3">Choose a reward name, star cost, and who can redeem it.</p>
+				<div id="rewardCatalogList" class="space-y-2"></div>
 			</div>
 		</div>
 	</div>
@@ -224,6 +220,42 @@
 		</div>
 	</div>
 </div>
+
+<div id="rewardCatalogModal" class="hidden fixed inset-0 z-[80] flex items-center justify-center p-4 sm:p-6">
+	<div id="rewardCatalogModalBackdrop" class="absolute inset-0 bg-black/60"></div>
+	<div class="relative w-full max-w-lg max-h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-3rem)] overflow-y-auto card p-4 sm:p-5">
+		<div class="flex items-center justify-between gap-2">
+			<h3 class="text-lg font-bold">Add Reward</h3>
+			<button id="closeRewardCatalogModalBtn" type="button" class="btn btn-secondary">Close</button>
+		</div>
+		<form id="rewardCatalogForm" class="mt-3 space-y-3">
+			<label class="block text-sm">
+				<span class="text-xs text-gray-600 dark:text-gray-300">Reward name</span>
+				<input id="rewardCatalogName" type="text" maxlength="256" required class="mt-1 w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600" placeholder="Example: Choose dessert night">
+			</label>
+			<label class="block text-sm">
+				<span class="text-xs text-gray-600 dark:text-gray-300">Stars required</span>
+				<input id="rewardCatalogStars" type="range" min="1" max="100" step="1" value="10" class="mt-2 w-full">
+				<div class="text-xs text-gray-500 mt-1"><span id="rewardCatalogStarsValue">10</span> ⭐</div>
+			</label>
+			<div>
+				<div class="text-xs text-gray-600 dark:text-gray-300 mb-2">Who can redeem this?</div>
+				<div class="grid grid-cols-2 gap-2">
+					{% for member in ['Avery', 'Harley', 'Rachel', 'Mykal'] %}
+					<label class="text-sm border rounded-lg px-3 py-2 dark:border-gray-700 flex items-center gap-2">
+						<input type="checkbox" class="reward-catalog-member h-4 w-4" value="{{ member }}" {% if member in ['Avery', 'Harley'] %}checked{% endif %}>
+						<span>{{ member }}</span>
+					</label>
+					{% endfor %}
+				</div>
+			</div>
+			<div class="flex justify-end gap-2 pt-1">
+				<button id="cancelRewardCatalogModalBtn" type="button" class="btn btn-secondary">Cancel</button>
+				<button id="saveRewardCatalogBtn" type="submit" class="btn btn-primary">Save reward</button>
+			</div>
+		</form>
+	</div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -231,6 +263,7 @@
 (() => {
 	let currentState = {{ rewards_state|tojson }};
 	const kidView = {{ kid_view|tojson }};
+	const actorName = {{ actor_name|tojson }};
 	const canManage = !!currentState.can_manage && !kidView;
 	const scoreGrid = document.getElementById('rewardScoreGrid');
 	const doRulesList = document.getElementById('doRulesList');
@@ -251,10 +284,18 @@
 	const timeoutDefaultStarLoss = document.getElementById('timeoutDefaultStarLoss');
 	const timeoutDefaultRewardLoss = document.getElementById('timeoutDefaultRewardLoss');
 	const saveSettingsBtn = document.getElementById('saveSettingsBtn');
-	const saveRewardOptionsBtn = document.getElementById('saveRewardOptionsBtn');
+	const rewardCatalogList = document.getElementById('rewardCatalogList');
+	const rewardCatalogModal = document.getElementById('rewardCatalogModal');
+	const rewardCatalogForm = document.getElementById('rewardCatalogForm');
+	const rewardCatalogName = document.getElementById('rewardCatalogName');
+	const rewardCatalogStars = document.getElementById('rewardCatalogStars');
+	const rewardCatalogStarsValue = document.getElementById('rewardCatalogStarsValue');
+	const saveRewardCatalogBtn = document.getElementById('saveRewardCatalogBtn');
+	const openRewardCatalogModalBtn = document.getElementById('openRewardCatalogModalBtn');
 	const redeemRewardBtn = document.getElementById('redeemRewardBtn');
 	const redeemRewardOption = document.getElementById('redeemRewardOption');
 	const timeoutApplyBtn = document.getElementById('timeoutApplyBtn');
+	const enableKioskModeBtn = document.getElementById('enableKioskModeBtn');
 	const bedtimePlanReader = document.getElementById('bedtimePlanReader');
 	const bedtimePlanBook = document.getElementById('bedtimePlanBook');
 	const bedtimePlanMovie = document.getElementById('bedtimePlanMovie');
@@ -321,8 +362,19 @@
 			const remaining = Number(progress.remaining || 0);
 			const childLocks = currentState.child_locks || {};
 			const locked = !!childLocks[child.child_name];
+			const pendingGrants = Array.isArray(child.pending_grants) ? child.pending_grants : [];
+			const isCurrentChild = String(actorName || '').trim().toLowerCase() === String(child.child_name || '').trim().toLowerCase();
+			const canClaimForCard = !locked && (canManage || isCurrentChild);
 			const lockBanner = locked
 				? `<div class="mt-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 px-3 py-2 text-xs text-red-700 dark:text-red-300">${currentState.pending_repair_message || 'Complete repair task before reward flow resumes.'}</div>`
+				: '';
+			const pendingBanner = pendingGrants.length
+				? `<div class="mt-3 rounded-lg border border-sky-200 dark:border-sky-700 bg-sky-50/80 dark:bg-sky-900/20 px-3 py-2 text-xs text-sky-800 dark:text-sky-200">${pendingGrants.length} dispensed star reward${pendingGrants.length === 1 ? '' : 's'} waiting to be claimed.</div>`
+				: '';
+			const claimButtons = canClaimForCard && pendingGrants.length
+				? `<div class="mt-3 flex flex-wrap gap-2">${pendingGrants.map((grant) => (
+					`<button type="button" class="btn btn-primary reward-claim-btn" data-grant-id="${Number(grant.id || 0)}" data-child="${child.child_name}">Claim +${Number(grant.stars_awarded || 1)} ⭐</button>`
+				)).join('')}</div>`
 				: '';
 			return `<div class="card p-5 border-2 border-yellow-200 dark:border-yellow-700 bg-white/90 dark:bg-gray-900/50">
 				<div class="flex items-center justify-between gap-3">
@@ -339,13 +391,15 @@
 					</div>
 					<div class="mt-2 text-xs text-gray-500">${remaining > 0 ? `${remaining} more stars to go!` : 'Milestone reached — awesome work!'}</div>
 				</div>
+				${pendingBanner}
 				${lockBanner}
 				<div class="mt-4 flex flex-wrap gap-2 ${canManage ? '' : 'hidden'}">
 					<button type="button" class="btn btn-secondary reward-adjust-btn" data-child="${child.child_name}" data-delta="-1">-1 Star</button>
 					<button type="button" class="btn btn-secondary reward-adjust-btn" data-child="${child.child_name}" data-delta="-2">-2 Stars</button>
-					<button type="button" class="btn btn-primary reward-adjust-btn" data-child="${child.child_name}" data-delta="1" ${locked ? 'disabled' : ''}>+1 Star</button>
-					<button type="button" class="btn btn-primary reward-adjust-btn" data-child="${child.child_name}" data-delta="2" ${locked ? 'disabled' : ''}>+2 Stars</button>
+					<button type="button" class="btn btn-primary reward-dispense-btn" data-child="${child.child_name}" data-stars="1" ${locked ? 'disabled' : ''}>Dispense +1</button>
+					<button type="button" class="btn btn-primary reward-dispense-btn" data-child="${child.child_name}" data-stars="2" ${locked ? 'disabled' : ''}>Dispense +2</button>
 				</div>
+				${claimButtons}
 			</div>`;
 		}).join('');
 	}
@@ -489,34 +543,60 @@
 		disciplineMethodsList.innerHTML = methods.map((item) => `<li>${item}</li>`).join('');
 	}
 
-	function collectRewardOptionsFromEditor(childName) {
-		const options = [];
-		for (let idx = 1; idx <= 3; idx += 1) {
-			const labelInput = document.getElementById(`rewardOption${childName}Label${idx}`);
-			const starsInput = document.getElementById(`rewardOption${childName}Stars${idx}`);
-			const reward_label = String(labelInput?.value || '').trim();
-			if (!reward_label) continue;
-			const stars_required = Number(starsInput?.value || 0);
-			options.push({ reward_label, stars_required });
+	function selectedRewardMembers() {
+		return [...document.querySelectorAll('.reward-catalog-member:checked')]
+			.map((node) => String(node.value || '').trim())
+			.filter(Boolean);
+	}
+
+	function openRewardCatalogModal() {
+		if (!canManage || !rewardCatalogModal) return;
+		rewardCatalogName.value = '';
+		rewardCatalogStars.value = '10';
+		rewardCatalogStarsValue.textContent = '10';
+		document.querySelectorAll('.reward-catalog-member').forEach((node) => {
+			node.checked = ['Avery', 'Harley'].includes(String(node.value || '').trim());
+		});
+		rewardCatalogModal.classList.remove('hidden');
+		setTimeout(() => rewardCatalogName.focus(), 10);
+	}
+
+	function closeRewardCatalogModal() {
+		rewardCatalogModal?.classList.add('hidden');
+	}
+
+	async function saveRewardCatalogEntries(rewards) {
+		const response = await fetch('/api/rewards/reward-options', {
+			method: 'PUT',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ rewards }),
+		});
+		const data = await response.json();
+		if (!response.ok || !data.ok || !data.state) {
+			throw new Error(data.error || 'Unable to save reward options');
 		}
-		return options;
+		currentState = data.state;
+		renderAll();
 	}
 
 	function renderRewardOptionEditor() {
-		const byChild = currentState.reward_options_by_child || {};
-		['Avery', 'Harley', 'Rachel', 'Mykal'].forEach((childName) => {
-			const options = Array.isArray(byChild[childName]) ? byChild[childName] : [];
-			for (let idx = 1; idx <= 3; idx += 1) {
-				const entry = options[idx - 1] || {};
-				const labelInput = document.getElementById(`rewardOption${childName}Label${idx}`);
-				const starsInput = document.getElementById(`rewardOption${childName}Stars${idx}`);
-				if (labelInput) labelInput.value = String(entry.reward_label || '');
-				if (starsInput) starsInput.value = Number(entry.stars_required || '');
-				if (labelInput) labelInput.disabled = !canManage;
-				if (starsInput) starsInput.disabled = !canManage;
-			}
-		});
-		if (saveRewardOptionsBtn) saveRewardOptionsBtn.disabled = !canManage;
+		if (!rewardCatalogList) return;
+		const rewards = Array.isArray(currentState.reward_options) ? currentState.reward_options : [];
+		rewardCatalogList.innerHTML = rewards.length
+			? rewards.map((entry, index) => {
+				const applies = Array.isArray(entry.applies_to) ? entry.applies_to : [];
+				return `<div class="rounded-lg border px-3 py-2 dark:border-gray-700">
+					<div class="flex items-start justify-between gap-3">
+						<div>
+							<div class="font-semibold">${entry.reward_label}</div>
+							<div class="text-xs text-gray-500">${Number(entry.stars_required || 0)} ⭐ · ${applies.join(', ') || 'No members selected'}</div>
+						</div>
+						<button type="button" class="btn btn-secondary reward-delete-btn" data-reward-index="${index}" ${canManage ? '' : 'disabled'}>Delete</button>
+					</div>
+				</div>`;
+			}).join('')
+			: '<p class="text-sm text-gray-500">No rewards configured yet. Add one with the + button.</p>';
+		if (openRewardCatalogModalBtn) openRewardCatalogModalBtn.disabled = !canManage;
 	}
 
 	function renderRedeemOptions() {
@@ -621,6 +701,63 @@
 	}
 
 	scoreGrid.addEventListener('click', async (event) => {
+		const claimButton = event.target.closest('.reward-claim-btn');
+		if (claimButton) {
+			const grantId = Number(claimButton.dataset.grantId || 0);
+			if (!grantId) return;
+			claimButton.disabled = true;
+			try {
+				const response = await fetch('/api/rewards/claim', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ grant_id: grantId }),
+				});
+				const data = await response.json();
+				if (!response.ok || !data.ok || !data.state) {
+					globalToast(data.error || 'Unable to claim stars', 'error');
+					return;
+				}
+				currentState = data.state;
+				renderAll();
+				sparkleConfetti();
+				playChime();
+				globalToast('Stars claimed!', 'success');
+			} catch (_) {
+				globalToast('Unable to claim stars right now', 'error');
+			} finally {
+				claimButton.disabled = false;
+			}
+			return;
+		}
+
+		const dispenseButton = event.target.closest('.reward-dispense-btn');
+		if (dispenseButton) {
+			if (!canManage) return;
+			const child = dispenseButton.dataset.child;
+			const stars_awarded = Number(dispenseButton.dataset.stars || 0);
+			dispenseButton.disabled = true;
+			try {
+				const response = await fetch('/api/rewards/dispense', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ child_name: child, stars_awarded }),
+				});
+				const data = await response.json();
+				if (!response.ok || !data.ok || !data.state) {
+					globalToast(data.error || 'Unable to dispense stars', 'error');
+					return;
+				}
+				currentState = data.state;
+				renderAll();
+				globalToast(`Dispensed ${stars_awarded} star${stars_awarded === 1 ? '' : 's'} for ${child}`, 'success');
+			} catch (_) {
+				globalToast('Unable to dispense stars right now', 'error');
+			} finally {
+				dispenseButton.disabled = false;
+			}
+			return;
+		}
+
 		const button = event.target.closest('.reward-adjust-btn');
 		if (!button || !canManage) return;
 		const child = button.dataset.child;
@@ -754,34 +891,76 @@
 		renderRedeemOptions();
 	});
 	redeemRewardOption?.addEventListener('change', () => renderRedeemOptions());
-
-	saveRewardOptionsBtn?.addEventListener('click', async () => {
-		if (!canManage) return;
-		const options = {
-			Avery: collectRewardOptionsFromEditor('Avery'),
-			Harley: collectRewardOptionsFromEditor('Harley'),
-			Rachel: collectRewardOptionsFromEditor('Rachel'),
-			Mykal: collectRewardOptionsFromEditor('Mykal'),
-		};
-		saveRewardOptionsBtn.disabled = true;
+	enableKioskModeBtn?.addEventListener('click', async () => {
+		enableKioskModeBtn.disabled = true;
 		try {
-			const response = await fetch('/api/rewards/reward-options', {
-				method: 'PUT',
+			const response = await fetch('/api/rewards/kiosk-mode', {
+				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ options }),
+				body: JSON.stringify({ enabled: true }),
 			});
 			const data = await response.json();
-			if (!response.ok || !data.ok || !data.state) {
-				globalToast(data.error || 'Unable to save reward options', 'error');
+			if (!response.ok || !data.ok) {
+				globalToast(data.error || 'Unable to enable kiosk mode', 'error');
 				return;
 			}
-			currentState = data.state;
-			renderAll();
-			globalToast('Reward options saved', 'success');
+			window.location.href = '/kids-stars?kiosk=1';
 		} catch (_) {
-			globalToast('Unable to save reward options right now', 'error');
+			globalToast('Unable to enable kiosk mode right now', 'error');
+			enableKioskModeBtn.disabled = false;
+		}
+	});
+	rewardCatalogStars?.addEventListener('input', () => {
+		rewardCatalogStarsValue.textContent = String(rewardCatalogStars.value || '0');
+	});
+	openRewardCatalogModalBtn?.addEventListener('click', openRewardCatalogModal);
+	['closeRewardCatalogModalBtn', 'cancelRewardCatalogModalBtn', 'rewardCatalogModalBackdrop'].forEach((id) => {
+		document.getElementById(id)?.addEventListener('click', closeRewardCatalogModal);
+	});
+	rewardCatalogForm?.addEventListener('submit', async (event) => {
+		event.preventDefault();
+		if (!canManage) return;
+		const reward_label = String(rewardCatalogName?.value || '').trim();
+		const stars_required = Number(rewardCatalogStars?.value || 0);
+		const applies_to = selectedRewardMembers();
+		if (!reward_label) {
+			globalToast('Reward name is required', 'error');
+			return;
+		}
+		if (!applies_to.length) {
+			globalToast('Select at least one family member', 'error');
+			return;
+		}
+		const rewards = [...(Array.isArray(currentState.reward_options) ? currentState.reward_options : []), {
+			reward_label,
+			stars_required,
+			applies_to,
+		}];
+		saveRewardCatalogBtn.disabled = true;
+		try {
+			await saveRewardCatalogEntries(rewards);
+			closeRewardCatalogModal();
+			globalToast('Reward added', 'success');
+		} catch (error) {
+			globalToast(error?.message || 'Unable to add reward', 'error');
 		} finally {
-			saveRewardOptionsBtn.disabled = false;
+			saveRewardCatalogBtn.disabled = false;
+		}
+	});
+	rewardCatalogList?.addEventListener('click', async (event) => {
+		const button = event.target.closest('.reward-delete-btn');
+		if (!button || !canManage) return;
+		const index = Number(button.dataset.rewardIndex || -1);
+		if (index < 0) return;
+		const rewards = [...(Array.isArray(currentState.reward_options) ? currentState.reward_options : [])];
+		if (!rewards[index]) return;
+		rewards.splice(index, 1);
+		button.disabled = true;
+		try {
+			await saveRewardCatalogEntries(rewards);
+			globalToast('Reward removed', 'success');
+		} catch (error) {
+			globalToast(error?.message || 'Unable to remove reward', 'error');
 		}
 	});
 

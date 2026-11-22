@@ -156,6 +156,9 @@
                     </div>
                     {% if current_is_admin %}
                     <div class="flex gap-2 items-center">
+                        <button type="button" class="link-supabase-btn px-3 py-1 text-sm bg-indigo-600 text-white rounded hover:bg-indigo-700 transition" data-member-id="{{ member.id }}" data-member-name="{{ member.name }}" data-member-email="{{ member.email or '' }}">
+                            <i class="fa-solid fa-link mr-1"></i>Link Login
+                        </button>
                         <button type="button" class="edit-btn px-3 py-1 text-sm bg-yellow-600 text-white rounded hover:bg-yellow-700 transition">
                             <i class="fa-solid fa-pen mr-1"></i>Edit
                         </button>
@@ -164,6 +167,10 @@
                         </button>
                     </div>
                     {% endif %}
+                </div>
+
+                <div class="text-xs text-gray-600 dark:text-gray-300">
+                    Login: {% if member.email %}Supabase linked ({{ member.email }}){% else %}Local profile only{% endif %}
                 </div>
                 
                 <!-- PIN Management -->
@@ -287,6 +294,30 @@
     </div>
 </div>
 
+<!-- Link Supabase modal -->
+<div id="linkSupabaseModal" class="fixed inset-0 bg-black/40 hidden items-center justify-center z-50 p-2 md:p-6">
+    <div class="glass-lg w-full max-w-sm p-6 rounded-2xl border border-white/20 shadow-2xl max-h-[calc(100vh-2rem)] md:max-h-[calc(100vh-4rem)] overflow-y-auto">
+        <h4 class="text-lg font-semibold mb-4 text-gray-900 dark:text-gray-100">Link Member to Supabase Login</h4>
+        <form id="linkSupabaseForm" class="space-y-4">
+            <input type="hidden" id="linkSupabaseMemberId">
+            <div class="text-sm text-gray-600 dark:text-gray-300" id="linkSupabaseMemberName"></div>
+            <div>
+                <label class="block text-sm text-gray-600 dark:text-gray-300 mb-2">Email</label>
+                <input type="email" id="linkSupabaseEmail" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-white" required>
+            </div>
+            <div>
+                <label class="block text-sm text-gray-600 dark:text-gray-300 mb-2">Password (optional)</label>
+                <input type="text" id="linkSupabasePassword" autocomplete="new-password" placeholder="Leave blank to keep existing Supabase password" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-white">
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Set this only if you want to create/reset their Supabase password now.</p>
+            </div>
+            <div class="flex justify-end gap-2">
+                <button type="button" id="linkSupabaseCancelBtn" class="btn btn-secondary">Cancel</button>
+                <button type="submit" id="linkSupabaseSaveBtn" class="btn btn-primary">Link Account</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <!-- PIN Management Modal -->
 <div id="pinManagementModal" class="fixed inset-0 bg-black/40 hidden items-center justify-center z-50 p-2 md:p-6">
     <div class="glass-lg w-full max-w-sm p-6 rounded-2xl border border-white/20 shadow-2xl max-h-[calc(100vh-2rem)] md:max-h-[calc(100vh-4rem)] overflow-y-auto">
@@ -355,6 +386,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const editMemberId = document.getElementById('editMemberId');
     const editMemberName = document.getElementById('editMemberName');
     const editCancelBtn = document.getElementById('editCancelBtn');
+    const linkSupabaseModal = document.getElementById('linkSupabaseModal');
+    const linkSupabaseForm = document.getElementById('linkSupabaseForm');
+    const linkSupabaseMemberId = document.getElementById('linkSupabaseMemberId');
+    const linkSupabaseMemberName = document.getElementById('linkSupabaseMemberName');
+    const linkSupabaseEmail = document.getElementById('linkSupabaseEmail');
+    const linkSupabasePassword = document.getElementById('linkSupabasePassword');
+    const linkSupabaseCancelBtn = document.getElementById('linkSupabaseCancelBtn');
+    const linkSupabaseSaveBtn = document.getElementById('linkSupabaseSaveBtn');
     const permissionSubjectSelect = document.getElementById('permissionSubjectSelect');
     const permissionSubjectRole = document.getElementById('permissionSubjectRole');
     const permissionSubjectRoleSave = document.getElementById('permissionSubjectRoleSave');
@@ -605,6 +644,17 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Edit button click
     document.addEventListener('click', (e) => {
+        if (e.target.closest('.link-supabase-btn')) {
+            const button = e.target.closest('.link-supabase-btn');
+            linkSupabaseMemberId.value = button.dataset.memberId || '';
+            linkSupabaseMemberName.textContent = `Member: ${button.dataset.memberName || ''}`;
+            linkSupabaseEmail.value = button.dataset.memberEmail || '';
+            linkSupabasePassword.value = '';
+            linkSupabaseModal.classList.remove('hidden');
+            linkSupabaseModal.classList.add('flex');
+            setTimeout(() => linkSupabaseEmail.focus(), 20);
+            return;
+        }
         if (e.target.closest('.edit-btn')) {
             const item = e.target.closest('.member-item');
             const id = item.dataset.memberId;
@@ -621,6 +671,52 @@ document.addEventListener('DOMContentLoaded', () => {
     editCancelBtn.addEventListener('click', () => {
         editModal.classList.add('hidden');
         editModal.classList.remove('flex');
+    });
+
+    linkSupabaseCancelBtn?.addEventListener('click', () => {
+        linkSupabaseModal.classList.add('hidden');
+        linkSupabaseModal.classList.remove('flex');
+    });
+    linkSupabaseModal?.addEventListener('click', (e) => {
+        if (e.target !== linkSupabaseModal) return;
+        linkSupabaseModal.classList.add('hidden');
+        linkSupabaseModal.classList.remove('flex');
+    });
+
+    linkSupabaseForm?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const id = String(linkSupabaseMemberId.value || '').trim();
+        const email = String(linkSupabaseEmail.value || '').trim();
+        const password = String(linkSupabasePassword.value || '');
+        if (!id || !email) return;
+        linkSupabaseSaveBtn.disabled = true;
+        try {
+            const response = await fetch(`/api/family-members/${id}/link-supabase`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password }),
+            });
+            const data = await response.json();
+            if (!response.ok || !data.ok) {
+                toast(data.error || 'Unable to link Supabase account', 'error');
+                return;
+            }
+            linkSupabaseModal.classList.add('hidden');
+            linkSupabaseModal.classList.remove('flex');
+            await renderMembers();
+            const sync = data.supabase_sync || {};
+            if (data.welcome_email_sent) {
+                toast('Supabase login linked and welcome email sent.', 'success');
+            } else if (sync.ok) {
+                toast('Supabase login linked successfully.', 'success');
+            } else {
+                toast(sync.error || sync.reason || 'Member saved, but Supabase link failed.', 'error');
+            }
+        } catch (err) {
+            toast('Error linking Supabase account: ' + err.message, 'error');
+        } finally {
+            linkSupabaseSaveBtn.disabled = false;
+        }
     });
     
     // Edit submit
@@ -721,6 +817,9 @@ document.addEventListener('DOMContentLoaded', () => {
                             : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300';
                         const actionsHtml = currentIsAdmin ? `
                             <div class="flex gap-2 items-center">
+                                <button type="button" class="link-supabase-btn px-3 py-1 text-sm bg-indigo-600 text-white rounded hover:bg-indigo-700 transition" data-member-id="${member.id}" data-member-name="${escapeHtml(member.name)}" data-member-email="${escapeHtml(member.email || '')}">
+                                    <i class="fa-solid fa-link mr-1"></i>Link Login
+                                </button>
                                 <button type="button" class="edit-btn px-3 py-1 text-sm bg-yellow-600 text-white rounded hover:bg-yellow-700 transition">
                                     <i class="fa-solid fa-pen mr-1"></i>Edit
                                 </button>
@@ -744,6 +843,9 @@ document.addEventListener('DOMContentLoaded', () => {
                                     <span class="member-role-badge px-2 py-0.5 rounded text-xs font-semibold ${roleBadgeClass}">${roleLabel}</span>
                                 </div>
                                 ${actionsHtml}
+                            </div>
+                            <div class="text-xs text-gray-600 dark:text-gray-300">
+                                Login: ${member.supabase_linked ? `Supabase linked (${escapeHtml(member.email || '')})` : 'Local profile only'}
                             </div>
                             <div class="mt-3 pt-3 border-t border-gray-300 dark:border-gray-600">
                                 <div class="flex items-center justify-between">
@@ -1658,7 +1760,7 @@ document.addEventListener('DOMContentLoaded', () => {
 </script>
 
 <style>
-    #editModal.flex, #pinManagementModal.flex {
+    #editModal.flex, #pinManagementModal.flex, #linkSupabaseModal.flex {
         display: flex;
     }
 </style>

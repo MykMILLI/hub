@@ -920,6 +920,18 @@ class KidRewardEvent(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
 
+class KidRewardPendingGrant(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    child_name = db.Column(db.String(128), nullable=False, index=True)
+    stars_awarded = db.Column(db.Integer, nullable=False, default=1)
+    reason = db.Column(db.String(256))
+    dispensed_by = db.Column(db.String(128), nullable=False, index=True)
+    claimed = db.Column(db.Boolean, nullable=False, default=False, index=True)
+    claimed_by = db.Column(db.String(128))
+    claimed_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+
 class KidRewardRedemption(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     child_name = db.Column(db.String(128), nullable=False, index=True)

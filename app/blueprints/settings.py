@@ -288,6 +288,8 @@ def api_get_family_members():
                 "name": m.name,
                 "pin": bool(m.pin),
                 "email": m.email,
+                "supabase_linked": bool(sanitize_text(str(m.email or '')).strip()),
+                "email_is_placeholder": is_placeholder_email(m.email),
                 "avatar": m.avatar,
                 "role": _normalize_role(m.role),
                 "is_admin": _normalize_role(m.role) == 'admin' or _is_config_admin_name(m.name),
@@ -348,6 +350,8 @@ def api_add_family_member():
                 "id": member.id,
                 "name": member.name,
                 "email": member.email,
+                "supabase_linked": bool(sanitize_text(str(member.email or '')).strip()),
+                "email_is_placeholder": is_placeholder_email(member.email),
                 "role": _normalize_role(member.role),
                 "is_admin": _normalize_role(member.role) == 'admin' or _is_config_admin_name(member.name),
             },
@@ -427,6 +431,8 @@ def api_update_family_member(member_id):
                 "name": member.name,
                 "pin": member.pin or "",
                 "email": member.email,
+                "supabase_linked": bool(sanitize_text(str(member.email or '')).strip()),
+                "email_is_placeholder": is_placeholder_email(member.email),
                 "role": _normalize_role(member.role),
                 "is_admin": _normalize_role(member.role) == 'admin' or _is_config_admin_name(member.name),
             },
@@ -543,6 +549,60 @@ def api_toggle_menu_item(menu_item):
             "ok": True,
             "message": f"Menu item '{menu_item}' is now {'visible' if visible else 'hidden'}",
             "menu_visibility": menu_visibility
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
+@main_bp.route('/api/family-members/<int:member_id>/link-supabase', methods=['POST'])
+def api_link_family_member_supabase(member_id):
+    """Link an existing local member profile to a Supabase login account."""
+    try:
+        if not _current_member_is_admin():
+            return jsonify({"ok": False, "error": "Only admins can link members to Supabase"}), 403
+
+        member = FamilyMember.query.get(member_id)
+        if not member:
+            return jsonify({"ok": False, "error": "Family member not found"}), 404
+
+        data = request.get_json(force=True) or {}
+        previous_email = sanitize_text((member.email or '').strip().lower())
+        requested_email = sanitize_text(str(data.get('email', '')).strip().lower())
+        password = str(data.get('password') or '')
+
+        if requested_email and ('@' not in requested_email or '.' not in requested_email.split('@')[-1]):
+            return jsonify({"ok": False, "error": "Invalid email address"}), 400
+        if password and len(password) < MIN_PASSWORD_LENGTH:
+            return jsonify({"ok": False, "error": f"Password must be at least {MIN_PASSWORD_LENGTH} characters"}), 400
+
+        chosen_email = requested_email or sanitize_text(str(member.email or '').strip().lower())
+        if not chosen_email:
+            return jsonify({"ok": False, "error": "Email is required to link this member to Supabase"}), 400
+
+        member.email = chosen_email
+        db.session.commit()
+
+        supabase_sync = _sync_member_upsert_to_supabase(
+            member_name=member.name,
+            member_email=member.email,
+            member_role=member.role,
+            previous_email=previous_email,
+            password=password,
+        )
+        welcome_email_sent = _send_welcome_if_needed(member.name, member.email, supabase_sync)
+        return jsonify({
+            "ok": True,
+            "welcome_email_sent": welcome_email_sent,
+            "member": {
+                "id": member.id,
+                "name": member.name,
+                "email": member.email,
+                "supabase_linked": bool(sanitize_text(str(member.email or '')).strip()),
+                "email_is_placeholder": is_placeholder_email(member.email),
+                "role": _normalize_role(member.role),
+                "is_admin": _normalize_role(member.role) == 'admin' or _is_config_admin_name(member.name),
+            },
+            "supabase_sync": supabase_sync,
         })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 400

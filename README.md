@@ -38,8 +38,9 @@ HomeHub is packed with useful tools to make family life a little more organized:
 * **Private & Self-Hosted**: All your data stays on your network. No cloud, no tracking.
 * **Simple & Lightweight**: Runs smoothly on minimal hardware.
 * **Family-Focused**: Designed to be intuitive for users of all technical skill levels.
-* **Kid-Friendly Routines**: Includes a Gold Star Club dashboard with admin-managed rewards, plus bedtime reader/book/movie assignments children can quickly understand.
-* **Camera Center**: View configured RTSP cameras in-app, send PTZ commands, and capture snapshots or recorded clips through API routes.
+* **Kid-Friendly Routines**: Includes a Gold Star Club dashboard with reward catalog management (name + star slider + who it applies to), parent-dispensed star claims for kids, a kid-friendly tablet view at `/kids-stars`, session-level kiosk lock mode for kid accounts, weekly star behavior rollups, and bedtime reader/book/movie assignments children can quickly understand.
+* **Member Account Linking**: Family members are created locally first, then can be explicitly linked to Supabase login credentials from Settings.
+* **Camera Center**: Video-first camera cards with focused PTZ controls, capability-aware control surface, client-side digital zoom (1.0×–4.0×, drag-to-pan, reset), and capture tools (audio, snapshots, recordings) through authenticated API routes. Digital zoom only enlarges local display; snapshots and recordings keep the original stream output. PTZ lease/watchdog safety is process-local (single worker scope) and should be backed by a shared store for multi-worker hard guarantees.
 * **Customizable**: Toggle features on or off and even change the color theme right from the `config.yml` file.
 
 ![homehub](https://github.com/user-attachments/assets/55b1c580-8897-4073-9e51-2a892a2bdcd4)

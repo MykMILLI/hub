@@ -423,7 +423,9 @@ def test_chore_template_wires_days_collaborators_and_watchers():
     assert 'id="completionCelebrationTitle"' in html
     assert 'Good job!' in html
     assert 'launchConfetti()' in html
-    assert 'id="choreBoard" class="flex flex-nowrap items-stretch gap-4 overflow-x-auto pb-2"' in html
+    assert 'id="choreBoard" class="pb-2"' in html
+    assert '#choreBoard {' in html
+    assert 'grid-template-columns: repeat(auto-fit, minmax(16.5rem, 1fr));' in html
     assert 'class="chore-col-drag-handle"' in html
     assert 'ui:choresBoardOrder' in html
 
