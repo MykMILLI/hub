@@ -164,6 +164,25 @@
       font-size: 0.82rem;
       font-weight: 600;
     }
+    .diagnostic-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 0.45rem 0.6rem;
+      margin: 0;
+      font-size: 0.8rem;
+      color: var(--muted);
+      align-items: baseline;
+    }
+    .diagnostic-grid dt {
+      margin: 0;
+      font-weight: 600;
+    }
+    .diagnostic-grid dd {
+      margin: 0;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      color: #3a2758;
+    }
   </style>
 </head>
 <body>
@@ -232,6 +251,21 @@
             </div>
             <input id="slowMoRange" type="range" min="0.2" max="1.0" step="0.05" value="1.0" />
           </div>
+        </section>
+
+        <section class="card">
+          <h2 class="text-lg font-semibold mb-3">Review diagnostics</h2>
+          <dl class="diagnostic-grid">
+            <dt>Build</dt><dd id="diagBuildId">—</dd>
+            <dt>Selected expression</dt><dd id="diagExpression">—</dd>
+            <dt>Active performance</dt><dd id="diagPerformance">none</dd>
+            <dt>Motion</dt><dd id="diagMotion">running</dd>
+            <dt>Mouth open (current/target)</dt><dd id="diagMouthOpen">—</dd>
+            <dt>Smile (current/target)</dt><dd id="diagSmile">—</dd>
+            <dt>Cheek lift</dt><dd id="diagCheekLift">—</dd>
+            <dt>Eye squint</dt><dd id="diagEyeSquint">—</dd>
+          </dl>
+          <p class="mini mt-3">Diagnostics mirror the real rig controller values for review only.</p>
         </section>
       </aside>
     </main>
