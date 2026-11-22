@@ -1,0 +1,45 @@
+{
+  "buildId": "gold-star-lab-2026-11-22-static-fallback-v1",
+  "url": "http://127.0.0.1:5000/gold-stars/preview/character-lab",
+  "adapterMethods": [
+    "idle",
+    "noticeNewStar",
+    "tapReaction",
+    "collecting",
+    "celebrate",
+    "rewardApproved",
+    "setReducedMotion",
+    "dispose",
+    "getState"
+  ],
+  "state": {
+    "buildId": "gold-star-lab-2026-11-22-static-fallback-v1",
+    "mode": "material",
+    "camera": "front",
+    "action": "celebrate",
+    "reducedMotion": false,
+    "face": {
+      "hasOpenMouth": false,
+      "hasAnimatedEyelids": false,
+      "hasDimples": false,
+      "hasSmileCreases": false,
+      "mouthContours": 1
+    }
+  },
+  "assertions": [
+    {
+      "name": "adapter_contract_methods_present",
+      "pass": true
+    },
+    {
+      "name": "static_face_fallback_flags",
+      "pass": true
+    },
+    {
+      "name": "no_console_errors",
+      "pass": true
+    }
+  ],
+  "consoleErrors": [],
+  "screenshot": "C:\\clones\\homehub\\docs\\gold-stars-preview\\phase8-fallback-static-face.png"
+}

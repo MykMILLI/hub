@@ -218,27 +218,16 @@
         </section>
 
         <section class="card">
-          <h2 class="text-lg font-semibold mb-3">Greeting performance review</h2>
+          <h2 class="text-lg font-semibold mb-3">Character adapter actions</h2>
           <div class="control-grid">
-            <button class="btn primary" data-performance="play" id="playGreetingBtn">Play greeting</button>
-            <button class="btn" data-performance="restart" id="restartGreetingBtn">Restart</button>
-            <button class="btn" data-performance="pause" id="pauseMotionBtn" aria-pressed="false">Pause</button>
+            <button class="btn primary" data-action="idle">idle</button>
+            <button class="btn" data-action="noticeNewStar">noticeNewStar</button>
+            <button class="btn" data-action="tapReaction">tapReaction</button>
+            <button class="btn" data-action="collecting">collecting</button>
+            <button class="btn" data-action="celebrate">celebrate</button>
+            <button class="btn" data-action="rewardApproved">rewardApproved</button>
           </div>
-          <div class="slider-wrap mt-3">
-            <div class="slider-row">
-              <label for="greetingProgressRange" class="mini">Greeting progress</label>
-              <span id="greetingProgressBadge" class="badge">0%</span>
-            </div>
-            <input id="greetingProgressRange" type="range" min="0" max="100" step="1" value="0" />
-            <div class="slider-row mini" aria-hidden="true">
-              <span>Relaxed</span>
-              <span>Recognition</span>
-              <span>Anticipation</span>
-              <span>Delight</span>
-              <span>Settle</span>
-            </div>
-          </div>
-          <p class="mini mt-3">One coordinated timeline drives body + face from relaxed to delighted and back.</p>
+          <p class="mini mt-3">Temporary static-face fallback using the approved connected star body. These actions exercise the renderer adapter contract only.</p>
         </section>
 
         <section class="card">
@@ -254,28 +243,21 @@
             <input type="checkbox" id="motionToggle" />
             Reduced motion override
           </label>
-          <div class="slider-wrap mt-3">
-            <div class="slider-row">
-              <label for="slowMoRange" class="mini">Slow motion</label>
-              <span id="slowMoBadge" class="badge">1.00×</span>
-            </div>
-            <input id="slowMoRange" type="range" min="0.2" max="1.0" step="0.05" value="1.0" />
-          </div>
         </section>
 
         <section class="card">
           <h2 class="text-lg font-semibold mb-3">Review diagnostics</h2>
           <dl class="diagnostic-grid">
             <dt>Build</dt><dd id="diagBuildId">—</dd>
-            <dt>Selected expression</dt><dd id="diagExpression">—</dd>
+            <dt>Adapter action</dt><dd id="diagExpression">idle</dd>
             <dt>Active performance</dt><dd id="diagPerformance">none</dd>
-            <dt>Motion</dt><dd id="diagMotion">running</dd>
-            <dt>Mouth open (current/target)</dt><dd id="diagMouthOpen">—</dd>
-            <dt>Smile (current/target)</dt><dd id="diagSmile">—</dd>
-            <dt>Cheek lift</dt><dd id="diagCheekLift">—</dd>
-            <dt>Eye squint</dt><dd id="diagEyeSquint">—</dd>
+            <dt>Motion</dt><dd id="diagMotion">static</dd>
+            <dt>Mouth open (current/target)</dt><dd id="diagMouthOpen">0 / 0</dd>
+            <dt>Smile (current/target)</dt><dd id="diagSmile">1 / 1</dd>
+            <dt>Cheek lift</dt><dd id="diagCheekLift">0</dd>
+            <dt>Eye squint</dt><dd id="diagEyeSquint">0</dd>
           </dl>
-          <p class="mini mt-3">Diagnostics mirror the real rig controller values for review only.</p>
+          <p class="mini mt-3">Fallback diagnostics show one static-face renderer and active adapter state.</p>
         </section>
       </aside>
     </main>
