@@ -7,834 +7,836 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='output.css') }}?v={{ asset_version|default('1') }}">
   <style>
     :root {
-      --preview-bg: radial-gradient(circle at top left, #fff8db 0%, #fef3c7 28%, #f3ecff 72%, #efe8ff 100%);
-      --surface: rgba(255, 255, 255, 0.84);
-      --surface-border: rgba(139, 92, 246, 0.18);
-      --accent: #7c3aed;
-      --text-strong: #3a2758;
-      --text-soft: #6a4a91;
-      --star-gold: #ffd149;
-      --star-shadow: rgba(221, 146, 22, 0.44);
-      --board-star: #f6bf3d;
-      --danger: #be185d;
+      --bg: radial-gradient(circle at top left, #fff8db 0%, #fef3c7 26%, #f3ecff 70%, #efe8ff 100%);
+      --surface: rgba(255, 255, 255, 0.9);
+      --border: rgba(139, 92, 246, 0.2);
+      --text: #3a2758;
+      --muted: #6a4a91;
+      --purple: #7c3aed;
       --ok: #166534;
+      --warn: #9a3412;
+      --danger: #be123c;
     }
-    body.preview-body {
+    body {
       margin: 0;
       min-height: 100vh;
       font-family: Inter, "Segoe UI", sans-serif;
-      background: var(--preview-bg);
-      color: var(--text-strong);
-      overflow-x: hidden;
+      color: var(--text);
+      background: var(--bg);
     }
-    .preview-shell {
-      max-width: 1180px;
+    .shell {
+      max-width: 1240px;
       margin: 0 auto;
       padding: 1rem 1rem 2rem;
       display: grid;
       gap: 1rem;
     }
-    .preview-banner {
-      border: 1px solid var(--surface-border);
-      border-radius: 1rem;
+    .card {
       background: var(--surface);
-      backdrop-filter: blur(4px);
+      border: 1px solid var(--border);
+      border-radius: 1rem;
       padding: 0.9rem 1rem;
+      box-shadow: 0 12px 28px rgba(76, 29, 149, 0.08);
+    }
+    .banner {
       display: flex;
-      flex-wrap: wrap;
       justify-content: space-between;
       align-items: center;
-      gap: 0.75rem;
+      gap: 1rem;
+      flex-wrap: wrap;
     }
-    .preview-tag {
+    .tag {
+      display: inline-flex;
+      border-radius: 999px;
       background: #ede9fe;
       color: #5b21b6;
-      border-radius: 999px;
-      padding: 0.25rem 0.7rem;
+      padding: 0.2rem 0.65rem;
       font-size: 0.78rem;
       font-weight: 700;
-      letter-spacing: 0.02em;
       text-transform: uppercase;
+      letter-spacing: 0.02em;
     }
-    .preview-layout {
+    .tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+    }
+    .tab-btn {
+      border: 1px solid #c4b5fd;
+      border-radius: 999px;
+      background: #f5f3ff;
+      color: #5b21b6;
+      font-weight: 700;
+      padding: 0.4rem 0.75rem;
+      cursor: pointer;
+    }
+    .tab-btn.active {
+      background: var(--purple);
+      color: #fff;
+      border-color: var(--purple);
+    }
+    .grid-two {
       display: grid;
-      grid-template-columns: minmax(0, 1.6fr) minmax(320px, 1fr);
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 1rem;
-      align-items: start;
     }
-    @media (max-width: 1000px) {
-      .preview-layout {
-        grid-template-columns: 1fr;
-      }
-    }
-    .panel {
-      border: 1px solid var(--surface-border);
-      border-radius: 1rem;
-      background: var(--surface);
-      backdrop-filter: blur(3px);
-      box-shadow: 0 14px 34px rgba(76, 29, 149, 0.08);
-      padding: 1rem;
-    }
-    .child-stage {
-      position: relative;
-      min-height: 460px;
-      overflow: hidden;
-    }
-    .child-stage::before {
-      content: "";
-      position: absolute;
-      inset: 0;
-      background: radial-gradient(circle at 14% 0%, rgba(255, 255, 255, 0.7) 0%, transparent 56%);
-      pointer-events: none;
-    }
-    .child-name {
-      margin: 0;
-      font-size: 1.45rem;
-      font-weight: 800;
-      letter-spacing: -0.01em;
-    }
-    .totals {
-      margin-top: 0.85rem;
+    .grid-three {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 0.5rem;
     }
-    .total-card {
+    @media (max-width: 960px) {
+      .grid-two,
+      .grid-three {
+        grid-template-columns: 1fr;
+      }
+    }
+    .metric {
+      border: 1px solid rgba(139, 92, 246, 0.16);
       border-radius: 0.8rem;
-      background: rgba(255, 255, 255, 0.78);
-      border: 1px solid rgba(139, 92, 246, 0.12);
-      padding: 0.55rem 0.7rem;
+      padding: 0.5rem 0.65rem;
+      background: #fff;
     }
-    .total-card .label {
-      margin: 0;
-      color: var(--text-soft);
-      font-size: 0.75rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.03em;
-    }
-    .total-card .value {
-      margin: 0.18rem 0 0;
-      font-size: 1.18rem;
-      font-weight: 800;
-      color: var(--text-strong);
-    }
-    .character-wrap {
-      margin-top: 1rem;
-      display: grid;
-      place-items: center;
-      min-height: 190px;
-    }
-    .star-character {
-      width: 172px;
-      aspect-ratio: 1;
-      position: relative;
-      filter: drop-shadow(0 18px 22px rgba(103, 53, 34, 0.28));
-      transform-origin: center 74%;
-      animation: idle-float 3.8s ease-in-out infinite;
-      cursor: pointer;
-      touch-action: manipulation;
-    }
-    .star-character .body {
-      position: absolute;
-      inset: 0;
-      clip-path: polygon(50% 0%, 62% 30%, 94% 35%, 70% 56%, 78% 90%, 50% 71%, 22% 90%, 30% 56%, 6% 35%, 38% 30%);
-      border-radius: 24px;
-      background:
-        radial-gradient(circle at 30% 28%, #fff9d8 0%, rgba(255, 249, 216, 0.98) 10%, transparent 46%),
-        radial-gradient(circle at 68% 72%, rgba(235, 153, 26, 0.38), transparent 62%),
-        linear-gradient(155deg, #ffe27a 10%, #ffd149 48%, #f4ad2f 100%);
-    }
-    .star-character .face {
-      position: absolute;
-      inset: 0;
-      display: grid;
-      place-items: center;
-      transform: translateY(6px);
-      pointer-events: none;
-    }
-    .eyes {
-      display: flex;
-      gap: 1rem;
-    }
-    .eye {
-      width: 23px;
-      height: 29px;
-      border-radius: 12px;
-      background: linear-gradient(180deg, #1f2937 0%, #111827 100%);
-      position: relative;
-      overflow: hidden;
-    }
-    .eye::before {
-      content: "";
-      position: absolute;
-      width: 9px;
-      height: 9px;
-      border-radius: 50%;
-      top: 5px;
-      left: 6px;
-      background: rgba(255, 255, 255, 0.92);
-    }
-    .eye::after {
-      content: "";
-      position: absolute;
-      inset: 0;
-      background: rgba(243, 244, 246, 0.96);
-      transform: scaleY(0);
-      transform-origin: top;
-      animation: blink 5.6s infinite;
-    }
-    .mouth {
-      margin-top: 0.6rem;
-      width: 28px;
-      height: 16px;
-      border-bottom: 3px solid #7b2e2e;
-      border-radius: 0 0 18px 18px;
-      transform: translateY(-2px);
-    }
-    .cheek {
-      position: absolute;
-      top: 58%;
-      width: 14px;
-      height: 9px;
-      border-radius: 999px;
-      background: rgba(255, 145, 173, 0.45);
-      filter: blur(0.5px);
-    }
-    .cheek.left { left: 44px; }
-    .cheek.right { right: 44px; }
-    .arm {
-      position: absolute;
-      width: 36px;
-      height: 10px;
-      border-radius: 999px;
-      background: linear-gradient(180deg, #ffd56a 0%, #f5b036 100%);
-      top: 53%;
-    }
-    .arm.left {
-      left: 4px;
-      transform-origin: 96% 50%;
-      transform: rotate(38deg);
-    }
-    .arm.right {
-      right: 4px;
-      transform-origin: 4% 50%;
-      transform: rotate(-32deg);
-    }
-    .character-wrap.notice .arm.right {
-      animation: wave 0.95s ease-in-out infinite;
-    }
-    .character-wrap.proud .star-character {
-      animation: proud-hop 0.9s ease-in-out;
-    }
-    .character-wrap.tap-react .star-character {
-      animation: tap-wiggle 0.55s ease-in-out;
-    }
-    .waiting-zone {
-      margin-top: 1.1rem;
-      border-radius: 0.9rem;
-      border: 1px dashed rgba(124, 58, 237, 0.34);
-      background: rgba(255, 255, 255, 0.68);
-      padding: 0.75rem;
-    }
-    .waiting-zone h3 {
-      margin: 0;
-      font-size: 0.9rem;
-      color: var(--text-soft);
+    .metric p { margin: 0; }
+    .metric .label { color: var(--muted); font-size: 0.78rem; font-weight: 600; text-transform: uppercase; }
+    .metric .value { margin-top: 0.15rem; font-size: 1.15rem; font-weight: 800; }
+    .btn {
+      border: 1px solid transparent;
+      border-radius: 0.72rem;
       font-weight: 700;
+      padding: 0.5rem 0.75rem;
+      cursor: pointer;
     }
-    .waiting-stars {
-      margin-top: 0.5rem;
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .btn-primary { background: var(--purple); color: #fff; }
+    .btn-soft { background: #ede9fe; color: #5b21b6; border-color: #c4b5fd; }
+    .btn-danger { background: #ffe4e6; color: var(--danger); border-color: #fecdd3; }
+    .hidden { display: none !important; }
+    .mini { font-size: 0.82rem; color: var(--muted); margin: 0; }
+    .reward-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+      gap: 0.65rem;
+    }
+    .reward-item {
+      border: 1px solid rgba(139, 92, 246, 0.16);
+      border-radius: 0.9rem;
+      padding: 0.65rem;
+      background: #fff;
+    }
+    .reward-illus {
+      width: 100%;
+      height: 92px;
+      border-radius: 0.8rem;
+      display: grid;
+      place-items: center;
+      font-size: 1.9rem;
+      background: linear-gradient(165deg, #fef3c7 0%, #ede9fe 100%);
+      border: 1px solid rgba(139, 92, 246, 0.2);
+    }
+    .table-like {
+      display: grid;
+      gap: 0.55rem;
+      max-height: 360px;
+      overflow: auto;
+      padding-right: 0.2rem;
+    }
+    .row {
+      border-radius: 0.75rem;
+      border: 1px solid rgba(139, 92, 246, 0.16);
+      background: #fff;
+      padding: 0.55rem 0.65rem;
+    }
+    .row-title {
+      margin: 0;
+      font-weight: 700;
+      font-size: 0.92rem;
+    }
+    .status {
+      display: inline-flex;
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      border-radius: 999px;
+      padding: 0.1rem 0.5rem;
+      letter-spacing: 0.02em;
+    }
+    .status.pending { background: #fef3c7; color: #854d0e; }
+    .status.approved, .status.ready { background: #dcfce7; color: #166534; }
+    .status.declined { background: #ffe4e6; color: var(--danger); }
+    .status.invalidated { background: #fee2e2; color: #991b1b; }
+    .status.delivered { background: #dbeafe; color: #1e3a8a; }
+    .history-filters {
       display: flex;
       flex-wrap: wrap;
       gap: 0.5rem;
-      min-height: 36px;
+      margin-bottom: 0.65rem;
     }
-    .waiting-star {
-      border: 0;
-      border-radius: 999px;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.4rem;
-      background: rgba(255, 240, 196, 0.92);
-      box-shadow: 0 8px 12px rgba(166, 108, 20, 0.2);
-      color: #5c3f17;
-      font-weight: 700;
-      padding: 0.4rem 0.72rem;
-      cursor: pointer;
-      touch-action: manipulation;
-      transition: transform 150ms ease, box-shadow 150ms ease;
+    input[type="text"], input[type="number"], select {
+      border: 1px solid #cbd5e1;
+      border-radius: 0.6rem;
+      padding: 0.42rem 0.55rem;
+      font: inherit;
+      min-width: 0;
+      width: 100%;
+      box-sizing: border-box;
+      background: #fff;
     }
-    .waiting-star:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 10px 14px rgba(166, 108, 20, 0.24);
-    }
-    .waiting-star.compress {
-      transform: scale(0.88);
-    }
-    .board-stars {
-      margin-top: 1rem;
-      border-radius: 0.95rem;
-      background: rgba(255, 255, 255, 0.78);
-      border: 1px solid rgba(139, 92, 246, 0.14);
-      padding: 0.75rem;
-    }
-    .board-stars h3 {
-      margin: 0;
-      font-size: 0.9rem;
-      color: var(--text-soft);
-      font-weight: 700;
-    }
-    .board-grid {
-      margin-top: 0.55rem;
+    .editor-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(24px, 1fr));
-      gap: 0.4rem;
-      max-height: 106px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.6rem;
+    }
+    @media (max-width: 800px) {
+      .editor-grid { grid-template-columns: 1fr; }
+    }
+    .character {
+      width: 136px;
+      aspect-ratio: 1;
+      margin: 0 auto;
+      position: relative;
+      cursor: pointer;
+      filter: drop-shadow(0 10px 16px rgba(131, 77, 19, 0.3));
+      touch-action: manipulation;
+    }
+    .character .body {
+      position: absolute;
+      inset: 0;
+      clip-path: polygon(50% 0%, 61% 33%, 94% 35%, 67% 56%, 76% 88%, 50% 70%, 24% 88%, 33% 56%, 6% 35%, 39% 33%);
+      background: linear-gradient(160deg, #ffe385 0%, #ffc94c 56%, #efac2f 100%);
+    }
+    .character .face {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      transform: translateY(7px);
+      color: #4b1d1d;
+      font-size: 0.82rem;
+      font-weight: 700;
+    }
+    .character.state-idle { animation: idle 3.6s ease-in-out infinite; }
+    .character.state-noticeNewStar { animation: notice 0.95s ease-in-out infinite; }
+    .character.state-tapReaction { animation: tap 0.5s ease-in-out; }
+    .character.state-collecting { animation: collect 0.5s ease-in-out infinite; }
+    .character.state-celebrate { animation: celebrate 0.8s ease-in-out; }
+    .character.state-rewardApproved { animation: approved 0.7s ease-in-out; }
+    .board {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(22px, 1fr));
+      gap: 0.32rem;
+      max-height: 120px;
       overflow: auto;
       padding-right: 0.2rem;
     }
     .board-star {
-      width: 24px;
-      height: 24px;
-      background: radial-gradient(circle at 30% 30%, #fff6d1 0%, #fff6d1 20%, rgba(255, 246, 209, 0) 52%), linear-gradient(165deg, #ffd969 0%, #f3b43b 100%);
+      width: 22px;
+      height: 22px;
       clip-path: polygon(50% 0%, 61% 33%, 94% 35%, 67% 56%, 76% 88%, 50% 70%, 24% 88%, 33% 56%, 6% 35%, 39% 33%);
-      filter: drop-shadow(0 2px 2px rgba(175, 104, 12, 0.33));
-      animation: star-drop 420ms ease;
+      background: linear-gradient(160deg, #ffe17a 0%, #f6bb3d 100%);
     }
-    .reward-card {
-      margin-top: 1rem;
-      border-radius: 0.9rem;
-      background: rgba(255, 255, 255, 0.82);
-      border: 1px solid rgba(124, 58, 237, 0.16);
-      padding: 0.8rem;
-    }
-    .reward-row {
-      display: flex;
-      justify-content: space-between;
-      gap: 0.5rem;
-      align-items: center;
-    }
-    .history-list {
-      list-style: none;
-      margin: 0.7rem 0 0;
-      padding: 0;
-      display: grid;
-      gap: 0.45rem;
-      max-height: 290px;
-      overflow: auto;
-    }
-    .history-list li {
-      border-radius: 0.65rem;
-      padding: 0.5rem 0.6rem;
-      background: rgba(255, 255, 255, 0.72);
-      border: 1px solid rgba(148, 163, 184, 0.24);
-      display: grid;
-      gap: 0.2rem;
-    }
-    .history-stars {
-      font-size: 0.82rem;
-      font-weight: 700;
-    }
-    .history-stars.pos { color: var(--ok); }
-    .history-stars.neg { color: var(--danger); }
-    .demo-controls {
-      margin-top: 0.7rem;
-      display: grid;
-      gap: 0.55rem;
-    }
-    .btn {
-      border: 1px solid transparent;
-      border-radius: 0.72rem;
-      padding: 0.55rem 0.8rem;
-      font-weight: 700;
-      font-size: 0.87rem;
-      cursor: pointer;
-      transition: transform 120ms ease, filter 120ms ease;
-      touch-action: manipulation;
-    }
-    .btn:disabled {
-      cursor: not-allowed;
-      filter: grayscale(0.34) opacity(0.7);
-    }
-    .btn:hover:not(:disabled) { transform: translateY(-1px); }
-    .btn-primary { background: #7c3aed; color: #fff; }
-    .btn-secondary { background: #ede9fe; color: #5b21b6; border-color: #c4b5fd; }
-    .btn-danger { background: #ffe4e6; color: #be123c; border-color: #fecdd3; }
-    .small-muted { font-size: 0.78rem; color: var(--text-soft); margin: 0; }
-    .flying-star {
-      position: fixed;
-      width: 32px;
-      height: 32px;
-      z-index: 40;
-      pointer-events: none;
-      background: radial-gradient(circle at 30% 30%, #fff7d5 0%, #fff7d5 26%, rgba(255, 247, 213, 0) 56%), linear-gradient(155deg, #ffe17a 0%, #f4b43c 100%);
-      clip-path: polygon(50% 0%, 61% 33%, 94% 35%, 67% 56%, 76% 88%, 50% 70%, 24% 88%, 33% 56%, 6% 35%, 39% 33%);
-      filter: drop-shadow(0 4px 4px rgba(170, 112, 30, 0.35));
-      transform-origin: center;
-    }
-    .toast {
-      position: fixed;
-      right: 12px;
-      bottom: 12px;
-      background: rgba(17, 24, 39, 0.9);
-      color: #fff;
-      border-radius: 0.65rem;
-      padding: 0.55rem 0.7rem;
-      font-size: 0.84rem;
-      opacity: 0;
-      transform: translateY(8px);
-      transition: opacity 180ms ease, transform 180ms ease;
-      pointer-events: none;
-    }
-    .toast.show {
-      opacity: 1;
-      transform: translateY(0);
-    }
-    .sparkles {
-      position: absolute;
-      width: 40px;
-      height: 40px;
-      pointer-events: none;
-      z-index: 20;
-    }
-    .sparkles::before, .sparkles::after {
-      content: "";
-      position: absolute;
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: rgba(255, 227, 138, 0.88);
-      animation: sparkle 450ms ease-out forwards;
-    }
-    .sparkles::before { top: 4px; left: 4px; }
-    .sparkles::after { right: 6px; bottom: 6px; animation-delay: 80ms; }
-    @keyframes idle-float {
-      0%, 100% { transform: translateY(0) rotate(-1.4deg); }
-      50% { transform: translateY(-5px) rotate(1.4deg); }
-    }
-    @keyframes blink {
-      0%, 44%, 50%, 100% { transform: scaleY(0); }
-      46%, 48% { transform: scaleY(1); }
-    }
-    @keyframes wave {
-      0%, 100% { transform: rotate(-28deg); }
-      50% { transform: rotate(-65deg); }
-    }
-    @keyframes proud-hop {
-      0% { transform: translateY(0) scale(1); }
-      35% { transform: translateY(-10px) scale(1.04); }
-      100% { transform: translateY(0) scale(1); }
-    }
-    @keyframes tap-wiggle {
-      0% { transform: rotate(0deg); }
-      25% { transform: rotate(-4deg); }
-      55% { transform: rotate(4deg); }
-      100% { transform: rotate(0deg); }
-    }
-    @keyframes star-drop {
-      0% { transform: translateY(-6px) scale(0.86); opacity: 0.6; }
-      65% { transform: translateY(2px) scale(1.05); opacity: 1; }
-      100% { transform: translateY(0) scale(1); opacity: 1; }
-    }
-    @keyframes sparkle {
-      0% { transform: scale(0.45); opacity: 0.9; }
-      100% { transform: scale(1.85); opacity: 0; }
-    }
+    @keyframes idle { 0%, 100% { transform: translateY(0) rotate(-1deg); } 50% { transform: translateY(-5px) rotate(1deg); } }
+    @keyframes notice { 0%,100% { transform: rotate(0deg); } 50% { transform: rotate(-8deg); } }
+    @keyframes tap { 0% { transform: scale(1); } 50% { transform: scale(0.92); } 100% { transform: scale(1); } }
+    @keyframes collect { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+    @keyframes celebrate { 0% { transform: scale(1); } 45% { transform: scale(1.12); } 100% { transform: scale(1); } }
+    @keyframes approved { 0%,100% { transform: rotate(0deg); } 30% { transform: rotate(-8deg); } 65% { transform: rotate(8deg); } }
     @media (prefers-reduced-motion: reduce) {
-      .star-character,
-      .eye::after,
-      .character-wrap.notice .arm.right {
-        animation: none !important;
-      }
-      .btn { transition: none; }
+      .character { animation: none !important; }
     }
   </style>
 </head>
-<body class="preview-body">
-  <div class="preview-shell">
-    <header class="preview-banner">
+<body>
+  <div class="shell">
+    <header class="card banner">
       <div>
-        <span class="preview-tag">Gold Star Club Preview</span>
-        <h1 class="text-xl font-bold mt-2 mb-1">Mills-Roberts Home — Child Experience Prototype</h1>
-        <p class="small-muted">Signed in as {{ actor_name }}. This route uses isolated demo state only and does not write production rewards data.</p>
+        <span class="tag">Gold Star Club preview</span>
+        <h1 class="text-xl font-bold mt-2 mb-1">Mills-Roberts Home — Isolated Rewards Prototype</h1>
+        <p class="mini">Signed in as {{ actor_name }}. Session preview only, no production rewards-table writes.</p>
       </div>
-      <div class="text-right">
-        <p class="small-muted mb-1">Route: <code>/gold-stars/preview</code></p>
-        <a class="btn btn-secondary inline-block" href="/gold-stars">Back to live rewards</a>
+      <div>
+        <p class="mini mb-2">Parent URL: <code>/gold-stars/preview</code></p>
+        <a class="btn btn-soft inline-block" href="/gold-stars">Back to live rewards</a>
       </div>
     </header>
 
-    <div class="preview-layout">
-      <section class="panel child-stage">
-        <h2 class="child-name">Avery’s Star Board</h2>
-        <p class="small-muted">Playful preview for tablet-style child view (prototype only).</p>
+    <section class="card" id="parentToolbar">
+      <div class="tabs">
+        <button class="tab-btn" data-view="parent-overview">Overview</button>
+        <button class="tab-btn" data-view="parent-rewards">Rewards</button>
+        <button class="tab-btn" data-view="parent-requests">Requests / delivery</button>
+        <button class="tab-btn" data-view="parent-history">History</button>
+        <button class="tab-btn" data-view="child-board" data-child="Avery">View Avery child screen</button>
+        <button class="tab-btn" data-view="child-board" data-child="Harley">View Harley child screen</button>
+      </div>
+      <div class="flex gap-2 mt-3">
+        <button class="btn btn-danger" id="resetDemoBtn">Reset preview state</button>
+        <label class="mini flex items-center gap-2">
+          <input type="checkbox" id="motionToggle" />
+          Reduced motion override
+        </label>
+        <span class="mini">Sound: unavailable in this prototype.</span>
+      </div>
+    </section>
 
-        <div class="totals">
-          <article class="total-card">
-            <p class="label">Available stars</p>
-            <p id="availableStars" class="value">0</p>
-          </article>
-          <article class="total-card">
-            <p class="label">All-time earned</p>
-            <p id="earnedStars" class="value">0</p>
-          </article>
-          <article class="total-card">
-            <p class="label">Spent on rewards</p>
-            <p id="spentStars" class="value">0</p>
-          </article>
-        </div>
-
-        <div id="characterWrap" class="character-wrap" aria-live="polite">
-          <div id="starCharacter" class="star-character" title="Tap me for a friendly reaction">
-            <div class="body"></div>
-            <span class="arm left"></span>
-            <span class="arm right"></span>
-            <div class="face">
-              <div>
-                <div class="eyes"><span class="eye"></span><span class="eye"></span></div>
-                <div class="mouth"></div>
-              </div>
-            </div>
-            <span class="cheek left"></span>
-            <span class="cheek right"></span>
-          </div>
-        </div>
-
-        <section class="waiting-zone">
-          <div class="flex items-center justify-between gap-2">
-            <h3>Waiting stars to collect</h3>
-            <p id="waitingCount" class="small-muted">0 waiting</p>
-          </div>
-          <div id="waitingStars" class="waiting-stars"></div>
-        </section>
-
-        <section class="board-stars">
-          <h3>Owned stars on board</h3>
-          <div id="boardGrid" class="board-grid" aria-label="Owned stars"></div>
-        </section>
-
-        <section class="reward-card">
-          <div class="reward-row">
-            <div>
-              <h3 id="rewardLabel" class="font-semibold m-0 text-sm">Reward example</h3>
-              <p class="small-muted mt-1 mb-0">Spending reduces available stars only; all-time earned stays unchanged.</p>
-            </div>
-            <p id="rewardStatus" class="small-muted m-0">Status: requested</p>
-          </div>
-          <button id="approveRewardBtn" type="button" class="btn btn-primary mt-3 w-full">Approve 5-star reward</button>
-        </section>
-      </section>
-
-      <aside class="panel">
-        <h2 class="text-base font-bold mt-0">Parent / Developer Demo Panel</h2>
-        <p class="small-muted">This panel is preview-only and will not appear in the child-facing production UI.</p>
-        <div class="demo-controls">
-          <button id="giveStarBtn" type="button" class="btn btn-primary">Give demo star (+1 earned, +1 waiting)</button>
-          <button id="resetDemoBtn" type="button" class="btn btn-danger">Reset demo state</button>
-          <label class="flex items-center justify-between gap-2 border rounded-xl px-3 py-2 border-violet-200 bg-violet-50/60">
-            <span class="small-muted">Animation enabled</span>
-            <input id="motionToggle" type="checkbox" />
-          </label>
-          <label class="flex items-center justify-between gap-2 border rounded-xl px-3 py-2 border-violet-200 bg-violet-50/60">
-            <span class="small-muted">Sound enabled (off by default)</span>
-            <input id="soundToggle" type="checkbox" />
-          </label>
-          <p class="small-muted">If reduced motion is enabled by device preference, animated transitions are minimized automatically.</p>
-        </div>
-        <hr class="my-3 border-violet-200/60" />
-        <h3 class="text-sm font-semibold mt-0 mb-2">Demo history</h3>
-        <ul id="historyList" class="history-list"></ul>
-      </aside>
-    </div>
+    <main>
+      <section id="view-parent-overview" class="view card hidden"></section>
+      <section id="view-parent-rewards" class="view card hidden"></section>
+      <section id="view-parent-requests" class="view card hidden"></section>
+      <section id="view-parent-history" class="view card hidden"></section>
+      <section id="view-child-board" class="view card hidden"></section>
+      <section id="view-child-rewards" class="view card hidden"></section>
+      <section id="view-child-story" class="view card hidden"></section>
+    </main>
   </div>
-  <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <script>
-    (function initGoldStarPreview() {
+    (() => {
       const initialState = {{ preview_state|tojson }};
-      const state = {
-        data: initialState,
-        requestInFlight: false,
+      const initialView = {{ initial_view|tojson }};
+      const initialChild = {{ initial_child|tojson }};
+      const emojiByImageRef = { dessert: "🍨", game: "🎲", weekend: "🎟️", star: "⭐", treat: "🧁" };
+
+      const app = {
+        state: initialState,
+        view: initialView || "parent-overview",
+        child: initialChild || "Avery",
+        historyFilterChild: "all",
+        historyFilterType: "all",
+        busy: false,
       };
-      const prefersReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
       const dom = {
-        availableStars: document.getElementById('availableStars'),
-        earnedStars: document.getElementById('earnedStars'),
-        spentStars: document.getElementById('spentStars'),
-        waitingCount: document.getElementById('waitingCount'),
-        waitingStars: document.getElementById('waitingStars'),
-        boardGrid: document.getElementById('boardGrid'),
-        rewardLabel: document.getElementById('rewardLabel'),
-        rewardStatus: document.getElementById('rewardStatus'),
-        giveStarBtn: document.getElementById('giveStarBtn'),
-        approveRewardBtn: document.getElementById('approveRewardBtn'),
-        resetDemoBtn: document.getElementById('resetDemoBtn'),
-        motionToggle: document.getElementById('motionToggle'),
-        soundToggle: document.getElementById('soundToggle'),
-        historyList: document.getElementById('historyList'),
-        toast: document.getElementById('toast'),
-        characterWrap: document.getElementById('characterWrap'),
-        starCharacter: document.getElementById('starCharacter'),
+        parentToolbar: document.getElementById("parentToolbar"),
+        motionToggle: document.getElementById("motionToggle"),
+        resetDemoBtn: document.getElementById("resetDemoBtn"),
+        views: {
+          parentOverview: document.getElementById("view-parent-overview"),
+          parentRewards: document.getElementById("view-parent-rewards"),
+          parentRequests: document.getElementById("view-parent-requests"),
+          parentHistory: document.getElementById("view-parent-history"),
+          childBoard: document.getElementById("view-child-board"),
+          childRewards: document.getElementById("view-child-rewards"),
+          childStory: document.getElementById("view-child-story"),
+        },
+        tabButtons: Array.from(document.querySelectorAll(".tab-btn")),
       };
 
-      const pathConfig = {
-        state: '/api/gold-stars/preview/state',
-        give: '/api/gold-stars/preview/demo/give-star',
-        collect: '/api/gold-stars/preview/demo/collect',
-        approve: '/api/gold-stars/preview/demo/approve-reward',
-        reset: '/api/gold-stars/preview/reset',
+      const api = {
+        state: "/api/gold-stars/preview/state",
+        reset: "/api/gold-stars/preview/reset",
+        prefs: "/api/gold-stars/preview/preferences",
+        awards: "/api/gold-stars/preview/awards",
+        collect: "/api/gold-stars/preview/awards/collect",
+        catalog: "/api/gold-stars/preview/catalog",
+        requestReward: "/api/gold-stars/preview/requests",
       };
 
-      function showToast(message) {
-        dom.toast.textContent = message || '';
-        dom.toast.classList.add('show');
-        window.setTimeout(() => dom.toast.classList.remove('show'), 2100);
+      function currentChildData() {
+        return (app.state.children || {})[app.child] || null;
       }
 
-      function motionEnabled() {
-        return !!dom.motionToggle.checked && !prefersReducedMotion;
+      function stateClassForCharacter(childData) {
+        if (!childData) return "idle";
+        if ((childData.latest_delivery || {}).status === "ready") return "rewardApproved";
+        if ((childData.waiting_count || 0) > 0) return "noticeNewStar";
+        return "idle";
       }
 
       async function requestJson(url, options) {
         const response = await fetch(url, Object.assign({
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'same-origin',
+          method: "GET",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
         }, options || {}));
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok || !payload.ok) {
-          throw new Error(payload.error || 'Request failed');
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok || !body.ok) {
+          throw new Error(body.error || "Request failed");
         }
-        return payload;
+        return body;
       }
 
-      function setButtonsDisabled(disabled) {
-        state.requestInFlight = !!disabled;
-        dom.giveStarBtn.disabled = !!disabled;
-        dom.resetDemoBtn.disabled = !!disabled;
-        dom.approveRewardBtn.disabled = !!disabled || (state.data.reward_demo && state.data.reward_demo.status !== 'requested');
-      }
-
-      function renderHistory() {
-        dom.historyList.innerHTML = '';
-        const rows = Array.isArray(state.data.history) ? state.data.history : [];
-        if (!rows.length) {
-          const empty = document.createElement('li');
-          empty.textContent = 'No demo events yet.';
-          dom.historyList.appendChild(empty);
-          return;
-        }
-        rows.slice(0, 14).forEach((row) => {
-          const item = document.createElement('li');
-          const line = document.createElement('div');
-          line.textContent = row.message || 'Updated';
-          line.className = 'text-sm font-medium';
-          const stars = Number(row.stars || 0);
-          const meta = document.createElement('div');
-          meta.className = 'history-stars ' + (stars < 0 ? 'neg' : 'pos');
-          if (stars === 0) {
-            meta.className = 'small-muted';
-            meta.textContent = 'Info';
-          } else {
-            meta.textContent = `${stars > 0 ? '+' : ''}${stars} stars`;
+      function setBusy(flag) {
+        app.busy = !!flag;
+        for (const button of document.querySelectorAll("button")) {
+          if (button.id === "resetDemoBtn" || button.dataset.action) {
+            button.disabled = app.busy;
           }
-          item.appendChild(line);
-          item.appendChild(meta);
-          dom.historyList.appendChild(item);
+        }
+      }
+
+      function escapeHtml(input) {
+        return String(input || "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      }
+
+      function childUrl(childName) {
+        return `/gold-stars/preview/child/${encodeURIComponent(childName || "Avery")}`;
+      }
+
+      function badge(status) {
+        return `<span class="status ${escapeHtml(status)}">${escapeHtml(status)}</span>`;
+      }
+
+      function renderParentOverview() {
+        const cards = ["Avery", "Harley"].map((child) => {
+          const data = app.state.children[child];
+          return `
+            <article class="card">
+              <div class="flex items-center justify-between gap-2">
+                <h2 class="text-lg font-bold m-0">${child}</h2>
+                <a class="btn btn-soft" href="${childUrl(child)}">Open child preview</a>
+              </div>
+              <div class="grid-three mt-3">
+                <div class="metric"><p class="label">Available</p><p class="value">${data.available}</p></div>
+                <div class="metric"><p class="label">Waiting</p><p class="value">${data.waiting_count}</p></div>
+                <div class="metric"><p class="label">All-time earned</p><p class="value">${data.earned}</p></div>
+                <div class="metric"><p class="label">Net spent</p><p class="value">${data.spent}</p></div>
+                <div class="metric"><p class="label">Pending requests</p><p class="value">${(app.state.requests || []).filter((r) => r.child_name === child && r.status === "pending").length}</p></div>
+                <div class="metric"><p class="label">Approved to deliver</p><p class="value">${(app.state.delivery_queue || []).filter((d) => d.child_name === child && d.status === "ready").length}</p></div>
+              </div>
+              <div class="mt-3 grid-two">
+                <input type="text" data-note-input="${child}" placeholder="Optional award note" />
+                <button class="btn btn-primary" data-action="award-star" data-child="${child}">Give ${child} one star</button>
+              </div>
+            </article>`;
+        }).join("");
+        dom.views.parentOverview.innerHTML = `
+          <h2 class="text-xl font-bold mt-0 mb-2">Parent overview</h2>
+          <p class="mini mb-3">Demo view identity never changes your real session authorization.</p>
+          <div class="grid-two">${cards}</div>`;
+      }
+
+      function renderParentRewards() {
+        const catalogCards = (app.state.catalog || []).map((reward) => `
+          <article class="reward-item">
+            <div class="reward-illus">${emojiByImageRef[reward.image_ref] || "⭐"}</div>
+            <h3 class="row-title mt-2 mb-1">${escapeHtml(reward.name)}</h3>
+            <p class="mini">Cost: ${reward.cost} stars</p>
+            <p class="mini">Eligible: ${(reward.eligible_children || []).join(", ")}</p>
+            <p class="mini">Status: ${reward.active ? "Active" : "Archived"}</p>
+            <div class="flex gap-2 mt-2">
+              <button class="btn btn-soft" data-action="edit-reward" data-reward-id="${reward.id}">Edit</button>
+              ${reward.active ? `<button class="btn btn-danger" data-action="archive-reward" data-reward-id="${reward.id}">Archive</button>` : ""}
+            </div>
+          </article>
+        `).join("");
+        dom.views.parentRewards.innerHTML = `
+          <h2 class="text-xl font-bold mt-0 mb-2">Reward catalog editor</h2>
+          <p class="mini mb-3">Cost is validated server-side as integer 1-${app.state.notes.cost_bound}. Images are local illustration references for this prototype.</p>
+          <form id="rewardEditorForm" class="card mb-3">
+            <div class="editor-grid">
+              <label class="mini">Reward name
+                <input type="text" id="rewardName" required />
+              </label>
+              <label class="mini">Picture/illustration
+                <select id="rewardImageRef">
+                  <option value="dessert">Dessert illustration</option>
+                  <option value="game">Game illustration</option>
+                  <option value="weekend">Weekend illustration</option>
+                  <option value="star">Star illustration</option>
+                  <option value="treat">Treat illustration</option>
+                </select>
+              </label>
+              <label class="mini">Exact cost
+                <input type="number" id="rewardCostInput" min="1" max="${app.state.notes.cost_bound}" value="5" />
+              </label>
+              <label class="mini">Cost slider
+                <input type="range" id="rewardCostSlider" min="1" max="${app.state.notes.cost_bound}" value="5" />
+              </label>
+            </div>
+            <div class="flex items-center gap-4 mt-2">
+              <label class="mini"><input type="checkbox" id="eligibleAvery" checked /> Avery</label>
+              <label class="mini"><input type="checkbox" id="eligibleHarley" checked /> Harley</label>
+              <label class="mini"><input type="checkbox" id="rewardActive" checked /> Active</label>
+              <button class="btn btn-primary" type="submit">Add reward</button>
+            </div>
+          </form>
+          <div class="reward-grid">${catalogCards || '<p class="mini">No rewards yet.</p>'}</div>`;
+      }
+
+      function renderParentRequests() {
+        const requestRows = (app.state.requests || []).map((req) => `
+          <article class="row">
+            <div class="flex items-center justify-between gap-2">
+              <p class="row-title m-0">${escapeHtml(req.child_name)} requested ${escapeHtml(req.reward_name)} (${req.requested_cost}⭐)</p>
+              ${badge(req.status)}
+            </div>
+            <p class="mini mt-1 mb-0">${escapeHtml(req.status_message || "—")}</p>
+            ${(req.status === "pending")
+              ? `<div class="flex gap-2 mt-2">
+                  <button class="btn btn-primary" data-action="approve-request" data-request-id="${req.id}">Approve</button>
+                  <button class="btn btn-danger" data-action="decline-request" data-request-id="${req.id}">Decline</button>
+                </div>` : "" }
+          </article>`).join("");
+        const deliveryRows = (app.state.delivery_queue || []).map((delivery) => `
+          <article class="row">
+            <div class="flex items-center justify-between gap-2">
+              <p class="row-title m-0">${escapeHtml(delivery.child_name)} · ${escapeHtml(delivery.reward_name)} (${delivery.reward_cost}⭐)</p>
+              ${badge(delivery.status)}
+            </div>
+            <p class="mini mt-1 mb-0">Approved by ${escapeHtml(delivery.approved_by || "parent")}</p>
+            ${(delivery.status === "ready")
+              ? `<button class="btn btn-primary mt-2" data-action="deliver-reward" data-delivery-id="${delivery.id}">Mark delivered</button>`
+              : `<p class="mini mt-2 mb-0">Delivered by ${escapeHtml(delivery.delivered_by || "parent")}</p>`}
+          </article>`).join("");
+        dom.views.parentRequests.innerHTML = `
+          <h2 class="text-xl font-bold mt-0 mb-2">Requests and shared delivery queue</h2>
+          <div class="grid-two">
+            <section>
+              <h3 class="text-base font-semibold mt-0">Purchase requests</h3>
+              <div class="table-like">${requestRows || '<p class="mini">No requests yet.</p>'}</div>
+            </section>
+            <section>
+              <h3 class="text-base font-semibold mt-0">Delivery queue</h3>
+              <div class="table-like">${deliveryRows || '<p class="mini">No approved rewards waiting delivery.</p>'}</div>
+            </section>
+          </div>`;
+      }
+
+      function renderParentHistory() {
+        const allRows = app.state.history || [];
+        const rows = allRows.filter((row) => {
+          const childOk = app.historyFilterChild === "all" || row.child_name === app.historyFilterChild;
+          const typeOk = app.historyFilterType === "all" || row.event_type === app.historyFilterType;
+          return childOk && typeOk;
         });
+        const items = rows.map((row) => `
+          <article class="row">
+            <div class="flex items-center justify-between gap-2">
+              <p class="row-title m-0">${escapeHtml(row.message)}</p>
+              ${badge(row.event_type)}
+            </div>
+            <p class="mini mt-1 mb-0">${escapeHtml(row.child_name || "Family")} · ${escapeHtml(row.actor || "system")} · ${escapeHtml(row.created_at || "")}</p>
+            ${row.context ? `<p class="mini mt-1 mb-0">${escapeHtml(row.context)}</p>` : ""}
+          </article>
+        `).join("");
+        dom.views.parentHistory.innerHTML = `
+          <h2 class="text-xl font-bold mt-0 mb-2">Parent history</h2>
+          <div class="history-filters">
+            <select id="historyFilterChild">
+              <option value="all">All children</option>
+              <option value="Avery" ${app.historyFilterChild === "Avery" ? "selected" : ""}>Avery</option>
+              <option value="Harley" ${app.historyFilterChild === "Harley" ? "selected" : ""}>Harley</option>
+            </select>
+            <select id="historyFilterType">
+              <option value="all">All activity</option>
+              <option value="awarded" ${app.historyFilterType === "awarded" ? "selected" : ""}>Awarded</option>
+              <option value="collected" ${app.historyFilterType === "collected" ? "selected" : ""}>Collected</option>
+              <option value="requested" ${app.historyFilterType === "requested" ? "selected" : ""}>Requested</option>
+              <option value="approved" ${app.historyFilterType === "approved" ? "selected" : ""}>Approved</option>
+              <option value="declined" ${app.historyFilterType === "declined" ? "selected" : ""}>Declined</option>
+              <option value="invalidated" ${app.historyFilterType === "invalidated" ? "selected" : ""}>Invalidated</option>
+              <option value="delivered" ${app.historyFilterType === "delivered" ? "selected" : ""}>Delivered</option>
+            </select>
+          </div>
+          <div class="table-like">${items || '<p class="mini">No history yet.</p>'}</div>`;
       }
 
-      function createBoardStars(total) {
-        dom.boardGrid.innerHTML = '';
-        const count = Math.max(0, Number(total || 0));
-        for (let i = 0; i < count; i += 1) {
-          const star = document.createElement('span');
-          star.className = 'board-star';
-          dom.boardGrid.appendChild(star);
+      function childNav(active) {
+        return `
+          <div class="tabs mb-3">
+            <button class="tab-btn ${active === "child-board" ? "active" : ""}" data-view="child-board" data-child="${app.child}">My Board</button>
+            <button class="tab-btn ${active === "child-rewards" ? "active" : ""}" data-view="child-rewards" data-child="${app.child}">My Rewards</button>
+            <button class="tab-btn ${active === "child-story" ? "active" : ""}" data-view="child-story" data-child="${app.child}">My Star Story</button>
+            <button class="tab-btn" data-view="parent-overview">Back to parent preview</button>
+          </div>`;
+      }
+
+      function characterHtml(stateName) {
+        const safeState = ["idle", "noticeNewStar", "tapReaction", "collecting", "celebrate", "rewardApproved"].includes(stateName) ? stateName : "idle";
+        return `
+          <div class="character state-${safeState}" data-action="tap-character">
+            <div class="body"></div>
+            <div class="face">★</div>
+          </div>
+          <p class="mini text-center mt-2">Temporary procedural star (replaceable visual component)</p>`;
+      }
+
+      function renderChildBoard() {
+        const child = currentChildData();
+        if (!child) return;
+        const waiting = (child.waiting_awards || []).map((award) => `
+          <article class="row">
+            <p class="row-title m-0">Waiting star #${award.id}</p>
+            <p class="mini mt-1 mb-0">${escapeHtml(award.note || "Parent approved a star")}</p>
+            <button class="btn btn-primary mt-2" data-action="collect-star" data-award-id="${award.id}" data-child="${app.child}">Collect star</button>
+          </article>
+        `).join("");
+        const stars = new Array(Math.max(0, Number(child.board_stars || 0))).fill(0).map(() => '<span class="board-star"></span>').join("");
+        dom.views.childBoard.innerHTML = `
+          ${childNav("child-board")}
+          <h2 class="text-xl font-bold mt-0 mb-2">${app.child} · My Board</h2>
+          <div class="grid-two">
+            <section>
+              <div class="grid-three">
+                <div class="metric"><p class="label">Available</p><p class="value">${child.available}</p></div>
+                <div class="metric"><p class="label">Waiting</p><p class="value">${child.waiting_count}</p></div>
+                <div class="metric"><p class="label">All-time earned</p><p class="value">${child.earned}</p></div>
+              </div>
+              <h3 class="text-base font-semibold mt-3 mb-2">Waiting stars</h3>
+              <div class="table-like">${waiting || '<p class="mini">No waiting stars right now.</p>'}</div>
+              <h3 class="text-base font-semibold mt-3 mb-2">Collected board stars</h3>
+              <div class="board">${stars || '<p class="mini">No stars yet.</p>'}</div>
+            </section>
+            <section>
+              ${characterHtml(stateClassForCharacter(child))}
+              <p class="mini mt-3">Character states: idle, noticeNewStar, tapReaction, collecting, celebrate, rewardApproved.</p>
+              <p class="mini mt-1">Animation can fail without blocking accounting or API outcomes.</p>
+              <p class="mini mt-1">Sound unavailable in this prototype.</p>
+            </section>
+          </div>`;
+      }
+
+      function renderChildRewards() {
+        const child = currentChildData();
+        if (!child) return;
+        const cards = (child.active_rewards || []).map((reward) => `
+          <article class="reward-item">
+            <div class="reward-illus">${emojiByImageRef[reward.image_ref] || "⭐"}</div>
+            <h3 class="row-title mt-2 mb-1">${escapeHtml(reward.name)}</h3>
+            <p class="mini">Cost: ${reward.cost} stars</p>
+            <p class="mini">Remaining after request: ${reward.remaining_after_request}</p>
+            <button class="btn ${reward.affordable ? "btn-primary" : "btn-soft"} mt-2" data-action="request-reward" data-reward-id="${reward.id}" data-child="${app.child}" ${reward.affordable ? "" : "disabled"}>${reward.affordable ? "Request reward" : "Not enough stars"}</button>
+          </article>
+        `).join("");
+        const pending = child.pending_request;
+        const delivery = child.latest_delivery;
+        dom.views.childRewards.innerHTML = `
+          ${childNav("child-rewards")}
+          <h2 class="text-xl font-bold mt-0 mb-2">${app.child} · My Rewards</h2>
+          ${pending ? `<div class="row mb-3">${badge(pending.status)} <p class="mini mt-2 mb-0">Waiting for parent: ${escapeHtml(pending.reward_name)} (${pending.requested_cost}⭐)</p></div>` : ""}
+          ${delivery ? `<div class="row mb-3">${badge(delivery.status)} <p class="mini mt-2 mb-0">${escapeHtml(delivery.reward_name)} · ${delivery.status === "ready" ? "Approved / ready to enjoy" : "Delivered"}</p></div>` : ""}
+          <div class="reward-grid">${cards || '<p class="mini">No eligible active rewards right now.</p>'}</div>`;
+      }
+
+      function renderChildStory() {
+        const child = currentChildData();
+        if (!child) return;
+        const timeline = (child.history || []).map((row) => `
+          <article class="row">
+            <div class="flex items-center justify-between gap-2">
+              <p class="row-title m-0">${escapeHtml(row.message)}</p>
+              ${badge(row.event_type)}
+            </div>
+            <p class="mini mt-1 mb-0">${escapeHtml(row.created_at || "")}</p>
+            ${row.reward ? `<p class="mini mt-1 mb-0">Reward picture: ${emojiByImageRef[row.reward.image_ref] || "⭐"} ${escapeHtml(row.reward.name)}</p>` : ""}
+          </article>`).join("");
+        dom.views.childStory.innerHTML = `
+          ${childNav("child-story")}
+          <h2 class="text-xl font-bold mt-0 mb-2">${app.child} · My Star Story</h2>
+          <p class="mini mb-2">Spending stars on rewards does not erase all-time earned achievements.</p>
+          <div class="table-like">${timeline || '<p class="mini">No story events yet.</p>'}</div>`;
+      }
+
+      function render() {
+        renderParentOverview();
+        renderParentRewards();
+        renderParentRequests();
+        renderParentHistory();
+        renderChildBoard();
+        renderChildRewards();
+        renderChildStory();
+        const viewToId = {
+          "parent-overview": "parentOverview",
+          "parent-rewards": "parentRewards",
+          "parent-requests": "parentRequests",
+          "parent-history": "parentHistory",
+          "child-board": "childBoard",
+          "child-rewards": "childRewards",
+          "child-story": "childStory",
+        };
+        for (const [key, value] of Object.entries(dom.views)) {
+          value.classList.toggle("hidden", viewToId[app.view] !== key);
+        }
+        const childView = app.view.startsWith("child-");
+        dom.parentToolbar.classList.toggle("hidden", childView);
+        dom.motionToggle.checked = !app.state.motion_enabled;
+        for (const tab of dom.tabButtons) {
+          const tabView = tab.dataset.view || "";
+          const tabChild = tab.dataset.child || "";
+          const active = tabView === app.view && (!tabChild || tabChild === app.child);
+          tab.classList.toggle("active", active);
         }
       }
 
-      function waitingChip(row) {
-        const chip = document.createElement('button');
-        chip.type = 'button';
-        chip.className = 'waiting-star';
-        chip.dataset.waitingId = String(row.id);
-        chip.innerHTML = '<span aria-hidden="true">⭐</span><span>Collect star</span>';
-        chip.addEventListener('click', () => collectWaitingStar(chip, row.id));
-        return chip;
+      async function refreshState() {
+        const payload = await requestJson(api.state);
+        app.state = payload.state;
+        render();
       }
 
-      function renderWaiting() {
-        dom.waitingStars.innerHTML = '';
-        const waiting = Array.isArray(state.data.waiting) ? state.data.waiting : [];
-        waiting.forEach((row) => dom.waitingStars.appendChild(waitingChip(row)));
-        dom.waitingCount.textContent = `${waiting.length} waiting`;
-        if (waiting.length) {
-          dom.characterWrap.classList.add('notice');
-        } else {
-          dom.characterWrap.classList.remove('notice');
-        }
-      }
-
-      function renderState() {
-        dom.availableStars.textContent = String(state.data.available || 0);
-        dom.earnedStars.textContent = String(state.data.earned || 0);
-        dom.spentStars.textContent = String(state.data.spent || 0);
-        const reward = state.data.reward_demo || {};
-        dom.rewardLabel.textContent = `${reward.label || 'Reward'} (${reward.cost || 0} stars)`;
-        dom.rewardStatus.textContent = `Status: ${reward.status || 'requested'}`;
-        createBoardStars(state.data.available || 0);
-        renderWaiting();
-        renderHistory();
-        setButtonsDisabled(false);
-      }
-
-      function addSparkles() {
-        const rect = dom.boardGrid.getBoundingClientRect();
-        const spark = document.createElement('span');
-        spark.className = 'sparkles';
-        spark.style.left = `${rect.left + rect.width - 44}px`;
-        spark.style.top = `${rect.top + 4}px`;
-        document.body.appendChild(spark);
-        window.setTimeout(() => spark.remove(), 520);
-      }
-
-      async function syncState() {
-        const payload = await requestJson(pathConfig.state, { method: 'GET' });
-        state.data = payload.state || state.data;
-      }
-
-      async function collectWaitingStar(chip, waitingId) {
-        if (state.requestInFlight) {
-          return;
-        }
-        const waitingBefore = Number(state.data.waiting_count || 0);
-        setButtonsDisabled(true);
-        chip.classList.add('compress');
+      async function post(url, body) {
+        setBusy(true);
         try {
-          if (motionEnabled()) {
-            await animateCollection(chip);
-          }
-          const payload = await requestJson(pathConfig.collect, {
-            method: 'POST',
-            body: JSON.stringify({ waiting_id: waitingId }),
+          const payload = await requestJson(url, { method: "POST", body: JSON.stringify(body || {}) });
+          app.state = payload.state || app.state;
+          render();
+          return payload;
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      async function put(url, body) {
+        setBusy(true);
+        try {
+          const payload = await requestJson(url, { method: "PUT", body: JSON.stringify(body || {}) });
+          app.state = payload.state || app.state;
+          render();
+          return payload;
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      function wireStaticEvents() {
+        dom.tabButtons.forEach((tab) => {
+          tab.addEventListener("click", () => {
+            app.view = tab.dataset.view || "parent-overview";
+            if (tab.dataset.child) app.child = tab.dataset.child;
+            render();
           });
-          state.data = payload.state || state.data;
-          renderState();
-          dom.characterWrap.classList.remove('notice');
-          dom.characterWrap.classList.add('proud');
-          window.setTimeout(() => dom.characterWrap.classList.remove('proud'), 900);
-          if (motionEnabled()) {
-            addSparkles();
+        });
+        dom.resetDemoBtn.addEventListener("click", async () => {
+          await post(api.reset, {});
+          app.view = "parent-overview";
+          app.child = "Avery";
+          render();
+        });
+        dom.motionToggle.addEventListener("change", async () => {
+          await post(api.prefs, { motion_enabled: !dom.motionToggle.checked });
+        });
+      }
+
+      document.addEventListener("submit", async (event) => {
+        const form = event.target;
+        if (!(form instanceof HTMLFormElement)) return;
+        if (form.id !== "rewardEditorForm") return;
+        event.preventDefault();
+        const name = document.getElementById("rewardName").value;
+        const costInput = document.getElementById("rewardCostInput");
+        const imageRef = document.getElementById("rewardImageRef").value;
+        const eligibleChildren = [];
+        if (document.getElementById("eligibleAvery").checked) eligibleChildren.push("Avery");
+        if (document.getElementById("eligibleHarley").checked) eligibleChildren.push("Harley");
+        const active = document.getElementById("rewardActive").checked;
+        await post(api.catalog, {
+          name,
+          cost: Number(costInput.value),
+          image_ref: imageRef,
+          eligible_children: eligibleChildren,
+          active,
+        });
+        form.reset();
+        document.getElementById("rewardCostInput").value = "5";
+        document.getElementById("rewardCostSlider").value = "5";
+      });
+
+      document.addEventListener("input", (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) return;
+        if (target.id === "rewardCostInput") {
+          const slider = document.getElementById("rewardCostSlider");
+          slider.value = target.value || "1";
+        }
+        if (target.id === "rewardCostSlider") {
+          const number = document.getElementById("rewardCostInput");
+          number.value = target.value || "1";
+        }
+      });
+
+      document.addEventListener("change", (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLSelectElement)) return;
+        if (target.id === "historyFilterChild") {
+          app.historyFilterChild = target.value;
+          renderParentHistory();
+        }
+        if (target.id === "historyFilterType") {
+          app.historyFilterType = target.value;
+          renderParentHistory();
+        }
+      });
+
+      document.addEventListener("click", async (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) return;
+        const actionEl = target.closest("[data-action]");
+        if (!actionEl) return;
+        const action = actionEl.getAttribute("data-action");
+        if (!action) return;
+        if (action === "tap-character") {
+          const character = actionEl;
+          character.className = "character state-tapReaction";
+          window.setTimeout(() => { character.className = `character state-${stateClassForCharacter(currentChildData())}`; }, 500);
+          return;
+        }
+        try {
+          if (action === "award-star") {
+            const child = actionEl.getAttribute("data-child");
+            const noteInput = document.querySelector(`[data-note-input="${child}"]`);
+            const note = noteInput ? noteInput.value : "";
+            await post(api.awards, { child_name: child, note });
+            if (noteInput) noteInput.value = "";
+            return;
           }
-          showToast(waitingBefore > Number(state.data.waiting_count || 0) ? 'Star collected! Great job, Avery.' : 'Collected.');
-        } catch (error) {
-          showToast(error.message || 'Unable to collect that star.');
-          setButtonsDisabled(false);
-        }
-      }
-
-      async function animateCollection(sourceEl) {
-        const sourceRect = sourceEl.getBoundingClientRect();
-        const targetRect = dom.boardGrid.getBoundingClientRect();
-        const star = document.createElement('span');
-        star.className = 'flying-star';
-        star.style.left = `${sourceRect.left + sourceRect.width / 2 - 16}px`;
-        star.style.top = `${sourceRect.top + sourceRect.height / 2 - 16}px`;
-        document.body.appendChild(star);
-        const dx = (targetRect.left + Math.min(targetRect.width - 16, 36)) - sourceRect.left;
-        const dy = (targetRect.top + 26) - sourceRect.top;
-        await star.animate([
-          { transform: 'translate(0, 0) scale(0.9)', opacity: 1, offset: 0 },
-          { transform: `translate(${dx * 0.55}px, ${dy * 0.3 - 56}px) scale(1.12)`, opacity: 1, offset: 0.55 },
-          { transform: `translate(${dx}px, ${dy}px) scale(0.66)`, opacity: 0.96, offset: 1 },
-        ], { duration: 620, easing: 'cubic-bezier(0.22, 0.84, 0.31, 1)' }).finished.catch(() => null);
-        star.remove();
-      }
-
-      async function giveDemoStar() {
-        if (state.requestInFlight) {
-          return;
-        }
-        setButtonsDisabled(true);
-        try {
-          const payload = await requestJson(pathConfig.give, { method: 'POST', body: '{}' });
-          state.data = payload.state || state.data;
-          renderState();
-          dom.characterWrap.classList.add('notice');
-          showToast('One demo star is now waiting to collect.');
-        } catch (error) {
-          showToast(error.message || 'Unable to add a waiting star.');
-          setButtonsDisabled(false);
-        }
-      }
-
-      async function approveReward() {
-        if (state.requestInFlight) {
-          return;
-        }
-        setButtonsDisabled(true);
-        try {
-          const payload = await requestJson(pathConfig.approve, { method: 'POST', body: '{}' });
-          state.data = payload.state || state.data;
-          renderState();
-          showToast('Reward approved. Available stars exchanged.');
-        } catch (error) {
-          showToast(error.message || 'Unable to approve reward.');
-          setButtonsDisabled(false);
-        }
-      }
-
-      async function resetDemo() {
-        if (state.requestInFlight) {
-          return;
-        }
-        setButtonsDisabled(true);
-        try {
-          const payload = await requestJson(pathConfig.reset, { method: 'POST', body: '{}' });
-          state.data = payload.state || state.data;
-          renderState();
-          showToast('Demo state reset.');
-        } catch (error) {
-          showToast(error.message || 'Unable to reset demo.');
-          setButtonsDisabled(false);
-        }
-      }
-
-      function bindEvents() {
-        dom.giveStarBtn.addEventListener('click', giveDemoStar);
-        dom.approveRewardBtn.addEventListener('click', approveReward);
-        dom.resetDemoBtn.addEventListener('click', resetDemo);
-        dom.starCharacter.addEventListener('click', () => {
-          dom.characterWrap.classList.remove('tap-react');
-          void dom.characterWrap.offsetWidth;
-          dom.characterWrap.classList.add('tap-react');
-          window.setTimeout(() => dom.characterWrap.classList.remove('tap-react'), 620);
-        });
-        dom.motionToggle.addEventListener('change', () => {
-          if (!dom.motionToggle.checked) {
-            dom.characterWrap.classList.remove('notice', 'proud', 'tap-react');
+          if (action === "collect-star") {
+            await post(api.collect, {
+              child_name: actionEl.getAttribute("data-child"),
+              award_id: Number(actionEl.getAttribute("data-award-id")),
+            });
+            return;
           }
-          showToast(dom.motionToggle.checked ? 'Animation enabled.' : 'Animation reduced.');
-        });
-        dom.soundToggle.addEventListener('change', () => {
-          showToast(dom.soundToggle.checked ? 'Sound enabled (placeholder).' : 'Sound off.');
-        });
-      }
+          if (action === "request-reward") {
+            await post(api.requestReward, {
+              child_name: actionEl.getAttribute("data-child"),
+              reward_id: Number(actionEl.getAttribute("data-reward-id")),
+            });
+            return;
+          }
+          if (action === "approve-request") {
+            await post(`/api/gold-stars/preview/requests/${Number(actionEl.getAttribute("data-request-id"))}/approve`, {});
+            return;
+          }
+          if (action === "decline-request") {
+            await post(`/api/gold-stars/preview/requests/${Number(actionEl.getAttribute("data-request-id"))}/decline`, {});
+            return;
+          }
+          if (action === "deliver-reward") {
+            await post(`/api/gold-stars/preview/delivery/${Number(actionEl.getAttribute("data-delivery-id"))}/deliver`, {});
+            return;
+          }
+          if (action === "archive-reward") {
+            await post(`/api/gold-stars/preview/catalog/${Number(actionEl.getAttribute("data-reward-id"))}/archive`, {});
+            return;
+          }
+          if (action === "edit-reward") {
+            const rewardId = Number(actionEl.getAttribute("data-reward-id"));
+            const reward = (app.state.catalog || []).find((r) => Number(r.id) === rewardId);
+            if (!reward) return;
+            const nextCost = Math.max(1, Math.min(app.state.notes.cost_bound, Number(window.prompt("New cost", String(reward.cost)) || reward.cost)));
+            const nextName = window.prompt("New reward name", reward.name) || reward.name;
+            await put(`/api/gold-stars/preview/catalog/${rewardId}`, { name: nextName, cost: nextCost });
+            return;
+          }
+        } catch (err) {
+          window.alert(err.message || "Action failed");
+        }
+      });
 
       async function boot() {
-        dom.motionToggle.checked = !prefersReducedMotion;
-        dom.soundToggle.checked = false;
-        bindEvents();
-        try {
-          await syncState();
-        } catch (error) {
-          showToast(error.message || 'Preview failed to load.');
-        }
-        renderState();
+        wireStaticEvents();
+        render();
+        await refreshState();
       }
 
-      boot();
+      boot().catch((error) => {
+        window.alert(error.message || "Failed to load preview");
+      });
     })();
   </script>
 </body>

@@ -484,6 +484,8 @@ def test_gold_star_preview_requires_parent_or_admin(client):
         session['current_member'] = 'Avery'
     page = client.get('/gold-stars/preview')
     assert page.status_code == 403
+    child_page = client.get('/gold-stars/preview/child/Avery')
+    assert child_page.status_code == 403
     api_state = client.get('/api/gold-stars/preview/state')
     assert api_state.status_code == 403
     payload = api_state.get_json()
@@ -494,70 +496,164 @@ def test_gold_star_preview_requires_parent_or_admin(client):
     allowed_page = client.get('/gold-stars/preview')
     assert allowed_page.status_code == 200
     html = allowed_page.get_data(as_text=True)
-    assert 'Gold Star Club Preview' in html
-    assert 'Parent / Developer Demo Panel' in html
-    assert 'prefers-reduced-motion: reduce' in html
-    assert 'id="motionToggle"' in html
+    assert 'Gold Star Club preview' in html
+    assert 'Overview' in html
+    assert 'Reduced motion override' in html
 
 
-def test_gold_star_preview_demo_accounting_flow(client):
+def test_gold_star_preview_two_child_independent_accounting_and_collect_once(client):
+    with client.session_transaction() as session:
+        session['current_member'] = 'Rachel'
+    initial = client.get('/api/gold-stars/preview/state').get_json()['state']
+    assert initial['children']['Avery']['earned'] == 32
+    assert initial['children']['Avery']['available'] == 7
+    assert initial['children']['Avery']['spent'] == 25
+    assert initial['children']['Harley']['earned'] == 24
+    assert initial['children']['Harley']['available'] == 4
+    assert initial['children']['Harley']['spent'] == 20
+
+    award = client.post('/api/gold-stars/preview/awards', json={'child_name': 'Avery', 'note': 'Good listening'})
+    assert award.status_code == 200
+    award_state = award.get_json()['state']
+    assert award_state['children']['Avery']['earned'] == 33
+    assert award_state['children']['Avery']['waiting_count'] == 1
+    assert award_state['children']['Harley']['earned'] == 24
+    waiting_id = award_state['children']['Avery']['waiting_awards'][0]['id']
+
+    collect = client.post('/api/gold-stars/preview/awards/collect', json={'child_name': 'Avery', 'award_id': waiting_id})
+    assert collect.status_code == 200
+    collect_state = collect.get_json()['state']
+    assert collect_state['children']['Avery']['available'] == 8
+    assert collect_state['children']['Avery']['waiting_count'] == 0
+    assert collect_state['children']['Avery']['earned'] == 33
+    assert collect_state['children']['Avery']['invariant_ok'] is True
+    assert collect_state['children']['Harley']['available'] == 4
+
+    duplicate_collect = client.post('/api/gold-stars/preview/awards/collect', json={'child_name': 'Avery', 'award_id': waiting_id})
+    assert duplicate_collect.status_code == 409
+
+
+def test_gold_star_preview_catalog_validation_and_eligibility(client):
     with client.session_transaction() as session:
         session['current_member'] = 'Rachel'
 
-    start = client.get('/api/gold-stars/preview/state')
-    assert start.status_code == 200
-    initial = start.get_json()['state']
-    assert initial['child_name'] == 'Avery'
-    assert initial['earned'] == 32
-    assert initial['available'] == 7
-    assert initial['spent'] == 25
-    assert initial['waiting_count'] == 0
-    assert initial['invariant_ok'] is True
+    invalid_cost = client.post('/api/gold-stars/preview/catalog', json={
+        'name': 'Bad cost',
+        'cost': 0,
+        'image_ref': 'star',
+        'eligible_children': ['Avery'],
+    })
+    assert invalid_cost.status_code == 400
 
-    give = client.post('/api/gold-stars/preview/demo/give-star', json={})
-    assert give.status_code == 200
-    after_give = give.get_json()['state']
-    assert after_give['earned'] == 33
-    assert after_give['available'] == 7
-    assert after_give['spent'] == 25
-    assert after_give['waiting_count'] == 1
-    assert len(after_give['waiting']) == 1
-    waiting_id = after_give['waiting'][0]['id']
-    assert after_give['invariant_ok'] is True
+    create_reward = client.post('/api/gold-stars/preview/catalog', json={
+        'name': 'Avery only treat',
+        'cost': 6,
+        'image_ref': 'treat',
+        'eligible_children': ['Avery'],
+        'active': True,
+    })
+    assert create_reward.status_code == 200
+    reward_id = create_reward.get_json()['reward_id']
 
-    duplicate_give = client.post('/api/gold-stars/preview/demo/give-star', json={})
-    assert duplicate_give.status_code == 409
+    harley_request = client.post('/api/gold-stars/preview/requests', json={'child_name': 'Harley', 'reward_id': reward_id})
+    assert harley_request.status_code == 400
 
-    collect = client.post('/api/gold-stars/preview/demo/collect', json={'waiting_id': waiting_id})
-    assert collect.status_code == 200
-    after_collect = collect.get_json()['state']
-    assert after_collect['earned'] == 33
-    assert after_collect['waiting_count'] == 0
-    assert after_collect['available'] == 8
-    assert after_collect['spent'] == 25
-    assert after_collect['invariant_ok'] is True
+    avery_request = client.post('/api/gold-stars/preview/requests', json={'child_name': 'Avery', 'reward_id': reward_id})
+    assert avery_request.status_code == 200
+    duplicate_avery_request = client.post('/api/gold-stars/preview/requests', json={'child_name': 'Avery', 'reward_id': reward_id})
+    assert duplicate_avery_request.status_code == 409
 
-    duplicate_collect = client.post('/api/gold-stars/preview/demo/collect', json={'waiting_id': waiting_id})
-    assert duplicate_collect.status_code == 409
 
-    approve = client.post('/api/gold-stars/preview/demo/approve-reward', json={})
+def test_gold_star_preview_request_approval_decline_and_delivery_flow(client):
+    with client.session_transaction() as session:
+        session['current_member'] = 'Rachel'
+
+    request = client.post('/api/gold-stars/preview/requests', json={'child_name': 'Avery', 'reward_id': 1})
+    assert request.status_code == 200
+    request_id = request.get_json()['request_id']
+
+    duplicate_request = client.post('/api/gold-stars/preview/requests', json={'child_name': 'Avery', 'reward_id': 2})
+    assert duplicate_request.status_code == 409
+
+    approve = client.post(f'/api/gold-stars/preview/requests/{request_id}/approve', json={})
     assert approve.status_code == 200
-    after_approve = approve.get_json()['state']
-    assert after_approve['earned'] == 33
-    assert after_approve['available'] == 3
-    assert after_approve['spent'] == 30
-    assert after_approve['reward_demo']['status'] == 'approved'
-    assert after_approve['invariant_ok'] is True
+    approved = approve.get_json()['state']
+    assert approved['children']['Avery']['available'] == 2
+    assert approved['children']['Avery']['earned'] == 32
+    assert approved['children']['Avery']['spent'] == 30
+    assert approved['children']['Avery']['invariant_ok'] is True
+    delivery_id = approved['delivery_queue'][0]['id']
 
-    duplicate_approve = client.post('/api/gold-stars/preview/demo/approve-reward', json={})
-    assert duplicate_approve.status_code == 409
+    repeated_approve = client.post(f'/api/gold-stars/preview/requests/{request_id}/approve', json={})
+    assert repeated_approve.status_code == 409
+
+    deliver = client.post(f'/api/gold-stars/preview/delivery/{delivery_id}/deliver', json={})
+    assert deliver.status_code == 200
+    delivered = deliver.get_json()['state']
+    assert delivered['delivery_queue'][0]['status'] == 'delivered'
+
+    repeated_delivery = client.post(f'/api/gold-stars/preview/delivery/{delivery_id}/deliver', json={})
+    assert repeated_delivery.status_code == 409
+
+    decline_missing_pending = client.post(f'/api/gold-stars/preview/requests/{request_id}/decline', json={})
+    assert decline_missing_pending.status_code == 409
+
+    mini_reward = client.post('/api/gold-stars/preview/catalog', json={
+        'name': 'Harley mini choice',
+        'cost': 3,
+        'image_ref': 'star',
+        'eligible_children': ['Harley'],
+    })
+    assert mini_reward.status_code == 200
+    mini_reward_id = mini_reward.get_json()['reward_id']
+    harley_request = client.post('/api/gold-stars/preview/requests', json={'child_name': 'Harley', 'reward_id': mini_reward_id})
+    assert harley_request.status_code == 200
+    harley_request_id = harley_request.get_json()['request_id']
+    decline = client.post(f'/api/gold-stars/preview/requests/{harley_request_id}/decline', json={})
+    assert decline.status_code == 200
+    declined = decline.get_json()['state']
+    declined_row = next((row for row in declined['requests'] if row['id'] == harley_request_id), None)
+    assert declined_row is not None
+    assert declined_row['status'] == 'declined'
+
+
+def test_gold_star_preview_price_change_archive_invalidation_and_reset_scope(client):
+    with client.session_transaction() as session:
+        session['current_member'] = 'Rachel'
+
+    request = client.post('/api/gold-stars/preview/requests', json={'child_name': 'Harley', 'reward_id': 1})
+    assert request.status_code == 400  # Harley starts with 4, reward #1 costs 5.
+
+    award_harley = client.post('/api/gold-stars/preview/awards', json={'child_name': 'Harley', 'note': 'Setup request test'})
+    assert award_harley.status_code == 200
+    waiting_id = award_harley.get_json()['state']['children']['Harley']['waiting_awards'][0]['id']
+    collect_harley = client.post('/api/gold-stars/preview/awards/collect', json={'child_name': 'Harley', 'award_id': waiting_id})
+    assert collect_harley.status_code == 200
+
+    request_ok = client.post('/api/gold-stars/preview/requests', json={'child_name': 'Harley', 'reward_id': 1})
+    assert request_ok.status_code == 200
+    request_id = request_ok.get_json()['request_id']
+
+    price_change = client.put('/api/gold-stars/preview/catalog/1', json={'cost': 6})
+    assert price_change.status_code == 200
+    changed_state = price_change.get_json()['state']
+    target = next((row for row in changed_state['requests'] if row['id'] == request_id), None)
+    assert target is not None
+    assert target['status'] == 'invalidated'
+
+    request_again = client.post('/api/gold-stars/preview/requests', json={'child_name': 'Harley', 'reward_id': 2})
+    assert request_again.status_code == 400
+
+    archive = client.post('/api/gold-stars/preview/catalog/2/archive', json={})
+    assert archive.status_code == 200
 
     reset = client.post('/api/gold-stars/preview/reset', json={})
     assert reset.status_code == 200
-    after_reset = reset.get_json()['state']
-    assert after_reset['earned'] == 32
-    assert after_reset['available'] == 7
-    assert after_reset['spent'] == 25
-    assert after_reset['waiting_count'] == 0
-    assert after_reset['reward_demo']['status'] == 'requested'
-    assert after_reset['invariant_ok'] is True
+    reset_state = reset.get_json()['state']
+    assert reset_state['children']['Avery']['earned'] == 32
+    assert reset_state['children']['Avery']['available'] == 7
+    assert reset_state['children']['Avery']['spent'] == 25
+    assert reset_state['children']['Harley']['earned'] == 24
+    assert reset_state['children']['Harley']['available'] == 4
+    assert reset_state['children']['Harley']['spent'] == 20
+    assert reset_state['requests'] == []
