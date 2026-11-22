@@ -8,13 +8,16 @@ import * as THREE from "/static/vendor/three/three.module.js";
   }
 
   const modeButtons = Array.from(document.querySelectorAll("[data-mode]"));
-  const expressionButtons = Array.from(document.querySelectorAll("[data-expression]"));
   const performanceButtons = Array.from(document.querySelectorAll("[data-performance]"));
   const cameraButtons = Array.from(document.querySelectorAll("[data-camera]"));
   const pauseMotionBtn = document.getElementById("pauseMotionBtn");
   const motionToggle = document.getElementById("motionToggle");
   const slowMoRange = document.getElementById("slowMoRange");
   const slowMoBadge = document.getElementById("slowMoBadge");
+  const greetingProgressRange = document.getElementById("greetingProgressRange");
+  const greetingProgressBadge = document.getElementById("greetingProgressBadge");
+  const reducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+
   const diagBuildId = document.getElementById("diagBuildId");
   const diagExpression = document.getElementById("diagExpression");
   const diagPerformance = document.getElementById("diagPerformance");
@@ -23,8 +26,7 @@ import * as THREE from "/static/vendor/three/three.module.js";
   const diagSmile = document.getElementById("diagSmile");
   const diagCheekLift = document.getElementById("diagCheekLift");
   const diagEyeSquint = document.getElementById("diagEyeSquint");
-  const reducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
-  const LAB_BUILD_ID = "gold-star-lab-2026-11-22-expressions-fix1";
+  const LAB_BUILD_ID = "gold-star-lab-2026-11-22-greeting-v1";
 
   const canUseWebGL = (() => {
     const canvas = document.createElement("canvas");
@@ -38,10 +40,26 @@ import * as THREE from "/static/vendor/three/three.module.js";
   const viewState = {
     mode: "material",
     camera: "front",
-    expression: "inviting",
     paused: false,
     slowMotion: 1,
     reducedMotionOverride: false,
+  };
+
+  const performanceState = {
+    progress: 0,
+    playing: false,
+    durationSeconds: 2.65,
+    activeName: null,
+  };
+
+  const faceState = {
+    current: { smile: 0.28, mouthOpen: 0.01, cheekLift: 0.2, eyeSquint: 0.08, eyeOpen: 0.74, browLift: 0.08, gazeY: 0.02 },
+    target: { smile: 0.28, mouthOpen: 0.01, cheekLift: 0.2, eyeSquint: 0.08, eyeOpen: 0.74, browLift: 0.08, gazeY: 0.02 },
+  };
+
+  const poseState = {
+    current: { y: 0, rotY: 0, rotZ: 0, squashX: 1, squashY: 1 },
+    target: { y: 0, rotY: 0, rotZ: 0, squashX: 1, squashY: 1 },
   };
 
   let renderer;
@@ -51,22 +69,15 @@ import * as THREE from "/static/vendor/three/three.module.js";
   let frameHandle = 0;
   let lastTs = 0;
   let pausedByVisibility = false;
-  let currentPose = { y: 0, rotY: 0, rotZ: 0, squashX: 1, squashY: 1 };
-  const expressionState = {
-    selected: viewState.expression,
-    activePerformance: null,
-    current: { smile: 0.72, mouthOpen: 0.58, cheekLift: 0.58, dimpleLift: 0.5, eyeSquint: 0.24, browLift: 0.16 },
-    target: { smile: 0.72, mouthOpen: 0.58, cheekLift: 0.58, dimpleLift: 0.5, eyeSquint: 0.24, browLift: 0.16 },
-  };
 
+  const refs = {};
   const lights = [];
   const cleanupCallbacks = [];
   const materials = {};
-  const refs = {};
 
   initScene();
   bindControls();
-  snapExpressionToPreset(viewState.expression);
+  applyTimelinePose(0, true);
   applyViewState();
   startLoop();
 
@@ -92,10 +103,12 @@ import * as THREE from "/static/vendor/three/three.module.js";
       emissiveIntensity: 0.04,
     });
     materials.silhouette = new THREE.MeshBasicMaterial({ color: 0x000000 });
-    materials.eyeWhite = new THREE.MeshStandardMaterial({ color: 0xfffcf6, roughness: 0.33, metalness: 0.01 });
-    materials.pupil = new THREE.MeshStandardMaterial({ color: 0x2d2140, roughness: 0.25, metalness: 0.05 });
-    materials.eyelid = new THREE.MeshStandardMaterial({ color: 0xe0b14f, roughness: 0.55, metalness: 0.02 });
-    materials.mouthLip = new THREE.MeshStandardMaterial({ color: 0x8c4050, roughness: 0.46, metalness: 0.02, side: THREE.DoubleSide });
+    materials.eyeWhite = new THREE.MeshStandardMaterial({ color: 0xfffcf6, roughness: 0.36, metalness: 0.01 });
+    materials.iris = new THREE.MeshStandardMaterial({ color: 0x3b2c53, roughness: 0.24, metalness: 0.04 });
+    materials.pupil = new THREE.MeshStandardMaterial({ color: 0x181422, roughness: 0.22, metalness: 0.04 });
+    materials.eyelid = new THREE.MeshStandardMaterial({ color: 0xe4b351, roughness: 0.55, metalness: 0.02 });
+    materials.brow = new THREE.MeshStandardMaterial({ color: 0xdca646, roughness: 0.52, metalness: 0.02 });
+    materials.mouthLip = new THREE.MeshStandardMaterial({ color: 0x8f3f4f, roughness: 0.46, metalness: 0.02, side: THREE.DoubleSide });
     materials.mouthInner = new THREE.MeshStandardMaterial({ color: 0x4f1f2a, roughness: 0.62, metalness: 0.01, side: THREE.DoubleSide });
     materials.tongue = new THREE.MeshStandardMaterial({ color: 0xe18390, roughness: 0.58, metalness: 0.02, side: THREE.DoubleSide });
     materials.cheek = new THREE.MeshStandardMaterial({
@@ -106,7 +119,7 @@ import * as THREE from "/static/vendor/three/three.module.js";
       opacity: 0.72,
       side: THREE.DoubleSide,
     });
-    materials.swoosh = new THREE.MeshBasicMaterial({ color: 0xeed8ff, transparent: true, opacity: 0, side: THREE.DoubleSide });
+    materials.crease = new THREE.MeshStandardMaterial({ color: 0xa04a58, roughness: 0.58, metalness: 0.02, transparent: true, opacity: 0.45 });
 
     refs.starRoot = new THREE.Group();
     refs.starRoot.position.set(0, 0.1, 0);
@@ -118,7 +131,6 @@ import * as THREE from "/static/vendor/three/three.module.js";
     refs.starRoot.add(refs.star);
 
     buildFace();
-    buildSwoosh();
 
     refs.shadow = new THREE.Mesh(
       new THREE.CircleGeometry(1.95, 64),
@@ -237,120 +249,104 @@ import * as THREE from "/static/vendor/three/three.module.js";
 
     refs.leftEye = createEye();
     refs.rightEye = createEye();
-    refs.leftEye.root.position.set(-0.38, 0.2, 0.37);
-    refs.rightEye.root.position.set(0.38, 0.2, 0.37);
+    refs.leftEye.root.position.set(-0.48, 0.28, 0.4);
+    refs.rightEye.root.position.set(0.48, 0.28, 0.4);
     refs.face.add(refs.leftEye.root, refs.rightEye.root);
 
     refs.leftBrow = createBrow();
     refs.rightBrow = createBrow();
-    refs.leftBrow.position.set(-0.4, 0.42, 0.39);
-    refs.rightBrow.position.set(0.4, 0.42, 0.39);
+    refs.leftBrow.position.set(-0.5, 0.53, 0.41);
+    refs.rightBrow.position.set(0.5, 0.53, 0.41);
     refs.face.add(refs.leftBrow, refs.rightBrow);
 
     refs.mouth = new THREE.Group();
-    refs.mouth.position.set(0, -0.12, 0.49);
+    refs.mouth.position.set(0, -0.19, 0.5);
 
-    refs.closedSmile = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.013, 12, 26, Math.PI * 0.7), materials.mouthLip);
-    refs.closedSmile.rotation.z = Math.PI;
-    refs.closedSmile.rotation.x = 0.16;
-    refs.closedSmile.position.set(0, -0.03, 0.01);
+    refs.upperLip = new THREE.Mesh(new THREE.TorusGeometry(0.198, 0.018, 12, 32, Math.PI * 0.72), materials.mouthLip);
+    refs.upperLip.rotation.z = Math.PI;
+    refs.upperLip.rotation.x = 0.2;
+    refs.upperLip.position.set(0, 0.034, 0.014);
 
-    refs.openMouth = new THREE.Group();
-    refs.openMouth.position.set(0, -0.01, 0);
-    refs.mouthLip = new THREE.Mesh(new THREE.RingGeometry(0.082, 0.113, 40, 1, Math.PI * 0.06, Math.PI * 0.88), materials.mouthLip);
-    refs.mouthLip.rotation.z = Math.PI;
-    refs.mouthInner = new THREE.Mesh(new THREE.CircleGeometry(0.096, 28), materials.mouthInner);
-    refs.mouthInner.position.set(0, -0.014, -0.009);
-    refs.mouthInner.scale.set(1, 0.72, 1);
-    refs.mouthTongue = new THREE.Mesh(new THREE.CircleGeometry(0.048, 24), materials.tongue);
-    refs.mouthTongue.position.set(0, -0.049, -0.004);
-    refs.mouthTongue.scale.set(1.05, 0.7, 1);
-    refs.openMouth.add(refs.mouthInner, refs.mouthTongue, refs.mouthLip);
-    refs.mouth.add(refs.closedSmile, refs.openMouth);
-    refs.face.add(refs.mouth);
+    refs.lowerLip = new THREE.Mesh(new THREE.TorusGeometry(0.212, 0.017, 12, 32, Math.PI * 0.86), materials.mouthLip);
+    refs.lowerLip.rotation.z = Math.PI;
+    refs.lowerLip.rotation.x = -0.08;
+    refs.lowerLip.position.set(0, -0.042, 0.012);
 
-    refs.leftCheek = new THREE.Mesh(new THREE.CircleGeometry(0.11, 32), materials.cheek);
-    refs.rightCheek = new THREE.Mesh(new THREE.CircleGeometry(0.11, 32), materials.cheek);
-    refs.leftCheek.position.set(-0.56, 0.03, 0.46);
-    refs.rightCheek.position.set(0.56, 0.03, 0.46);
-    refs.leftCheek.scale.set(1, 0.58, 1);
-    refs.rightCheek.scale.set(1, 0.58, 1);
-    refs.face.add(refs.leftCheek, refs.rightCheek);
+    refs.mouthInner = new THREE.Mesh(new THREE.CircleGeometry(0.16, 36), materials.mouthInner);
+    refs.mouthInner.position.set(0, -0.01, -0.01);
+    refs.mouthInner.scale.set(1.5, 0.52, 1);
 
-    refs.leftDimple = createDimple();
-    refs.rightDimple = createDimple();
-    refs.leftDimple.position.set(-0.21, -0.13, 0.44);
-    refs.rightDimple.position.set(0.21, -0.13, 0.44);
-    refs.face.add(refs.leftDimple, refs.rightDimple);
+    refs.mouthTongue = new THREE.Mesh(new THREE.CircleGeometry(0.068, 30), materials.tongue);
+    refs.mouthTongue.position.set(0, -0.11, -0.004);
+    refs.mouthTongue.scale.set(1.34, 0.66, 1);
+
+    refs.leftMouthCorner = new THREE.Mesh(new THREE.SphereGeometry(0.02, 12, 10), materials.mouthLip);
+    refs.rightMouthCorner = new THREE.Mesh(new THREE.SphereGeometry(0.02, 12, 10), materials.mouthLip);
+    refs.leftMouthCorner.position.set(-0.2, -0.012, 0.01);
+    refs.rightMouthCorner.position.set(0.2, -0.012, 0.01);
+
+    refs.leftCheek = new THREE.Mesh(new THREE.CircleGeometry(0.14, 36), materials.cheek);
+    refs.rightCheek = new THREE.Mesh(new THREE.CircleGeometry(0.14, 36), materials.cheek);
+    refs.leftCheek.position.set(-0.62, 0.03, 0.46);
+    refs.rightCheek.position.set(0.62, 0.03, 0.46);
+    refs.leftCheek.scale.set(1.18, 0.64, 1);
+    refs.rightCheek.scale.set(1.18, 0.64, 1);
+
+    refs.leftSmileCrease = new THREE.Mesh(new THREE.TorusGeometry(0.043, 0.008, 8, 16, Math.PI * 0.72), materials.crease);
+    refs.rightSmileCrease = new THREE.Mesh(new THREE.TorusGeometry(0.043, 0.008, 8, 16, Math.PI * 0.72), materials.crease);
+    refs.leftSmileCrease.rotation.z = Math.PI * 1.08;
+    refs.rightSmileCrease.rotation.z = Math.PI * 1.92;
+    refs.leftSmileCrease.position.set(-0.31, -0.13, 0.44);
+    refs.rightSmileCrease.position.set(0.31, -0.13, 0.44);
+
+    refs.mouth.add(
+      refs.mouthInner,
+      refs.mouthTongue,
+      refs.upperLip,
+      refs.lowerLip,
+      refs.leftMouthCorner,
+      refs.rightMouthCorner
+    );
+    refs.face.add(refs.mouth, refs.leftCheek, refs.rightCheek, refs.leftSmileCrease, refs.rightSmileCrease);
   }
 
   function createEye() {
     const root = new THREE.Group();
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.16, 28, 24), materials.eyeWhite);
-    eye.scale.set(1, 0.82, 0.44);
-    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.08, 20, 16), materials.pupil);
-    pupil.scale.set(1, 1.02, 0.48);
-    pupil.position.set(0, -0.01, 0.07);
-    const highlight = new THREE.Mesh(new THREE.SphereGeometry(0.017, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }));
-    highlight.position.set(-0.02, 0.022, 0.08);
+    const white = new THREE.Mesh(new THREE.SphereGeometry(0.21, 32, 26), materials.eyeWhite);
+    white.scale.set(1, 0.82, 0.46);
 
-    const upperLid = new THREE.Mesh(new THREE.SphereGeometry(0.168, 24, 18, 0, Math.PI * 2, 0, Math.PI * 0.45), materials.eyelid);
-    upperLid.scale.set(1, 0.82, 0.44);
-    upperLid.position.set(0, 0.092, 0.006);
+    const iris = new THREE.Mesh(new THREE.SphereGeometry(0.086, 22, 16), materials.iris);
+    iris.position.set(0, -0.008, 0.084);
+    iris.scale.set(1, 1.1, 0.56);
 
-    const lowerLid = new THREE.Mesh(new THREE.TorusGeometry(0.105, 0.013, 10, 24, Math.PI * 0.86), materials.eyelid);
+    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.044, 18, 14), materials.pupil);
+    pupil.position.set(0, -0.009, 0.112);
+    pupil.scale.set(1, 1.2, 0.58);
+
+    const highlight = new THREE.Mesh(new THREE.SphereGeometry(0.02, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+    highlight.position.set(-0.024, 0.038, 0.126);
+
+    const upperLid = new THREE.Mesh(
+      new THREE.SphereGeometry(0.22, 28, 20, 0, Math.PI * 2, 0, Math.PI * 0.53),
+      materials.eyelid
+    );
+    upperLid.scale.set(1.03, 0.84, 0.48);
+    upperLid.position.set(0, 0.114, 0.007);
+
+    const lowerLid = new THREE.Mesh(new THREE.TorusGeometry(0.141, 0.015, 10, 26, Math.PI * 0.92), materials.eyelid);
     lowerLid.rotation.z = Math.PI;
     lowerLid.rotation.x = 0.08;
-    lowerLid.position.set(0, -0.09, 0.045);
+    lowerLid.position.set(0, -0.12, 0.046);
 
-    root.add(eye, pupil, highlight, upperLid, lowerLid);
-    return { root, pupil, upperLid, lowerLid };
+    root.add(white, iris, pupil, highlight, upperLid, lowerLid);
+    return { root, iris, pupil, upperLid, lowerLid };
   }
 
   function createBrow() {
-    const brow = new THREE.Mesh(new THREE.TorusGeometry(0.072, 0.012, 10, 22, Math.PI * 0.82), materials.eyelid);
+    const brow = new THREE.Mesh(new THREE.TorusGeometry(0.09, 0.014, 10, 24, Math.PI * 0.85), materials.brow);
     brow.rotation.z = Math.PI;
-    brow.rotation.x = 0.12;
+    brow.rotation.x = 0.16;
     return brow;
-  }
-
-  function createDimple() {
-    const dimple = new THREE.Mesh(new THREE.TorusGeometry(0.03, 0.006, 8, 16, Math.PI * 0.9), materials.mouthLip);
-    dimple.rotation.z = Math.PI;
-    dimple.rotation.x = 0.2;
-    return dimple;
-  }
-
-  function buildSwoosh() {
-    refs.swooshGroup = new THREE.Group();
-    refs.swooshGroup.visible = false;
-    refs.starRoot.add(refs.swooshGroup);
-    refs.swooshMeshes = [];
-
-    const curves = [
-      new THREE.CatmullRomCurve3([
-        new THREE.Vector3(-1.7, 0.82, 0.25),
-        new THREE.Vector3(-2.18, 0.36, -0.2),
-        new THREE.Vector3(-1.7, -0.2, -0.55),
-      ]),
-      new THREE.CatmullRomCurve3([
-        new THREE.Vector3(1.62, 0.95, 0.18),
-        new THREE.Vector3(2.26, 0.46, -0.16),
-        new THREE.Vector3(1.9, -0.26, -0.52),
-      ]),
-      new THREE.CatmullRomCurve3([
-        new THREE.Vector3(0.26, 1.72, -0.2),
-        new THREE.Vector3(0.9, 1.44, -0.62),
-        new THREE.Vector3(1.4, 0.88, -0.84),
-      ]),
-    ];
-
-    curves.forEach((curve, index) => {
-      const mesh = new THREE.Mesh(new THREE.TubeGeometry(curve, 32, 0.024 - index * 0.004, 9, false), materials.swoosh.clone());
-      mesh.visible = false;
-      refs.swooshGroup.add(mesh);
-      refs.swooshMeshes.push(mesh);
-    });
   }
 
   function bindControls() {
@@ -363,23 +359,8 @@ import * as THREE from "/static/vendor/three/three.module.js";
         viewState.mode = nextMode;
         if (nextMode === "silhouette") {
           viewState.camera = "front";
-        }
-        applyViewState();
-      });
-    });
-
-    expressionButtons.forEach((button) => {
-      button.addEventListener("click", () => {
-        const nextExpression = button.dataset.expression;
-        if (!["friendlyIdle", "delighted", "inviting", "softSmile"].includes(nextExpression)) {
-          return;
-        }
-        viewState.expression = nextExpression;
-        expressionState.selected = nextExpression;
-        expressionState.activePerformance = null;
-        hideSwoosh();
-        if (viewState.paused || isReducedMotion()) {
-          snapExpressionToPreset(nextExpression);
+          performanceState.playing = false;
+          performanceState.activeName = null;
         }
         applyViewState();
       });
@@ -394,18 +375,27 @@ import * as THREE from "/static/vendor/three/three.module.js";
             pauseMotionBtn.classList.toggle("active", viewState.paused);
             pauseMotionBtn.setAttribute("aria-pressed", viewState.paused ? "true" : "false");
           }
-          if (viewState.paused) {
-            render();
-          }
           syncDiagnostics();
+          render();
           return;
         }
-        if (action === "hello") {
-          startPerformance("hello");
-        } else if (action === "turn") {
-          startPerformance("turn");
+        if (viewState.mode === "silhouette") {
+          return;
         }
-        applyViewState();
+        if (action === "play") {
+          if (performanceState.progress >= 0.999) {
+            performanceState.progress = 0;
+          }
+          performanceState.playing = true;
+          performanceState.activeName = "greeting";
+        } else if (action === "restart") {
+          performanceState.progress = 0;
+          performanceState.playing = false;
+          performanceState.activeName = null;
+          applyTimelinePose(0, true);
+        }
+        syncDiagnostics();
+        render();
       });
     });
 
@@ -427,12 +417,8 @@ import * as THREE from "/static/vendor/three/three.module.js";
       motionToggle.checked = false;
       motionToggle.addEventListener("change", () => {
         viewState.reducedMotionOverride = !!motionToggle.checked;
-        if (isReducedMotion() && expressionState.activePerformance) {
-          expressionState.activePerformance = null;
-          hideSwoosh();
-          snapExpressionToPreset(viewState.expression);
-        }
         syncDiagnostics();
+        render();
       });
     }
 
@@ -444,52 +430,20 @@ import * as THREE from "/static/vendor/three/three.module.js";
       });
       slowMoBadge.textContent = `${viewState.slowMotion.toFixed(2)}×`;
     }
-  }
 
-  function startPerformance(type) {
-    if (viewState.mode === "silhouette") {
-      return;
+    if (greetingProgressRange && greetingProgressBadge) {
+      greetingProgressRange.addEventListener("input", () => {
+        performanceState.progress = Math.max(0, Math.min(1, (Number(greetingProgressRange.value) || 0) / 100));
+        performanceState.playing = false;
+        performanceState.activeName = null;
+        applyTimelinePose(performanceState.progress, true);
+      });
+      greetingProgressBadge.textContent = "0%";
     }
-    hideSwoosh();
-    if (viewState.paused || isReducedMotion()) {
-      expressionState.activePerformance = null;
-      viewState.expression = type === "turn" ? "delighted" : "inviting";
-      expressionState.selected = viewState.expression;
-      snapExpressionToPreset(viewState.expression);
-      return;
-    }
-    expressionState.activePerformance = {
-      type,
-      time: 0,
-      duration: type === "turn" ? 1.38 : 1.62,
-    };
-    syncDiagnostics();
   }
 
   function isReducedMotion() {
     return !!viewState.reducedMotionOverride || !!reducedMotionQuery.matches;
-  }
-
-  function getExpressionPreset(name) {
-    if (name === "friendlyIdle") {
-      return { smile: 0.28, mouthOpen: 0.0, cheekLift: 0.2, dimpleLift: 0.14, eyeSquint: 0.06, browLift: 0.08 };
-    }
-    if (name === "delighted") {
-      return { smile: 0.96, mouthOpen: 0.84, cheekLift: 0.96, dimpleLift: 0.9, eyeSquint: 0.6, browLift: 0.28 };
-    }
-    if (name === "softSmile") {
-      return { smile: 0.46, mouthOpen: 0.08, cheekLift: 0.34, dimpleLift: 0.28, eyeSquint: 0.14, browLift: 0.12 };
-    }
-    return { smile: 0.84, mouthOpen: 0.66, cheekLift: 0.72, dimpleLift: 0.65, eyeSquint: 0.36, browLift: 0.2 };
-  }
-
-  function snapExpressionToPreset(name) {
-    const preset = getExpressionPreset(name);
-    expressionState.target = { ...preset };
-    expressionState.current = { ...preset };
-    applyExpression();
-    syncDiagnostics();
-    render();
   }
 
   function startLoop() {
@@ -508,197 +462,200 @@ import * as THREE from "/static/vendor/three/three.module.js";
       }
       const rawDelta = Math.min(0.05, (ts - lastTs) / 1000);
       lastTs = ts;
-      if (pausedByVisibility || viewState.paused) {
-        syncDiagnostics();
-        render();
-        return;
+
+      if (!pausedByVisibility && !viewState.paused && viewState.mode === "material" && performanceState.playing) {
+        performanceState.progress += (rawDelta * viewState.slowMotion) / performanceState.durationSeconds;
+        if (performanceState.progress >= 1) {
+          performanceState.progress = 1;
+          performanceState.playing = false;
+          performanceState.activeName = null;
+        } else {
+          performanceState.activeName = "greeting";
+        }
       }
-      update(rawDelta * viewState.slowMotion);
+
+      applyTimelinePose(performanceState.progress, false);
       render();
     };
     frameHandle = window.requestAnimationFrame(tick);
   }
 
-  function update(delta) {
-    const baseTarget = getExpressionPreset(expressionState.selected);
-    const poseTarget = { y: 0, rotY: 0, rotZ: 0, squashX: 1, squashY: 1 };
-    let expressionTarget = { ...baseTarget };
+  function evaluateGreeting(progress) {
+    const keyframes = [
+      {
+        t: 0,
+        stage: "Relaxed",
+        face: { smile: 0.26, mouthOpen: 0.01, cheekLift: 0.2, eyeSquint: 0.08, eyeOpen: 0.74, browLift: 0.08, gazeY: 0.02 },
+        pose: { y: 0, rotY: 0, rotZ: 0, squashX: 1, squashY: 1 },
+      },
+      {
+        t: 0.22,
+        stage: "Recognition",
+        face: { smile: 0.35, mouthOpen: 0.03, cheekLift: 0.28, eyeSquint: 0.06, eyeOpen: 0.88, browLift: 0.28, gazeY: 0.08 },
+        pose: { y: 0.01, rotY: 0.02, rotZ: 0, squashX: 1, squashY: 1 },
+      },
+      {
+        t: 0.44,
+        stage: "Anticipation",
+        face: { smile: 0.54, mouthOpen: 0.18, cheekLift: 0.44, eyeSquint: 0.18, eyeOpen: 0.78, browLift: 0.14, gazeY: 0.04 },
+        pose: { y: -0.18, rotY: 0, rotZ: -0.03, squashX: 1.08, squashY: 0.9 },
+      },
+      {
+        t: 0.7,
+        stage: "Delight",
+        face: { smile: 0.94, mouthOpen: 0.86, cheekLift: 0.96, eyeSquint: 0.62, eyeOpen: 0.58, browLift: 0.12, gazeY: 0.06 },
+        pose: { y: 0.28, rotY: 0, rotZ: 0.055, squashX: 0.95, squashY: 1.1 },
+      },
+      {
+        t: 0.84,
+        stage: "Settle",
+        face: { smile: 0.78, mouthOpen: 0.48, cheekLift: 0.72, eyeSquint: 0.42, eyeOpen: 0.62, browLift: 0.1, gazeY: 0.04 },
+        pose: { y: 0.08, rotY: 0, rotZ: 0.01, squashX: 0.98, squashY: 1.03 },
+      },
+      {
+        t: 1,
+        stage: "Relaxed",
+        face: { smile: 0.38, mouthOpen: 0.06, cheekLift: 0.3, eyeSquint: 0.14, eyeOpen: 0.72, browLift: 0.08, gazeY: 0.02 },
+        pose: { y: 0, rotY: 0, rotZ: 0, squashX: 1, squashY: 1 },
+      },
+    ];
 
-    if (expressionState.activePerformance) {
-      expressionState.activePerformance.time += delta;
-      const t = Math.min(1, expressionState.activePerformance.time / expressionState.activePerformance.duration);
-      if (expressionState.activePerformance.type === "hello") {
-        applyHelloPerformance(t, poseTarget, expressionTarget);
-      } else if (expressionState.activePerformance.type === "turn") {
-        applyTurnPerformance(t, poseTarget, expressionTarget);
+    const clamped = Math.max(0, Math.min(1, progress));
+    let from = keyframes[0];
+    let to = keyframes[keyframes.length - 1];
+    for (let i = 0; i < keyframes.length - 1; i += 1) {
+      if (clamped >= keyframes[i].t && clamped <= keyframes[i + 1].t) {
+        from = keyframes[i];
+        to = keyframes[i + 1];
+        break;
       }
-      if (t >= 1) {
-        if (expressionState.activePerformance.type === "hello") {
-          viewState.expression = "friendlyIdle";
-        } else if (expressionState.activePerformance.type === "turn") {
-          viewState.expression = "delighted";
-        }
-        expressionState.selected = viewState.expression;
-        expressionState.activePerformance = null;
-        hideSwoosh();
-      }
+    }
+    const section = Math.max(0.0001, to.t - from.t);
+    const localT = smoothStep((clamped - from.t) / section);
+    const face = lerpObject(from.face, to.face, localT);
+    const pose = lerpObject(from.pose, to.pose, localT);
+
+    let stage = from.stage;
+    if (clamped >= 0.2 && clamped < 0.36) {
+      stage = "Recognition";
+    } else if (clamped >= 0.36 && clamped < 0.58) {
+      stage = "Anticipation";
+    } else if (clamped >= 0.58 && clamped < 0.8) {
+      stage = "Delight";
+    } else if (clamped >= 0.8 && clamped < 0.95) {
+      stage = "Settle";
     } else {
-      hideSwoosh();
+      stage = "Relaxed";
     }
 
-    expressionState.target = expressionTarget;
-    const blend = Math.min(1, delta * 8.2);
-    for (const key of Object.keys(expressionState.current)) {
-      expressionState.current[key] += (expressionTarget[key] - expressionState.current[key]) * blend;
+    if (isReducedMotion()) {
+      pose.y = 0;
+      pose.rotY = 0;
+      pose.rotZ = 0;
+      pose.squashX = 1;
+      pose.squashY = 1;
+      if (stage === "Anticipation" || stage === "Delight") {
+        face.mouthOpen = Math.max(face.mouthOpen, 0.4);
+        face.cheekLift = Math.max(face.cheekLift, 0.66);
+        face.eyeSquint = Math.max(face.eyeSquint, 0.34);
+      }
     }
-    for (const key of Object.keys(currentPose)) {
-      currentPose[key] += (poseTarget[key] - currentPose[key]) * blend;
+
+    return { stage, face, pose };
+  }
+
+  function applyTimelinePose(progress, immediate) {
+    const { stage, face, pose } = evaluateGreeting(progress);
+    faceState.target = face;
+    poseState.target = pose;
+
+    if (immediate) {
+      faceState.current = { ...face };
+      poseState.current = { ...pose };
+    } else {
+      const blend = Math.max(0.18, Math.min(1, (viewState.slowMotion > 0.6 ? 0.28 : 0.2)));
+      for (const key of Object.keys(faceState.current)) {
+        faceState.current[key] += (face[key] - faceState.current[key]) * blend;
+      }
+      for (const key of Object.keys(poseState.current)) {
+        poseState.current[key] += (pose[key] - poseState.current[key]) * blend;
+      }
     }
+
     applyPose();
-    applyExpression();
-    syncDiagnostics();
-  }
-
-  function applyHelloPerformance(t, poseTarget, expressionTarget) {
-    if (t < 0.2) {
-      const p = easeOut(t / 0.2);
-      poseTarget.rotZ = -0.08 * p;
-      poseTarget.y = -0.03 * p;
-      blendExpression(expressionTarget, getExpressionPreset("friendlyIdle"), getExpressionPreset("inviting"), p);
-      return;
-    }
-    if (t < 0.44) {
-      const p = easeInOut((t - 0.2) / 0.24);
-      poseTarget.y = -0.2 * p;
-      poseTarget.squashX = 1 + 0.07 * p;
-      poseTarget.squashY = 1 - 0.11 * p;
-      blendExpression(expressionTarget, getExpressionPreset("inviting"), getExpressionPreset("delighted"), p * 0.7);
-      return;
-    }
-    if (t < 0.82) {
-      const p = (t - 0.44) / 0.38;
-      const arc = Math.sin(p * Math.PI);
-      poseTarget.y = arc * 0.34;
-      poseTarget.rotZ = Math.sin(p * Math.PI) * 0.06;
-      poseTarget.squashX = 1 - arc * 0.06;
-      poseTarget.squashY = 1 + arc * 0.08;
-      blendExpression(expressionTarget, getExpressionPreset("inviting"), getExpressionPreset("delighted"), p);
-      return;
-    }
-    const p = easeInOut((t - 0.82) / 0.18);
-    poseTarget.y = (1 - p) * 0.08;
-    poseTarget.rotZ = (1 - p) * 0.02;
-    blendExpression(expressionTarget, getExpressionPreset("delighted"), getExpressionPreset("friendlyIdle"), p);
-  }
-
-  function applyTurnPerformance(t, poseTarget, expressionTarget) {
-    if (t < 0.22) {
-      const p = easeInOut(t / 0.22);
-      poseTarget.rotY = -0.34 * p;
-      poseTarget.squashX = 1 + 0.06 * p;
-      poseTarget.squashY = 1 - 0.08 * p;
-      blendExpression(expressionTarget, getExpressionPreset("inviting"), getExpressionPreset("delighted"), p * 0.65);
-      return;
-    }
-    if (t < 0.84) {
-      const p = (t - 0.22) / 0.62;
-      const eased = easeOut(p);
-      poseTarget.rotY = -0.2 + eased * (Math.PI * 2.05);
-      poseTarget.y = Math.sin(p * Math.PI) * 0.09;
-      poseTarget.squashX = 1 - Math.sin(p * Math.PI) * 0.04;
-      poseTarget.squashY = 1 + Math.sin(p * Math.PI) * 0.04;
-      updateSwoosh(1 - Math.abs(0.5 - p) * 2);
-      blendExpression(expressionTarget, getExpressionPreset("delighted"), getExpressionPreset("delighted"), 1);
-      return;
-    }
-    const p = easeInOut((t - 0.84) / 0.16);
-    poseTarget.rotY = (1 - p) * 0.18;
-    poseTarget.y = (1 - p) * 0.03;
-    updateSwoosh(1 - p);
-    blendExpression(expressionTarget, getExpressionPreset("delighted"), getExpressionPreset("delighted"), 1);
-  }
-
-  function blendExpression(out, a, b, t) {
-    const keys = Object.keys(out);
-    keys.forEach((key) => {
-      out[key] = a[key] + (b[key] - a[key]) * t;
-    });
-  }
-
-  function updateSwoosh(strength) {
-    if (!refs.swooshMeshes) {
-      return;
-    }
-    refs.swooshGroup.visible = true;
-    refs.swooshMeshes.forEach((mesh, index) => {
-      const pulse = Math.max(0, Math.min(1, strength - index * 0.22));
-      mesh.visible = pulse > 0.01;
-      mesh.material.opacity = pulse * (0.5 - index * 0.12);
-    });
-  }
-
-  function hideSwoosh() {
-    if (!refs.swooshMeshes) {
-      return;
-    }
-    refs.swooshGroup.visible = false;
-    refs.swooshMeshes.forEach((mesh) => {
-      mesh.visible = false;
-      mesh.material.opacity = 0;
-    });
+    applyFace();
+    syncProgressUi(progress);
+    syncDiagnostics(stage);
   }
 
   function applyPose() {
-    refs.starRoot.position.y = 0.1 + currentPose.y;
-    refs.starRoot.rotation.y = currentPose.rotY;
-    refs.starRoot.rotation.z = currentPose.rotZ;
-    refs.starRoot.scale.set(currentPose.squashX, currentPose.squashY, 1);
+    refs.starRoot.position.y = 0.1 + poseState.current.y;
+    refs.starRoot.rotation.y = poseState.current.rotY;
+    refs.starRoot.rotation.z = poseState.current.rotZ;
+    refs.starRoot.scale.set(poseState.current.squashX, poseState.current.squashY, 1);
 
-    refs.shadow.scale.set(1 + currentPose.y * 0.22, 1 + currentPose.y * 0.22, 1);
-    refs.shadow.material.opacity = 0.16 - Math.max(0, currentPose.y) * 0.1;
+    refs.shadow.scale.set(1 + poseState.current.y * 0.2, 1 + poseState.current.y * 0.2, 1);
+    refs.shadow.material.opacity = 0.16 - Math.max(0, poseState.current.y) * 0.1;
   }
 
-  function applyExpression() {
-    const expression = expressionState.current;
-    const eyeBaseScale = 1;
-    const eyeScaleY = eyeBaseScale - expression.eyeSquint * 0.34;
+  function applyFace() {
+    const face = faceState.current;
+    const eyeScaleY = Math.max(0.58, face.eyeOpen - face.eyeSquint * 0.22);
+
     refs.leftEye.root.scale.set(1, eyeScaleY, 1);
     refs.rightEye.root.scale.set(1, eyeScaleY, 1);
+    refs.leftEye.upperLid.position.y = 0.116 - face.eyeOpen * 0.07 - face.eyeSquint * 0.03;
+    refs.rightEye.upperLid.position.y = 0.116 - face.eyeOpen * 0.07 - face.eyeSquint * 0.03;
+    refs.leftEye.lowerLid.position.y = -0.12 + face.eyeSquint * 0.07;
+    refs.rightEye.lowerLid.position.y = -0.12 + face.eyeSquint * 0.07;
 
-    refs.leftEye.upperLid.position.y = 0.094 - expression.eyeSquint * 0.06;
-    refs.rightEye.upperLid.position.y = 0.094 - expression.eyeSquint * 0.06;
-    refs.leftEye.lowerLid.position.y = -0.09 + expression.eyeSquint * 0.05;
-    refs.rightEye.lowerLid.position.y = -0.09 + expression.eyeSquint * 0.05;
+    refs.leftEye.iris.position.y = -0.008 + face.gazeY * 0.02;
+    refs.rightEye.iris.position.y = -0.008 + face.gazeY * 0.02;
+    refs.leftEye.pupil.position.y = -0.009 + face.gazeY * 0.026;
+    refs.rightEye.pupil.position.y = -0.009 + face.gazeY * 0.026;
 
-    refs.leftBrow.position.y = 0.42 + expression.browLift * 0.08;
-    refs.rightBrow.position.y = 0.42 + expression.browLift * 0.08;
-    refs.leftBrow.rotation.x = 0.12 + expression.browLift * 0.2;
-    refs.rightBrow.rotation.x = 0.12 + expression.browLift * 0.2;
+    refs.leftBrow.position.y = 0.53 + face.browLift * 0.12;
+    refs.rightBrow.position.y = 0.53 + face.browLift * 0.12;
+    refs.leftBrow.rotation.x = 0.16 + face.browLift * 0.24;
+    refs.rightBrow.rotation.x = 0.16 + face.browLift * 0.24;
 
-    refs.leftCheek.material.opacity = 0.34 + expression.cheekLift * 0.44;
-    refs.rightCheek.material.opacity = 0.34 + expression.cheekLift * 0.44;
-    refs.leftCheek.position.y = 0.02 + expression.cheekLift * 0.048;
-    refs.rightCheek.position.y = 0.02 + expression.cheekLift * 0.048;
+    refs.leftCheek.material.opacity = 0.28 + face.cheekLift * 0.48;
+    refs.rightCheek.material.opacity = 0.28 + face.cheekLift * 0.48;
+    refs.leftCheek.position.y = 0.03 + face.cheekLift * 0.07;
+    refs.rightCheek.position.y = 0.03 + face.cheekLift * 0.07;
+    refs.leftCheek.scale.y = 0.58 + face.cheekLift * 0.18;
+    refs.rightCheek.scale.y = 0.58 + face.cheekLift * 0.18;
 
-    refs.leftDimple.material.opacity = expression.dimpleLift * 0.9;
-    refs.rightDimple.material.opacity = expression.dimpleLift * 0.9;
-    refs.leftDimple.position.y = -0.13 + expression.dimpleLift * 0.05;
-    refs.rightDimple.position.y = -0.13 + expression.dimpleLift * 0.05;
+    refs.leftSmileCrease.material.opacity = 0.18 + face.cheekLift * 0.38;
+    refs.rightSmileCrease.material.opacity = 0.18 + face.cheekLift * 0.38;
+    refs.leftSmileCrease.position.y = -0.13 + face.cheekLift * 0.05;
+    refs.rightSmileCrease.position.y = -0.13 + face.cheekLift * 0.05;
 
-    refs.mouth.scale.set(0.86 + expression.smile * 0.24, 0.84 + expression.smile * 0.2, 1);
-    refs.mouth.position.y = -0.12 + expression.smile * 0.035;
-    refs.closedSmile.scale.set(0.9 + expression.smile * 0.28, 0.64 + expression.smile * 0.28, 1);
-    refs.closedSmile.position.y = -0.034 + expression.smile * 0.017;
-    refs.openMouth.scale.set(1, 0.74 + expression.smile * 0.26, 1);
-    refs.mouthLip.scale.set(1, 0.72 + expression.smile * 0.34, 1);
-    refs.mouthInner.scale.y = 0.42 + expression.mouthOpen * 0.74;
-    refs.mouthTongue.scale.y = 0.36 + expression.mouthOpen * 0.56;
-    refs.mouthTongue.position.y = -0.056 + expression.mouthOpen * 0.018;
-    const openVisible = expression.mouthOpen > 0.16;
-    refs.closedSmile.visible = !openVisible;
-    refs.openMouth.visible = openVisible;
-    refs.mouthInner.visible = openVisible;
-    refs.mouthTongue.visible = expression.mouthOpen > 0.34;
+    const mouthWidth = 0.9 + face.smile * 0.62;
+    const mouthHeight = 0.5 + face.smile * 0.36;
+    const mouthOpen = Math.max(0, Math.min(1, face.mouthOpen));
+    const cornerLift = face.smile * 0.08 + mouthOpen * 0.03;
+
+    refs.mouth.scale.set(mouthWidth, mouthHeight, 1);
+    refs.mouth.position.y = -0.2 + face.smile * 0.045;
+
+    refs.upperLip.position.y = 0.036 + cornerLift;
+    refs.upperLip.scale.set(1, 0.88 + face.smile * 0.28, 1);
+
+    const jawDrop = mouthOpen * 0.16;
+    refs.lowerLip.position.y = -0.036 - jawDrop;
+    refs.lowerLip.scale.set(1.02, 0.86 + mouthOpen * 0.5, 1);
+
+    refs.leftMouthCorner.position.set(-0.206, -0.012 + cornerLift * 0.9, 0.01);
+    refs.rightMouthCorner.position.set(0.206, -0.012 + cornerLift * 0.9, 0.01);
+
+    refs.mouthInner.position.y = -0.016 - mouthOpen * 0.05;
+    refs.mouthInner.scale.set(1.48, 0.34 + mouthOpen * 1.02, 1);
+    refs.mouthInner.visible = mouthOpen > 0.03;
+
+    refs.mouthTongue.position.y = -0.118 - mouthOpen * 0.016;
+    refs.mouthTongue.scale.set(1.34, 0.54 + mouthOpen * 0.5, 1);
+    refs.mouthTongue.visible = mouthOpen > 0.22;
   }
 
   function applyViewState() {
@@ -711,8 +668,6 @@ import * as THREE from "/static/vendor/three/three.module.js";
         light.visible = false;
       });
       setCameraPose("front");
-      expressionState.activePerformance = null;
-      hideSwoosh();
     } else {
       scene.background = new THREE.Color(0xf8f4ff);
       refs.star.material = materials.star;
@@ -730,18 +685,14 @@ import * as THREE from "/static/vendor/three/three.module.js";
       button.classList.toggle("primary", active);
     });
 
-    expressionButtons.forEach((button) => {
-      const active = button.dataset.expression === viewState.expression;
-      button.classList.toggle("active", active);
-      button.classList.toggle("primary", active);
-      button.disabled = viewState.mode === "silhouette";
-    });
-
     performanceButtons.forEach((button) => {
       const isPause = button.dataset.performance === "pause";
       button.disabled = viewState.mode === "silhouette" && !isPause;
       if (isPause) {
         button.classList.toggle("active", viewState.paused);
+      }
+      if (button.dataset.performance === "play") {
+        button.classList.toggle("active", performanceState.playing);
       }
     });
 
@@ -750,6 +701,10 @@ import * as THREE from "/static/vendor/three/three.module.js";
       button.classList.toggle("active", active);
       button.disabled = viewState.mode === "silhouette";
     });
+
+    if (greetingProgressRange) {
+      greetingProgressRange.disabled = viewState.mode === "silhouette";
+    }
 
     syncDiagnostics();
     render();
@@ -766,9 +721,18 @@ import * as THREE from "/static/vendor/three/three.module.js";
     camera.lookAt(0, 0.15, 0);
   }
 
-  function syncDiagnostics() {
-    const current = expressionState.current;
-    const target = expressionState.target;
+  function syncProgressUi(progress) {
+    const clamped = Math.max(0, Math.min(1, progress));
+    if (greetingProgressRange) {
+      greetingProgressRange.value = String(Math.round(clamped * 100));
+    }
+    if (greetingProgressBadge) {
+      greetingProgressBadge.textContent = `${Math.round(clamped * 100)}%`;
+    }
+  }
+
+  function syncDiagnostics(stageLabel = null) {
+    const stage = stageLabel || evaluateGreeting(performanceState.progress).stage;
     const motionState = viewState.paused
       ? "paused"
       : pausedByVisibility
@@ -780,58 +744,39 @@ import * as THREE from "/static/vendor/three/three.module.js";
       diagBuildId.textContent = LAB_BUILD_ID;
     }
     if (diagExpression) {
-      diagExpression.textContent = expressionState.selected;
+      diagExpression.textContent = stage;
     }
     if (diagPerformance) {
-      diagPerformance.textContent = expressionState.activePerformance ? expressionState.activePerformance.type : "none";
+      diagPerformance.textContent = performanceState.activeName || "none";
     }
     if (diagMotion) {
       diagMotion.textContent = motionState;
     }
     if (diagMouthOpen) {
-      diagMouthOpen.textContent = `${current.mouthOpen.toFixed(2)} / ${target.mouthOpen.toFixed(2)}`;
+      diagMouthOpen.textContent = `${faceState.current.mouthOpen.toFixed(2)} / ${faceState.target.mouthOpen.toFixed(2)}`;
     }
     if (diagSmile) {
-      diagSmile.textContent = `${current.smile.toFixed(2)} / ${target.smile.toFixed(2)}`;
+      diagSmile.textContent = `${faceState.current.smile.toFixed(2)} / ${faceState.target.smile.toFixed(2)}`;
     }
     if (diagCheekLift) {
-      diagCheekLift.textContent = current.cheekLift.toFixed(2);
+      diagCheekLift.textContent = faceState.current.cheekLift.toFixed(2);
     }
     if (diagEyeSquint) {
-      diagEyeSquint.textContent = current.eyeSquint.toFixed(2);
+      diagEyeSquint.textContent = faceState.current.eyeSquint.toFixed(2);
     }
   }
 
-  window.__goldStarLabDebug = {
-    getState() {
-      return {
-        buildId: LAB_BUILD_ID,
-        viewState: { ...viewState },
-        selectedExpression: expressionState.selected,
-        activePerformance: expressionState.activePerformance ? expressionState.activePerformance.type : null,
-        current: { ...expressionState.current },
-        target: { ...expressionState.target },
-        applied: {
-          closedSmileVisible: !!refs.closedSmile?.visible,
-          openMouthVisible: !!refs.openMouth?.visible,
-          tongueVisible: !!refs.mouthTongue?.visible,
-          mouthInnerScaleY: Number(refs.mouthInner?.scale?.y ?? 0),
-          mouthGroupScaleY: Number(refs.mouth?.scale?.y ?? 0),
-          leftCheekY: Number(refs.leftCheek?.position?.y ?? 0),
-          eyeScaleY: Number(refs.leftEye?.root?.scale?.y ?? 0),
-        },
-      };
-    },
-  };
-
-  function easeInOut(x) {
+  function smoothStep(x) {
     const clamped = Math.max(0, Math.min(1, x));
     return clamped * clamped * (3 - 2 * clamped);
   }
 
-  function easeOut(x) {
-    const clamped = Math.max(0, Math.min(1, x));
-    return 1 - (1 - clamped) * (1 - clamped);
+  function lerpObject(a, b, t) {
+    const out = {};
+    Object.keys(a).forEach((key) => {
+      out[key] = a[key] + (b[key] - a[key]) * t;
+    });
+    return out;
   }
 
   function render() {
@@ -865,4 +810,29 @@ import * as THREE from "/static/vendor/three/three.module.js";
       host.removeChild(renderer.domElement);
     }
   }
+
+  window.__goldStarLabDebug = {
+    getState() {
+      const stage = evaluateGreeting(performanceState.progress).stage;
+      return {
+        buildId: LAB_BUILD_ID,
+        stage,
+        progress: performanceState.progress,
+        viewState: { ...viewState },
+        activePerformance: performanceState.activeName,
+        current: { ...faceState.current },
+        target: { ...faceState.target },
+        applied: {
+          mouthInnerVisible: !!refs.mouthInner?.visible,
+          tongueVisible: !!refs.mouthTongue?.visible,
+          mouthInnerScaleY: Number(refs.mouthInner?.scale?.y ?? 0),
+          mouthScaleY: Number(refs.mouth?.scale?.y ?? 0),
+          lowerLipY: Number(refs.lowerLip?.position?.y ?? 0),
+          leftCheekY: Number(refs.leftCheek?.position?.y ?? 0),
+          leftEyeScaleY: Number(refs.leftEye?.root?.scale?.y ?? 0),
+          starY: Number(refs.starRoot?.position?.y ?? 0),
+        },
+      };
+    },
+  };
 })();

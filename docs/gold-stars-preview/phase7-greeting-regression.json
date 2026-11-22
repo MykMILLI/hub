@@ -1,0 +1,539 @@
+{
+  "buildId": "gold-star-lab-2026-11-22-greeting-v1",
+  "url": "http://127.0.0.1:5000/gold-stars/preview/character-lab",
+  "timelineSamples": {
+    "relaxed": {
+      "buildId": "gold-star-lab-2026-11-22-greeting-v1",
+      "stage": "Relaxed",
+      "progress": 0,
+      "viewState": {
+        "mode": "material",
+        "camera": "front",
+        "paused": false,
+        "slowMotion": 1,
+        "reducedMotionOverride": false
+      },
+      "activePerformance": null,
+      "current": {
+        "smile": 0.26,
+        "mouthOpen": 0.01,
+        "cheekLift": 0.2,
+        "eyeSquint": 0.08,
+        "eyeOpen": 0.74,
+        "browLift": 0.08,
+        "gazeY": 0.02
+      },
+      "target": {
+        "smile": 0.26,
+        "mouthOpen": 0.01,
+        "cheekLift": 0.2,
+        "eyeSquint": 0.08,
+        "eyeOpen": 0.74,
+        "browLift": 0.08,
+        "gazeY": 0.02
+      },
+      "applied": {
+        "mouthInnerVisible": false,
+        "tongueVisible": false,
+        "mouthInnerScaleY": 0.3502,
+        "mouthScaleY": 0.5936,
+        "lowerLipY": -0.037599999999999995,
+        "leftCheekY": 0.044,
+        "leftEyeScaleY": 0.7224,
+        "starY": 0.1
+      }
+    },
+    "recognition": {
+      "buildId": "gold-star-lab-2026-11-22-greeting-v1",
+      "stage": "Recognition",
+      "progress": 0.2,
+      "viewState": {
+        "mode": "material",
+        "camera": "front",
+        "paused": false,
+        "slowMotion": 1,
+        "reducedMotionOverride": false
+      },
+      "activePerformance": null,
+      "current": {
+        "smile": 0.34790383170548456,
+        "mouthOpen": 0.029534184823441022,
+        "cheekLift": 0.27813673929376415,
+        "eyeSquint": 0.060465815176558975,
+        "eyeOpen": 0.8767392937640872,
+        "browLift": 0.27534184823441027,
+        "gazeY": 0.07860255447032306
+      },
+      "target": {
+        "smile": 0.34790383170548456,
+        "mouthOpen": 0.029534184823441022,
+        "cheekLift": 0.27813673929376415,
+        "eyeSquint": 0.060465815176558975,
+        "eyeOpen": 0.8767392937640872,
+        "browLift": 0.27534184823441027,
+        "gazeY": 0.07860255447032306
+      },
+      "applied": {
+        "mouthInnerVisible": false,
+        "tongueVisible": false,
+        "mouthInnerScaleY": 0.3701248685199099,
+        "mouthScaleY": 0.6252453794139744,
+        "lowerLipY": -0.040725469571750564,
+        "leftCheekY": 0.04946957175056349,
+        "leftEyeScaleY": 0.8634368144252442,
+        "starY": 0.10976709241172052
+      }
+    },
+    "anticipation": {
+      "buildId": "gold-star-lab-2026-11-22-greeting-v1",
+      "stage": "Anticipation",
+      "progress": 0.44,
+      "viewState": {
+        "mode": "material",
+        "camera": "front",
+        "paused": false,
+        "slowMotion": 1,
+        "reducedMotionOverride": false
+      },
+      "activePerformance": null,
+      "current": {
+        "smile": 0.54,
+        "mouthOpen": 0.18,
+        "cheekLift": 0.44,
+        "eyeSquint": 0.18,
+        "eyeOpen": 0.78,
+        "browLift": 0.14,
+        "gazeY": 0.04
+      },
+      "target": {
+        "smile": 0.54,
+        "mouthOpen": 0.18,
+        "cheekLift": 0.44,
+        "eyeSquint": 0.18,
+        "eyeOpen": 0.78,
+        "browLift": 0.14,
+        "gazeY": 0.04
+      },
+      "applied": {
+        "mouthInnerVisible": true,
+        "tongueVisible": false,
+        "mouthInnerScaleY": 0.5236000000000001,
+        "mouthScaleY": 0.6944,
+        "lowerLipY": -0.0648,
+        "leftCheekY": 0.06080000000000001,
+        "leftEyeScaleY": 0.7404000000000001,
+        "starY": -0.07999999999999999
+      }
+    },
+    "delight": {
+      "buildId": "gold-star-lab-2026-11-22-greeting-v1",
+      "stage": "Delight",
+      "progress": 0.7,
+      "viewState": {
+        "mode": "material",
+        "camera": "front",
+        "paused": false,
+        "slowMotion": 1,
+        "reducedMotionOverride": false
+      },
+      "activePerformance": null,
+      "current": {
+        "smile": 0.94,
+        "mouthOpen": 0.8599999999999999,
+        "cheekLift": 0.96,
+        "eyeSquint": 0.62,
+        "eyeOpen": 0.58,
+        "browLift": 0.12,
+        "gazeY": 0.06
+      },
+      "target": {
+        "smile": 0.94,
+        "mouthOpen": 0.8599999999999999,
+        "cheekLift": 0.96,
+        "eyeSquint": 0.62,
+        "eyeOpen": 0.58,
+        "browLift": 0.12,
+        "gazeY": 0.06
+      },
+      "applied": {
+        "mouthInnerVisible": true,
+        "tongueVisible": true,
+        "mouthInnerScaleY": 1.2171999999999998,
+        "mouthScaleY": 0.8384,
+        "lowerLipY": -0.17359999999999998,
+        "leftCheekY": 0.09720000000000001,
+        "leftEyeScaleY": 0.58,
+        "starY": 0.38
+      }
+    },
+    "settle": {
+      "buildId": "gold-star-lab-2026-11-22-greeting-v1",
+      "stage": "Settle",
+      "progress": 0.88,
+      "viewState": {
+        "mode": "material",
+        "camera": "front",
+        "paused": false,
+        "slowMotion": 1,
+        "reducedMotionOverride": false
+      },
+      "activePerformance": null,
+      "current": {
+        "smile": 0.7174999999999999,
+        "mouthOpen": 0.41437499999999994,
+        "cheekLift": 0.6543749999999999,
+        "eyeSquint": 0.37625,
+        "eyeOpen": 0.635625,
+        "browLift": 0.096875,
+        "gazeY": 0.036875
+      },
+      "target": {
+        "smile": 0.7174999999999999,
+        "mouthOpen": 0.41437499999999994,
+        "cheekLift": 0.6543749999999999,
+        "eyeSquint": 0.37625,
+        "eyeOpen": 0.635625,
+        "browLift": 0.096875,
+        "gazeY": 0.036875
+      },
+      "applied": {
+        "mouthInnerVisible": true,
+        "tongueVisible": true,
+        "mouthInnerScaleY": 0.7626625,
+        "mouthScaleY": 0.7583,
+        "lowerLipY": -0.1023,
+        "leftCheekY": 0.07580624999999999,
+        "leftEyeScaleY": 0.58,
+        "starY": 0.16749999999999998
+      }
+    }
+  },
+  "reducedMotionSamples": {
+    "reducedRelaxed": {
+      "buildId": "gold-star-lab-2026-11-22-greeting-v1",
+      "stage": "Relaxed",
+      "progress": 0,
+      "viewState": {
+        "mode": "material",
+        "camera": "front",
+        "paused": false,
+        "slowMotion": 1,
+        "reducedMotionOverride": true
+      },
+      "activePerformance": null,
+      "current": {
+        "smile": 0.26,
+        "mouthOpen": 0.01,
+        "cheekLift": 0.2,
+        "eyeSquint": 0.08,
+        "eyeOpen": 0.74,
+        "browLift": 0.08,
+        "gazeY": 0.02
+      },
+      "target": {
+        "smile": 0.26,
+        "mouthOpen": 0.01,
+        "cheekLift": 0.2,
+        "eyeSquint": 0.08,
+        "eyeOpen": 0.74,
+        "browLift": 0.08,
+        "gazeY": 0.02
+      },
+      "applied": {
+        "mouthInnerVisible": false,
+        "tongueVisible": false,
+        "mouthInnerScaleY": 0.3502,
+        "mouthScaleY": 0.5936,
+        "lowerLipY": -0.037599999999999995,
+        "leftCheekY": 0.044,
+        "leftEyeScaleY": 0.7224,
+        "starY": 0.1
+      }
+    },
+    "reducedDelight": {
+      "buildId": "gold-star-lab-2026-11-22-greeting-v1",
+      "stage": "Delight",
+      "progress": 0.7,
+      "viewState": {
+        "mode": "material",
+        "camera": "front",
+        "paused": false,
+        "slowMotion": 1,
+        "reducedMotionOverride": true
+      },
+      "activePerformance": null,
+      "current": {
+        "smile": 0.94,
+        "mouthOpen": 0.8599999999999999,
+        "cheekLift": 0.96,
+        "eyeSquint": 0.62,
+        "eyeOpen": 0.58,
+        "browLift": 0.12,
+        "gazeY": 0.06
+      },
+      "target": {
+        "smile": 0.94,
+        "mouthOpen": 0.8599999999999999,
+        "cheekLift": 0.96,
+        "eyeSquint": 0.62,
+        "eyeOpen": 0.58,
+        "browLift": 0.12,
+        "gazeY": 0.06
+      },
+      "applied": {
+        "mouthInnerVisible": true,
+        "tongueVisible": true,
+        "mouthInnerScaleY": 1.2171999999999998,
+        "mouthScaleY": 0.8384,
+        "lowerLipY": -0.17359999999999998,
+        "leftCheekY": 0.09720000000000001,
+        "leftEyeScaleY": 0.58,
+        "starY": 0.1
+      }
+    }
+  },
+  "playbackSamples": [
+    {
+      "progress": 0.10694339622641498,
+      "stage": "Relaxed",
+      "current": {
+        "smile": 0.29388384925978983,
+        "mouthOpen": 0.0175297442799533,
+        "cheekLift": 0.23011897711981322,
+        "eyeSquint": 0.0724702557200467,
+        "eyeOpen": 0.7927082099596731,
+        "browLift": 0.155297442799533,
+        "gazeY": 0.0425892328398599
+      },
+      "applied": {
+        "mouthInnerVisible": false,
+        "tongueVisible": false,
+        "mouthInnerScaleY": 0.3578803391655524,
+        "mouthScaleY": 0.6057981857335244,
+        "lowerLipY": -0.03880475908479253,
+        "leftCheekY": 0.046108328398386925,
+        "leftEyeScaleY": 0.7767647537012627,
+        "starY": 0.10376487213997665
+      }
+    },
+    {
+      "progress": 0.22011320754716976,
+      "stage": "Recognition",
+      "current": {
+        "smile": 0.34714006975966305,
+        "mouthOpen": 0.029364483910900147,
+        "cheekLift": 0.2774578378099294,
+        "eyeSquint": 0.0606355761233981,
+        "eyeOpen": 0.8755511316746603,
+        "browLift": 0.2736444744562269,
+        "gazeY": 0.07809334278156659
+      },
+      "applied": {
+        "mouthInnerVisible": false,
+        "tongueVisible": false,
+        "mouthInnerScaleY": 0.3699517735891182,
+        "mouthScaleY": 0.6249704251134787,
+        "lowerLipY": -0.04069831742574402,
+        "leftCheekY": 0.049422048646695055,
+        "leftEyeScaleY": 0.8622113049275126,
+        "starY": 0.10968218303289809
+      }
+    },
+    {
+      "progress": 0.3458867924528301,
+      "stage": "Recognition",
+      "current": {
+        "smile": 0.4451360265767862,
+        "mouthOpen": 0.10510966338674196,
+        "cheekLift": 0.3601143611511675,
+        "eyeSquint": 0.12008933421977187,
+        "eyeOpen": 0.8299200613090792,
+        "browLift": 0.20988790766489113,
+        "gazeY": 0.05996784635581188
+      },
+      "applied": {
+        "mouthInnerVisible": true,
+        "tongueVisible": false,
+        "mouthInnerScaleY": 0.4472118566544768,
+        "mouthScaleY": 0.660248969567643,
+        "lowerLipY": -0.05281754614187871,
+        "leftCheekY": 0.05520800528058173,
+        "leftEyeScaleY": 0.8035004077807294,
+        "starY": 0.014859519227718498
+      }
+    },
+    {
+      "progress": 0.47796226415094323,
+      "stage": "Anticipation",
+      "current": {
+        "smile": 0.5513831429212313,
+        "mouthOpen": 0.20011260901998754,
+        "cheekLift": 0.4551809176720835,
+        "eyeSquint": 0.1929130934684355,
+        "eyeOpen": 0.7743304219594918,
+        "browLift": 0.14000507897807063,
+        "gazeY": 0.040786971840368856
+      },
+      "applied": {
+        "mouthInnerVisible": true,
+        "tongueVisible": false,
+        "mouthInnerScaleY": 0.5441148612003873,
+        "mouthScaleY": 0.6984979314516433,
+        "lowerLipY": -0.068018017443198,
+        "leftCheekY": 0.061862664237045846,
+        "leftEyeScaleY": 0.7318895413964359,
+        "starY": -0.06511183958357988
+      }
+    },
+    {
+      "progress": 0.6226415094339625,
+      "stage": "Delight",
+      "current": {
+        "smile": 0.8207434447527576,
+        "mouthOpen": 0.6572642543554547,
+        "cheekLift": 0.8049666784668515,
+        "eyeSquint": 0.48881799412253646,
+        "eyeOpen": 0.6396282891300402,
+        "browLift": 0.12596312818864724,
+        "gazeY": 0.0540372861929547
+      },
+      "applied": {
+        "mouthInnerVisible": true,
+        "tongueVisible": true,
+        "mouthInnerScaleY": 1.0104095394425638,
+        "mouthScaleY": 0.7954676401109928,
+        "lowerLipY": -0.14116228069687276,
+        "leftCheekY": 0.08634766749267961,
+        "leftEyeScaleY": 0.58,
+        "starY": 0.2428559018977716
+      }
+    },
+    {
+      "progress": 0.7672830188679252,
+      "stage": "Delight",
+      "current": {
+        "smile": 0.8878682355889952,
+        "mouthOpen": 0.7363771511820728,
+        "cheekLift": 0.8818586768808243,
+        "eyeSquint": 0.5548775371378489,
+        "eyeOpen": 0.593103345349453,
+        "browLift": 0.1135328125742774,
+        "gazeY": 0.05350465078044759
+      },
+      "applied": {
+        "mouthInnerVisible": true,
+        "tongueVisible": true,
+        "mouthInnerScaleY": 1.0911046942057143,
+        "mouthScaleY": 0.8196325648120383,
+        "lowerLipY": -0.15382034418913165,
+        "leftCheekY": 0.09173010738165771,
+        "leftEyeScaleY": 0.58,
+        "starY": 0.31486345667452786
+      }
+    },
+    {
+      "progress": 0.9307547169811335,
+      "stage": "Settle",
+      "current": {
+        "smile": 0.5967342089677813,
+        "mouthOpen": 0.28769948292780306,
+        "cheekLift": 0.5276145808873272,
+        "eyeSquint": 0.29176730510400656,
+        "eyeOpen": 0.6658164615061888,
+        "browLift": 0.09084399515088455,
+        "gazeY": 0.030843989651612287
+      },
+      "applied": {
+        "mouthInnerVisible": true,
+        "tongueVisible": true,
+        "mouthInnerScaleY": 0.6334534725863592,
+        "mouthScaleY": 0.7148243152284013,
+        "lowerLipY": -0.0820319172684485,
+        "leftCheekY": 0.0669330206621129,
+        "leftEyeScaleY": 0.6016276543833073,
+        "starY": 0.14344869839570892
+      }
+    }
+  ],
+  "series": {
+    "smileValues": [
+      0.29,
+      0.35,
+      0.45,
+      0.55,
+      0.82,
+      0.89,
+      0.6
+    ],
+    "mouthValues": [
+      0.02,
+      0.03,
+      0.11,
+      0.2,
+      0.66,
+      0.74,
+      0.29
+    ],
+    "cheekValues": [
+      0.23,
+      0.28,
+      0.36,
+      0.46,
+      0.8,
+      0.88,
+      0.53
+    ],
+    "eyeValues": [
+      0.07,
+      0.06,
+      0.12,
+      0.19,
+      0.49,
+      0.55,
+      0.29
+    ],
+    "bodyYValues": [
+      0.1,
+      0.11,
+      0.01,
+      -0.07,
+      0.24,
+      0.31,
+      0.14
+    ]
+  },
+  "assertions": [
+    {
+      "name": "timeline_relaxed_vs_delight_visibly_different",
+      "pass": true
+    },
+    {
+      "name": "anticipation_body_dip_exists",
+      "pass": true
+    },
+    {
+      "name": "delight_body_rise_exists",
+      "pass": true
+    },
+    {
+      "name": "reduced_motion_keeps_face_change_without_hop",
+      "pass": true
+    },
+    {
+      "name": "playback_shows_multi_step_face_and_body_changes",
+      "pass": true
+    },
+    {
+      "name": "no_console_errors",
+      "pass": true
+    }
+  ],
+  "consoleErrors": [],
+  "screenshots": {
+    "relaxed": "C:\\clones\\homehub\\docs\\gold-stars-preview\\phase7-greeting-relaxed.png",
+    "recognition": "C:\\clones\\homehub\\docs\\gold-stars-preview\\phase7-greeting-recognition.png",
+    "anticipation": "C:\\clones\\homehub\\docs\\gold-stars-preview\\phase7-greeting-anticipation.png",
+    "delight": "C:\\clones\\homehub\\docs\\gold-stars-preview\\phase7-greeting-delight.png",
+    "settle": "C:\\clones\\homehub\\docs\\gold-stars-preview\\phase7-greeting-settle.png"
+  }
+}

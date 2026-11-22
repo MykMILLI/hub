@@ -218,17 +218,27 @@
         </section>
 
         <section class="card">
-          <h2 class="text-lg font-semibold mb-3">Expressions & performance</h2>
+          <h2 class="text-lg font-semibold mb-3">Greeting performance review</h2>
           <div class="control-grid">
-            <button class="btn primary" data-expression="friendlyIdle">Friendly idle</button>
-            <button class="btn" data-expression="inviting">Welcoming open smile</button>
-            <button class="btn" data-expression="delighted">Delighted / dimples</button>
-            <button class="btn" data-expression="softSmile">Soft smile</button>
-            <button class="btn" data-performance="hello">Say hello</button>
-            <button class="btn" data-performance="turn">Playful turn</button>
+            <button class="btn primary" data-performance="play" id="playGreetingBtn">Play greeting</button>
+            <button class="btn" data-performance="restart" id="restartGreetingBtn">Restart</button>
             <button class="btn" data-performance="pause" id="pauseMotionBtn" aria-pressed="false">Pause</button>
           </div>
-          <p class="mini mt-3">These controls drive one character rig and one approved star body silhouette.</p>
+          <div class="slider-wrap mt-3">
+            <div class="slider-row">
+              <label for="greetingProgressRange" class="mini">Greeting progress</label>
+              <span id="greetingProgressBadge" class="badge">0%</span>
+            </div>
+            <input id="greetingProgressRange" type="range" min="0" max="100" step="1" value="0" />
+            <div class="slider-row mini" aria-hidden="true">
+              <span>Relaxed</span>
+              <span>Recognition</span>
+              <span>Anticipation</span>
+              <span>Delight</span>
+              <span>Settle</span>
+            </div>
+          </div>
+          <p class="mini mt-3">One coordinated timeline drives body + face from relaxed to delighted and back.</p>
         </section>
 
         <section class="card">
