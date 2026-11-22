@@ -2231,6 +2231,15 @@ def gold_stars_preview_child(child_name: str):
     )
 
 
+@main_bp.route('/gold-stars/preview/character-lab', methods=['GET'])
+def gold_stars_preview_character_lab():
+    actor = _current_actor_name()
+    denied = _gold_star_preview_require_parent(actor)
+    if denied is not None:
+        return denied
+    return render_template('gold_star_character_lab.html', actor_name=actor)
+
+
 @main_bp.route('/api/gold-stars/preview/state', methods=['GET'])
 def api_gold_stars_preview_state():
     actor = _current_actor_name()

@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gold Star Character Lab</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='output.css') }}?v={{ asset_version|default('1') }}">
+  <style>
+    :root {
+      --bg: radial-gradient(circle at top left, #fff8db 0%, #fef3c7 24%, #f3ecff 70%, #eee8ff 100%);
+      --surface: rgba(255, 255, 255, 0.9);
+      --border: rgba(139, 92, 246, 0.24);
+      --text: #3a2758;
+      --muted: #6a4a91;
+      --purple: #7c3aed;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .shell {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 1rem;
+      display: grid;
+      gap: 1rem;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 1rem;
+      padding: 0.9rem 1rem;
+      box-shadow: 0 12px 30px rgba(76, 29, 149, 0.1);
+    }
+    .banner {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+    .tag {
+      display: inline-flex;
+      border-radius: 999px;
+      background: #ede9fe;
+      color: #5b21b6;
+      padding: 0.22rem 0.68rem;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+    .mini {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+    .btn {
+      border: 1px solid #c4b5fd;
+      background: #f5f3ff;
+      color: #5b21b6;
+      border-radius: 0.72rem;
+      padding: 0.5rem 0.75rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .btn.primary {
+      background: var(--purple);
+      border-color: var(--purple);
+      color: #fff;
+    }
+    .btn.active {
+      background: #ddd6fe;
+      border-color: #8b5cf6;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+      gap: 1rem;
+      align-items: start;
+    }
+    @media (max-width: 1024px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+    }
+    .canvas-shell {
+      border-radius: 0.9rem;
+      border: 1px solid rgba(139, 92, 246, 0.22);
+      background:
+        radial-gradient(circle at 20% 15%, rgba(255, 255, 255, 0.95) 0%, transparent 48%),
+        linear-gradient(160deg, rgba(252, 244, 216, 0.92) 0%, rgba(236, 229, 255, 0.92) 100%);
+      min-height: 520px;
+      position: relative;
+      overflow: hidden;
+      display: grid;
+      place-items: stretch;
+    }
+    .canvas-host {
+      width: 100%;
+      height: 100%;
+      min-height: 520px;
+    }
+    .fallback {
+      position: absolute;
+      inset: 0;
+      display: none;
+      padding: 1rem;
+      place-items: center;
+      text-align: center;
+      font-weight: 600;
+      color: #5b21b6;
+      background: rgba(255, 255, 255, 0.86);
+    }
+    .fallback.active {
+      display: grid;
+    }
+    .control-column {
+      display: grid;
+      gap: 0.9rem;
+    }
+    .control-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.5rem;
+    }
+    .control-grid .btn {
+      width: 100%;
+      text-align: center;
+    }
+    .slider-wrap {
+      display: grid;
+      gap: 0.45rem;
+    }
+    .slider-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    input[type="range"] {
+      width: 100%;
+      accent-color: #7c3aed;
+    }
+    .badge {
+      border-radius: 999px;
+      background: #ede9fe;
+      color: #5b21b6;
+      padding: 0.2rem 0.58rem;
+      font-size: 0.76rem;
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="card banner">
+      <div>
+        <span class="tag">Gold Star preview lab</span>
+        <h1 class="text-xl font-bold mt-2 mb-1">Mills-Roberts Home — 3D Character Lab</h1>
+        <p class="mini">Signed in as {{ actor_name }}. Parent-authorized isolated rendering lab; rewards accounting remains unchanged.</p>
+      </div>
+      <div class="flex gap-2 flex-wrap justify-end">
+        <a class="btn" href="/gold-stars/preview">Back to preview workflow</a>
+        <a class="btn" href="/gold-stars">Back to live rewards</a>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="card canvas-shell">
+        <div id="characterLabCanvasHost" class="canvas-host" aria-label="3D star character scene"></div>
+        <div id="webglFallback" class="fallback" role="status" aria-live="polite">
+          WebGL rendering is unavailable in this browser. The rewards prototype still works, but this 3D lab needs WebGL support.
+        </div>
+      </section>
+
+      <aside class="control-column">
+        <section class="card">
+          <h2 class="text-lg font-semibold mb-3">Animation states</h2>
+          <div class="control-grid">
+            <button class="btn primary" data-action="idle">Idle</button>
+            <button class="btn" data-action="notice">Notice / wave</button>
+            <button class="btn" data-action="tap">Tap reaction</button>
+            <button class="btn" data-action="collect">Collect celebration</button>
+            <button class="btn" data-action="neutral">Return neutral</button>
+            <button class="btn" data-action="pause" id="pauseMotionBtn" aria-pressed="false">Pause motion</button>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2 class="text-lg font-semibold mb-3">Review controls</h2>
+          <div class="control-grid mb-3">
+            <button class="btn" data-camera="front">Front view</button>
+            <button class="btn" data-camera="threeQuarter">3/4 view</button>
+            <button class="btn" data-camera="side">Side view</button>
+          </div>
+          <div class="slider-wrap">
+            <div class="slider-row">
+              <label for="slowMoRange" class="mini">Slow motion</label>
+              <span id="slowMoBadge" class="badge">1.0×</span>
+            </div>
+            <input id="slowMoRange" type="range" min="0.2" max="1.0" step="0.05" value="1.0" />
+            <p class="mini">Lower values slow animation playback for inspection.</p>
+          </div>
+          <hr class="my-3 border-purple-100" />
+          <p class="mini">Reduced motion is respected. Rendering pauses when this tab is hidden.</p>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <script type="module" src="{{ url_for('static', filename='js/gold_star_character_lab.js') }}?v={{ asset_version|default('1') }}"></script>
+</body>
+</html>

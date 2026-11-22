@@ -484,6 +484,8 @@ def test_gold_star_preview_requires_parent_or_admin(client):
         session['current_member'] = 'Avery'
     page = client.get('/gold-stars/preview')
     assert page.status_code == 403
+    character_lab_page = client.get('/gold-stars/preview/character-lab')
+    assert character_lab_page.status_code == 403
     child_page = client.get('/gold-stars/preview/child/Avery')
     assert child_page.status_code == 403
     api_state = client.get('/api/gold-stars/preview/state')
@@ -499,6 +501,12 @@ def test_gold_star_preview_requires_parent_or_admin(client):
     assert 'Gold Star Club preview' in html
     assert 'Overview' in html
     assert 'Reduced motion override' in html
+
+    allowed_character_lab_page = client.get('/gold-stars/preview/character-lab')
+    assert allowed_character_lab_page.status_code == 200
+    character_lab_html = allowed_character_lab_page.get_data(as_text=True)
+    assert '3D Character Lab' in character_lab_html
+    assert 'Animation states' in character_lab_html
 
 
 def test_gold_star_preview_two_child_independent_accounting_and_collect_once(client):
