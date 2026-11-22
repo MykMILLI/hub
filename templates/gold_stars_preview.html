@@ -190,59 +190,280 @@
     @media (max-width: 800px) {
       .editor-grid { grid-template-columns: 1fr; }
     }
-    .character {
-      width: 136px;
-      aspect-ratio: 1;
-      margin: 0 auto;
+    .child-scene {
+      display: grid;
+      grid-template-columns: minmax(0, 1.25fr) minmax(300px, 0.9fr);
+      gap: 1rem;
+      align-items: start;
+    }
+    @media (max-width: 980px) {
+      .child-scene {
+        grid-template-columns: 1fr;
+      }
+    }
+    .child-hero {
+      border-radius: 1rem;
+      border: 1px solid rgba(139, 92, 246, 0.16);
+      background:
+        radial-gradient(circle at 16% 15%, rgba(255, 255, 255, 0.84) 0%, transparent 45%),
+        linear-gradient(165deg, rgba(255, 247, 220, 0.9) 0%, rgba(240, 233, 255, 0.9) 100%);
+      padding: 1rem 0.9rem;
       position: relative;
-      cursor: pointer;
-      filter: drop-shadow(0 10px 16px rgba(131, 77, 19, 0.3));
+      overflow: hidden;
+    }
+    .child-hero::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      bottom: -7px;
+      width: 190px;
+      height: 28px;
+      transform: translateX(-50%);
+      background: radial-gradient(ellipse at center, rgba(113, 72, 158, 0.26) 0%, rgba(113, 72, 158, 0) 74%);
+      pointer-events: none;
+    }
+    .character-wrap {
+      width: min(370px, 100%);
+      margin: 0.2rem auto 0;
+      position: relative;
       touch-action: manipulation;
     }
-    .character .body {
-      position: absolute;
-      inset: 0;
-      clip-path: polygon(50% 0%, 61% 33%, 94% 35%, 67% 56%, 76% 88%, 50% 70%, 24% 88%, 33% 56%, 6% 35%, 39% 33%);
-      background: linear-gradient(160deg, #ffe385 0%, #ffc94c 56%, #efac2f 100%);
+    .character {
+      position: relative;
+      cursor: pointer;
+      filter: drop-shadow(0 12px 18px rgba(168, 97, 23, 0.28));
+      transform-origin: center 65%;
+      will-change: transform;
     }
-    .character .face {
-      position: absolute;
-      inset: 0;
-      display: grid;
-      place-items: center;
-      transform: translateY(7px);
-      color: #4b1d1d;
-      font-size: 0.82rem;
-      font-weight: 700;
+    .character-svg {
+      width: 100%;
+      height: auto;
+      display: block;
     }
-    .character.state-idle { animation: idle 3.6s ease-in-out infinite; }
-    .character.state-noticeNewStar { animation: notice 0.95s ease-in-out infinite; }
-    .character.state-tapReaction { animation: tap 0.5s ease-in-out; }
-    .character.state-collecting { animation: collect 0.5s ease-in-out infinite; }
-    .character.state-celebrate { animation: celebrate 0.8s ease-in-out; }
-    .character.state-rewardApproved { animation: approved 0.7s ease-in-out; }
+    .star-shell {
+      fill: url(#starGradient);
+      stroke: rgba(191, 121, 26, 0.56);
+      stroke-width: 2;
+    }
+    .star-rim {
+      fill: url(#starRimGradient);
+      opacity: 0.82;
+    }
+    .star-highlight {
+      fill: rgba(255, 248, 208, 0.62);
+    }
+    .star-cheek {
+      fill: rgba(255, 142, 173, 0.36);
+    }
+    .eye-base {
+      fill: #201437;
+    }
+    .eye-glint {
+      fill: rgba(255, 255, 255, 0.95);
+    }
+    .eyelid {
+      fill: #f4af38;
+      transform-origin: center;
+      transform: scaleY(0);
+      animation: eye-blink 6.4s infinite;
+    }
+    .mouth {
+      fill: none;
+      stroke: #6a2b2b;
+      stroke-width: 4;
+      stroke-linecap: round;
+    }
+    .arm {
+      fill: url(#armGradient);
+      transform-origin: center;
+    }
+    .arm-left {
+      transform-origin: 84px 176px;
+    }
+    .arm-right {
+      transform-origin: 292px 172px;
+    }
+    .character-caption {
+      margin: 0.2rem 0 0;
+      text-align: center;
+      font-size: 0.78rem;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .character.state-idle { animation: char-idle 4s ease-in-out infinite; }
+    .character.state-noticeNewStar { animation: char-notice 1.05s ease-in-out infinite; }
+    .character.state-noticeNewStar .arm-right { animation: char-wave 0.9s ease-in-out infinite; }
+    .character.state-tapReaction { animation: char-tap 0.55s ease-in-out; }
+    .character.state-collecting { animation: char-collect 0.68s ease-in-out infinite; }
+    .character.state-celebrate { animation: char-celebrate 0.9s ease-in-out; }
+    .character.state-rewardApproved { animation: char-approved 0.8s ease-in-out; }
+    .character.state-rewardApproved .arm-left,
+    .character.state-rewardApproved .arm-right { animation: char-cheer-arm 0.8s ease-in-out; }
+    .character.motion-reduced,
+    .character.motion-reduced .eyelid,
+    .character.motion-reduced .arm-right,
+    .character.motion-reduced .arm-left {
+      animation: none !important;
+      transform: none !important;
+    }
+    .scene-sparkles {
+      position: absolute;
+      left: 50%;
+      top: 42%;
+      width: 24px;
+      height: 24px;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      opacity: 0;
+      z-index: 8;
+    }
+    .scene-sparkles.is-active {
+      opacity: 1;
+      animation: spark-pop 0.72s ease-out;
+    }
+    .scene-sparkles::before,
+    .scene-sparkles::after {
+      content: "";
+      position: absolute;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: rgba(255, 233, 159, 0.94);
+    }
+    .scene-sparkles::before {
+      left: 0;
+      top: 2px;
+    }
+    .scene-sparkles::after {
+      right: 0;
+      bottom: 2px;
+    }
     .board {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(22px, 1fr));
       gap: 0.32rem;
-      max-height: 120px;
+      max-height: 112px;
       overflow: auto;
       padding-right: 0.2rem;
+      align-content: start;
     }
     .board-star {
       width: 22px;
       height: 22px;
       clip-path: polygon(50% 0%, 61% 33%, 94% 35%, 67% 56%, 76% 88%, 50% 70%, 24% 88%, 33% 56%, 6% 35%, 39% 33%);
-      background: linear-gradient(160deg, #ffe17a 0%, #f6bb3d 100%);
+      background:
+        radial-gradient(circle at 32% 30%, rgba(255, 250, 220, 0.86) 0%, rgba(255, 250, 220, 0.02) 52%),
+        linear-gradient(160deg, #ffe17a 0%, #f6bb3d 100%);
+      box-shadow: inset 0 -1px 0 rgba(166, 93, 16, 0.24);
     }
-    @keyframes idle { 0%, 100% { transform: translateY(0) rotate(-1deg); } 50% { transform: translateY(-5px) rotate(1deg); } }
-    @keyframes notice { 0%,100% { transform: rotate(0deg); } 50% { transform: rotate(-8deg); } }
-    @keyframes tap { 0% { transform: scale(1); } 50% { transform: scale(0.92); } 100% { transform: scale(1); } }
-    @keyframes collect { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
-    @keyframes celebrate { 0% { transform: scale(1); } 45% { transform: scale(1.12); } 100% { transform: scale(1); } }
-    @keyframes approved { 0%,100% { transform: rotate(0deg); } 30% { transform: rotate(-8deg); } 65% { transform: rotate(8deg); } }
+    .board-more {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      border: 1px dashed rgba(139, 92, 246, 0.36);
+      color: #5b21b6;
+      font-size: 0.76rem;
+      font-weight: 700;
+      height: 22px;
+      padding: 0 0.42rem;
+      background: rgba(237, 233, 254, 0.62);
+    }
+    .waiting-award {
+      position: relative;
+      overflow: hidden;
+    }
+    .waiting-award.is-animating {
+      animation: waiting-tap 180ms ease-in-out;
+    }
+    .flying-star {
+      position: fixed;
+      width: 26px;
+      height: 26px;
+      pointer-events: none;
+      z-index: 120;
+      clip-path: polygon(50% 0%, 61% 33%, 94% 35%, 67% 56%, 76% 88%, 50% 70%, 24% 88%, 33% 56%, 6% 35%, 39% 33%);
+      background:
+        radial-gradient(circle at 32% 30%, rgba(255, 250, 220, 0.86) 0%, rgba(255, 250, 220, 0.03) 52%),
+        linear-gradient(160deg, #ffe17a 0%, #f6bb3d 100%);
+      box-shadow: 0 6px 14px rgba(145, 92, 14, 0.3);
+    }
+    .all-time-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      border: 1px solid rgba(139, 92, 246, 0.22);
+      border-radius: 999px;
+      padding: 0.28rem 0.6rem;
+      background: rgba(237, 233, 254, 0.72);
+      color: #5b21b6;
+      font-size: 0.8rem;
+      font-weight: 700;
+    }
+    @keyframes eye-blink {
+      0%, 42%, 46%, 100% { transform: scaleY(0); }
+      43%, 45% { transform: scaleY(1); }
+    }
+    @keyframes char-idle {
+      0%, 100% { transform: translateY(0) rotate(-1deg); }
+      50% { transform: translateY(-7px) rotate(1.1deg); }
+    }
+    @keyframes char-notice {
+      0%, 100% { transform: translateY(-1px) rotate(0deg) scale(1); }
+      50% { transform: translateY(-7px) rotate(-2deg) scale(1.02); }
+    }
+    @keyframes char-wave {
+      0%, 100% { transform: rotate(0deg); }
+      50% { transform: rotate(-24deg); }
+    }
+    @keyframes char-tap {
+      0% { transform: scale(1) rotate(0deg); }
+      36% { transform: scale(0.92) rotate(-4deg); }
+      68% { transform: scale(1.04) rotate(4deg); }
+      100% { transform: scale(1) rotate(0deg); }
+    }
+    @keyframes char-collect {
+      0%, 100% { transform: translateY(0) scale(1); }
+      50% { transform: translateY(-9px) scale(1.03); }
+    }
+    @keyframes char-celebrate {
+      0% { transform: scale(1); }
+      36% { transform: scale(1.1) rotate(-3deg); }
+      68% { transform: scale(1.06) rotate(3deg); }
+      100% { transform: scale(1); }
+    }
+    @keyframes char-approved {
+      0%, 100% { transform: translateY(0) rotate(0deg); }
+      30% { transform: translateY(-7px) rotate(-6deg); }
+      64% { transform: translateY(-7px) rotate(6deg); }
+    }
+    @keyframes char-cheer-arm {
+      0%, 100% { transform: rotate(0deg); }
+      45% { transform: rotate(-12deg); }
+    }
+    @keyframes spark-pop {
+      0% { opacity: 0; transform: translate(-50%, -50%) scale(0.3); }
+      25% { opacity: 1; transform: translate(-50%, -50%) scale(1.2); }
+      100% { opacity: 0; transform: translate(-50%, -50%) scale(1.6); }
+    }
+    @keyframes waiting-tap {
+      0% { transform: scale(1); }
+      50% { transform: scale(0.96); }
+      100% { transform: scale(1); }
+    }
     @media (prefers-reduced-motion: reduce) {
-      .character { animation: none !important; }
+      .character,
+      .eyelid,
+      .arm-right,
+      .arm-left {
+        animation: none !important;
+      }
+      .scene-sparkles,
+      .flying-star,
+      .waiting-award {
+        transition: none !important;
+        animation: none !important;
+      }
     }
   </style>
 </head>
@@ -304,6 +525,9 @@
         historyFilterChild: "all",
         historyFilterType: "all",
         busy: false,
+        characterOverrideState: null,
+        characterTimers: [],
+        sparkleToken: 0,
       };
 
       const dom = {
@@ -336,11 +560,40 @@
         return (app.state.children || {})[app.child] || null;
       }
 
-      function stateClassForCharacter(childData) {
+      function motionReduced() {
+        const prefersReduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        return prefersReduced || !app.state.motion_enabled;
+      }
+
+      function clearCharacterTimers() {
+        for (const timer of app.characterTimers) {
+          window.clearTimeout(timer);
+        }
+        app.characterTimers = [];
+      }
+
+      function queueCharacterState(stateName, durationMs, nextState) {
+        app.characterOverrideState = stateName;
+        render();
+        if (durationMs > 0) {
+          const timer = window.setTimeout(() => {
+            app.characterOverrideState = nextState || null;
+            render();
+          }, durationMs);
+          app.characterTimers.push(timer);
+        }
+      }
+
+      function baseStateForCharacter(childData) {
         if (!childData) return "idle";
         if ((childData.latest_delivery || {}).status === "ready") return "rewardApproved";
         if ((childData.waiting_count || 0) > 0) return "noticeNewStar";
         return "idle";
+      }
+
+      function stateClassForCharacter(childData) {
+        if (app.characterOverrideState) return app.characterOverrideState;
+        return baseStateForCharacter(childData);
       }
 
       async function requestJson(url, options) {
@@ -546,47 +799,97 @@
           </div>`;
       }
 
-      function characterHtml(stateName) {
+      function boundedBoardPreview(totalStars) {
+        const numeric = Math.max(0, Number(totalStars || 0));
+        const maxVisualStars = 42;
+        return {
+          visible: Math.min(numeric, maxVisualStars),
+          overflow: Math.max(0, numeric - maxVisualStars),
+        };
+      }
+
+      function characterHtml(stateName, childName) {
         const safeState = ["idle", "noticeNewStar", "tapReaction", "collecting", "celebrate", "rewardApproved"].includes(stateName) ? stateName : "idle";
+        const reducedClass = motionReduced() ? "motion-reduced" : "";
         return `
-          <div class="character state-${safeState}" data-action="tap-character">
-            <div class="body"></div>
-            <div class="face">★</div>
+          <div class="character-wrap">
+            <div id="sceneSparkles" class="scene-sparkles" aria-hidden="true"></div>
+            <div class="character state-${safeState} ${reducedClass}" data-action="tap-character" role="img" aria-label="${childName} star friend character">
+              <svg class="character-svg" viewBox="0 0 380 330" aria-hidden="true" focusable="false">
+                <defs>
+                  <radialGradient id="starGradient" cx="30%" cy="22%" r="78%">
+                    <stop offset="0%" stop-color="#fff3c9" />
+                    <stop offset="34%" stop-color="#ffd666" />
+                    <stop offset="72%" stop-color="#f8b435" />
+                    <stop offset="100%" stop-color="#e79a23" />
+                  </radialGradient>
+                  <linearGradient id="starRimGradient" x1="10%" y1="10%" x2="90%" y2="90%">
+                    <stop offset="0%" stop-color="rgba(255,249,218,0.88)" />
+                    <stop offset="100%" stop-color="rgba(198,122,24,0.18)" />
+                  </linearGradient>
+                  <linearGradient id="armGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stop-color="#ffe89b" />
+                    <stop offset="100%" stop-color="#ecaf34" />
+                  </linearGradient>
+                </defs>
+                <path class="arm arm-left" d="M96 186C73 189 52 204 44 219C39 228 43 235 52 236C64 237 83 222 102 204Z" />
+                <path class="arm arm-right" d="M281 193C299 210 320 224 333 224C344 224 348 216 342 206C333 191 312 180 289 176Z" />
+                <path class="star-rim" d="M189 18L224 87L301 98L245 150L259 232L189 198L121 232L134 150L78 98L155 87Z" />
+                <path class="star-shell" d="M189 26L219 89L291 100L239 147L252 224L189 193L127 224L139 147L87 100L160 89Z" />
+                <ellipse class="star-highlight" cx="145" cy="95" rx="44" ry="24" />
+                <ellipse class="star-cheek" cx="145" cy="166" rx="16" ry="10" />
+                <ellipse class="star-cheek" cx="233" cy="166" rx="16" ry="10" />
+                <g class="eyes">
+                  <ellipse class="eye-base" cx="167" cy="152" rx="14" ry="19" />
+                  <ellipse class="eye-base" cx="211" cy="151" rx="14" ry="19" />
+                  <ellipse class="eye-glint" cx="162" cy="145" rx="4" ry="5" />
+                  <ellipse class="eye-glint" cx="206" cy="144" rx="4" ry="5" />
+                  <ellipse class="eyelid" cx="167" cy="140" rx="14" ry="11" />
+                  <ellipse class="eyelid" cx="211" cy="139" rx="14" ry="11" />
+                </g>
+                <path class="mouth" d="M174 185C183 193 196 194 204 185" />
+              </svg>
+            </div>
           </div>
-          <p class="mini text-center mt-2">Temporary procedural star (replaceable visual component)</p>`;
+          <p class="character-caption">Temporary procedural star stand-in (replaceable visual component)</p>`;
       }
 
       function renderChildBoard() {
         const child = currentChildData();
         if (!child) return;
+        const board = boundedBoardPreview(child.board_stars);
         const waiting = (child.waiting_awards || []).map((award) => `
-          <article class="row">
+          <article class="row waiting-award" data-award-row="${award.id}">
             <p class="row-title m-0">Waiting star #${award.id}</p>
             <p class="mini mt-1 mb-0">${escapeHtml(award.note || "Parent approved a star")}</p>
             <button class="btn btn-primary mt-2" data-action="collect-star" data-award-id="${award.id}" data-child="${app.child}">Collect star</button>
           </article>
         `).join("");
-        const stars = new Array(Math.max(0, Number(child.board_stars || 0))).fill(0).map(() => '<span class="board-star"></span>').join("");
+        const stars = new Array(board.visible).fill(0).map(() => '<span class="board-star"></span>').join("");
         dom.views.childBoard.innerHTML = `
           ${childNav("child-board")}
-          <h2 class="text-xl font-bold mt-0 mb-2">${app.child} · My Board</h2>
-          <div class="grid-two">
+          <h2 class="text-xl font-bold mt-0 mb-1">${app.child} · My Board</h2>
+          <p class="mini mb-3">Collect stars, keep your all-time achievement, and trade available stars for rewards.</p>
+          <div class="child-scene">
+            <section class="child-hero">
+              ${characterHtml(stateClassForCharacter(child), app.child)}
+              <div class="text-center mt-2">
+                <span class="all-time-badge">🏅 All-time earned ${child.earned}</span>
+              </div>
+            </section>
             <section>
               <div class="grid-three">
                 <div class="metric"><p class="label">Available</p><p class="value">${child.available}</p></div>
                 <div class="metric"><p class="label">Waiting</p><p class="value">${child.waiting_count}</p></div>
-                <div class="metric"><p class="label">All-time earned</p><p class="value">${child.earned}</p></div>
+                <div class="metric"><p class="label">Spent on rewards</p><p class="value">${child.spent}</p></div>
               </div>
               <h3 class="text-base font-semibold mt-3 mb-2">Waiting stars</h3>
               <div class="table-like">${waiting || '<p class="mini">No waiting stars right now.</p>'}</div>
               <h3 class="text-base font-semibold mt-3 mb-2">Collected board stars</h3>
-              <div class="board">${stars || '<p class="mini">No stars yet.</p>'}</div>
-            </section>
-            <section>
-              ${characterHtml(stateClassForCharacter(child))}
-              <p class="mini mt-3">Character states: idle, noticeNewStar, tapReaction, collecting, celebrate, rewardApproved.</p>
-              <p class="mini mt-1">Animation can fail without blocking accounting or API outcomes.</p>
-              <p class="mini mt-1">Sound unavailable in this prototype.</p>
+              <div id="boardAnchor" class="board">${stars || '<p class="mini">No stars yet.</p>'}${board.overflow > 0 ? `<span class="board-more">+${board.overflow}</span>` : ""}</div>
+              <p class="mini mt-2">Grouped board preview keeps large balances readable; numeric balance is authoritative.</p>
+              <p class="mini mt-1">Character states: idle, noticeNewStar, tapReaction, collecting, celebrate, rewardApproved.</p>
+              <p class="mini mt-1">Animation can fail without blocking accounting or API outcomes. Sound remains unavailable in this prototype.</p>
             </section>
           </div>`;
       }
@@ -633,6 +936,11 @@
       }
 
       function render() {
+        const childView = app.view.startsWith("child-");
+        if (!childView && app.characterOverrideState) {
+          app.characterOverrideState = null;
+          clearCharacterTimers();
+        }
         renderParentOverview();
         renderParentRewards();
         renderParentRequests();
@@ -652,7 +960,6 @@
         for (const [key, value] of Object.entries(dom.views)) {
           value.classList.toggle("hidden", viewToId[app.view] !== key);
         }
-        const childView = app.view.startsWith("child-");
         dom.parentToolbar.classList.toggle("hidden", childView);
         dom.motionToggle.checked = !app.state.motion_enabled;
         for (const tab of dom.tabButtons) {
@@ -693,11 +1000,53 @@
         }
       }
 
+      async function animateFlyingStar(fromElement) {
+        if (motionReduced() || !fromElement) {
+          return;
+        }
+        const boardTarget = document.getElementById("boardAnchor");
+        if (!boardTarget) {
+          return;
+        }
+        const fromRect = fromElement.getBoundingClientRect();
+        const toRect = boardTarget.getBoundingClientRect();
+        const star = document.createElement("span");
+        star.className = "flying-star";
+        star.style.left = `${fromRect.left + fromRect.width / 2 - 13}px`;
+        star.style.top = `${fromRect.top + fromRect.height / 2 - 13}px`;
+        document.body.appendChild(star);
+        const dx = (toRect.left + Math.min(36, toRect.width * 0.22)) - (fromRect.left + fromRect.width / 2);
+        const dy = (toRect.top + 22) - (fromRect.top + fromRect.height / 2);
+        await star.animate([
+          { transform: "translate(0, 0) scale(0.88)", opacity: 0.98, offset: 0 },
+          { transform: `translate(${dx * 0.5}px, ${dy * 0.28 - 56}px) scale(1.05)`, opacity: 1, offset: 0.52 },
+          { transform: `translate(${dx}px, ${dy}px) scale(0.62)`, opacity: 0.94, offset: 1 },
+        ], { duration: 620, easing: "cubic-bezier(0.2, 0.82, 0.32, 1)" }).finished.catch(() => null);
+        star.remove();
+      }
+
+      function popSparkles() {
+        if (motionReduced()) {
+          return;
+        }
+        const sparkle = document.getElementById("sceneSparkles");
+        if (!sparkle) {
+          return;
+        }
+        sparkle.classList.remove("is-active");
+        void sparkle.offsetWidth;
+        sparkle.classList.add("is-active");
+      }
+
       function wireStaticEvents() {
         dom.tabButtons.forEach((tab) => {
           tab.addEventListener("click", () => {
             app.view = tab.dataset.view || "parent-overview";
             if (tab.dataset.child) app.child = tab.dataset.child;
+            if (!app.view.startsWith("child-")) {
+              clearCharacterTimers();
+              app.characterOverrideState = null;
+            }
             render();
           });
         });
@@ -709,6 +1058,13 @@
         });
         dom.motionToggle.addEventListener("change", async () => {
           await post(api.prefs, { motion_enabled: !dom.motionToggle.checked });
+        });
+        document.addEventListener("visibilitychange", () => {
+          if (document.hidden) {
+            clearCharacterTimers();
+            app.characterOverrideState = null;
+            render();
+          }
         });
       }
 
@@ -770,9 +1126,8 @@
         const action = actionEl.getAttribute("data-action");
         if (!action) return;
         if (action === "tap-character") {
-          const character = actionEl;
-          character.className = "character state-tapReaction";
-          window.setTimeout(() => { character.className = `character state-${stateClassForCharacter(currentChildData())}`; }, 500);
+          clearCharacterTimers();
+          queueCharacterState("tapReaction", motionReduced() ? 0 : 520, null);
           return;
         }
         try {
@@ -782,13 +1137,32 @@
             const note = noteInput ? noteInput.value : "";
             await post(api.awards, { child_name: child, note });
             if (noteInput) noteInput.value = "";
+            if (app.child === child && app.view.startsWith("child-")) {
+              clearCharacterTimers();
+              queueCharacterState("noticeNewStar", motionReduced() ? 0 : 780, null);
+            }
             return;
           }
           if (action === "collect-star") {
+            const row = actionEl.closest(".waiting-award");
+            if (row) {
+              row.classList.add("is-animating");
+            }
+            await animateFlyingStar(actionEl);
             await post(api.collect, {
               child_name: actionEl.getAttribute("data-child"),
               award_id: Number(actionEl.getAttribute("data-award-id")),
             });
+            clearCharacterTimers();
+            queueCharacterState("collecting", motionReduced() ? 0 : 430, "celebrate");
+            if (!motionReduced()) {
+              const timer = window.setTimeout(() => {
+                app.characterOverrideState = null;
+                render();
+              }, 980);
+              app.characterTimers.push(timer);
+            }
+            popSparkles();
             return;
           }
           if (action === "request-reward") {
@@ -796,10 +1170,14 @@
               child_name: actionEl.getAttribute("data-child"),
               reward_id: Number(actionEl.getAttribute("data-reward-id")),
             });
+            clearCharacterTimers();
+            queueCharacterState("noticeNewStar", motionReduced() ? 0 : 520, null);
             return;
           }
           if (action === "approve-request") {
             await post(`/api/gold-stars/preview/requests/${Number(actionEl.getAttribute("data-request-id"))}/approve`, {});
+            clearCharacterTimers();
+            queueCharacterState("rewardApproved", motionReduced() ? 0 : 760, null);
             return;
           }
           if (action === "decline-request") {
