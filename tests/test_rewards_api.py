@@ -506,7 +506,7 @@ def test_gold_star_preview_requires_parent_or_admin(client):
     assert allowed_character_lab_page.status_code == 200
     character_lab_html = allowed_character_lab_page.get_data(as_text=True)
     assert '3D Character Lab' in character_lab_html
-    assert 'Animation states' in character_lab_html
+    assert 'Review mode' in character_lab_html
 
 
 def test_gold_star_preview_two_child_independent_accounting_and_collect_once(client):

@@ -127,31 +127,12 @@
       grid-template-columns: 1fr 1fr;
       gap: 0.5rem;
     }
+    .control-grid.three {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
     .control-grid .btn {
       width: 100%;
       text-align: center;
-    }
-    .slider-wrap {
-      display: grid;
-      gap: 0.45rem;
-    }
-    .slider-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 0.75rem;
-    }
-    input[type="range"] {
-      width: 100%;
-      accent-color: #7c3aed;
-    }
-    .badge {
-      border-radius: 999px;
-      background: #ede9fe;
-      color: #5b21b6;
-      padding: 0.2rem 0.58rem;
-      font-size: 0.76rem;
-      font-weight: 700;
     }
   </style>
 </head>
@@ -179,34 +160,22 @@
 
       <aside class="control-column">
         <section class="card">
-          <h2 class="text-lg font-semibold mb-3">Animation states</h2>
+          <h2 class="text-lg font-semibold mb-3">Review mode</h2>
           <div class="control-grid">
-            <button class="btn primary" data-action="idle">Idle</button>
-            <button class="btn" data-action="notice">Notice / wave</button>
-            <button class="btn" data-action="tap">Tap reaction</button>
-            <button class="btn" data-action="collect">Collect celebration</button>
-            <button class="btn" data-action="neutral">Return neutral</button>
-            <button class="btn" data-action="pause" id="pauseMotionBtn" aria-pressed="false">Pause motion</button>
+            <button class="btn primary" data-mode="silhouette">Silhouette</button>
+            <button class="btn" data-mode="material">Material</button>
           </div>
+          <p class="mini mt-3">Silhouette mode locks to a straight-on front camera with a black star on a white background.</p>
         </section>
 
         <section class="card">
-          <h2 class="text-lg font-semibold mb-3">Review controls</h2>
-          <div class="control-grid mb-3">
+          <h2 class="text-lg font-semibold mb-3">Camera presets</h2>
+          <div class="control-grid three mb-3">
             <button class="btn" data-camera="front">Front view</button>
             <button class="btn" data-camera="threeQuarter">3/4 view</button>
             <button class="btn" data-camera="side">Side view</button>
           </div>
-          <div class="slider-wrap">
-            <div class="slider-row">
-              <label for="slowMoRange" class="mini">Slow motion</label>
-              <span id="slowMoBadge" class="badge">1.0×</span>
-            </div>
-            <input id="slowMoRange" type="range" min="0.2" max="1.0" step="0.05" value="1.0" />
-            <p class="mini">Lower values slow animation playback for inspection.</p>
-          </div>
-          <hr class="my-3 border-purple-100" />
-          <p class="mini">Reduced motion is respected. Rendering pauses when this tab is hidden.</p>
+          <p class="mini">Camera controls are active in material mode and temporarily disabled in silhouette mode.</p>
         </section>
       </aside>
     </main>
