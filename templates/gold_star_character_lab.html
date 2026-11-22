@@ -134,6 +134,36 @@
       width: 100%;
       text-align: center;
     }
+    .slider-wrap {
+      display: grid;
+      gap: 0.45rem;
+    }
+    .slider-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    input[type="range"] {
+      width: 100%;
+      accent-color: #7c3aed;
+    }
+    .badge {
+      border-radius: 999px;
+      background: #ede9fe;
+      color: #5b21b6;
+      padding: 0.2rem 0.58rem;
+      font-size: 0.76rem;
+      font-weight: 700;
+    }
+    .toggle-label {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      color: var(--muted);
+      font-size: 0.82rem;
+      font-weight: 600;
+    }
   </style>
 </head>
 <body>
@@ -169,12 +199,17 @@
         </section>
 
         <section class="card">
-          <h2 class="text-lg font-semibold mb-3">Face preset</h2>
+          <h2 class="text-lg font-semibold mb-3">Expressions & performance</h2>
           <div class="control-grid">
-            <button class="btn primary" data-face="A">Option A</button>
-            <button class="btn" data-face="B">Option B</button>
+            <button class="btn primary" data-expression="friendlyIdle">Friendly idle</button>
+            <button class="btn" data-expression="inviting">Welcoming open smile</button>
+            <button class="btn" data-expression="delighted">Delighted / dimples</button>
+            <button class="btn" data-expression="softSmile">Soft smile</button>
+            <button class="btn" data-performance="hello">Say hello</button>
+            <button class="btn" data-performance="turn">Playful turn</button>
+            <button class="btn" data-performance="pause" id="pauseMotionBtn" aria-pressed="false">Pause</button>
           </div>
-          <p class="mini mt-3">Both options use the same approved star body and lighting setup for direct comparison.</p>
+          <p class="mini mt-3">These controls drive one character rig and one approved star body silhouette.</p>
         </section>
 
         <section class="card">
@@ -185,6 +220,18 @@
             <button class="btn" data-camera="side">Side view</button>
           </div>
           <p class="mini">Camera controls are active in material mode and temporarily disabled in silhouette mode.</p>
+          <hr class="my-3 border-purple-100" />
+          <label class="toggle-label">
+            <input type="checkbox" id="motionToggle" />
+            Reduced motion override
+          </label>
+          <div class="slider-wrap mt-3">
+            <div class="slider-row">
+              <label for="slowMoRange" class="mini">Slow motion</label>
+              <span id="slowMoBadge" class="badge">1.00×</span>
+            </div>
+            <input id="slowMoRange" type="range" min="0.2" max="1.0" step="0.05" value="1.0" />
+          </div>
         </section>
       </aside>
     </main>
