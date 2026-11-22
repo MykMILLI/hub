@@ -1,0 +1,841 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gold Star Club Preview</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='output.css') }}?v={{ asset_version|default('1') }}">
+  <style>
+    :root {
+      --preview-bg: radial-gradient(circle at top left, #fff8db 0%, #fef3c7 28%, #f3ecff 72%, #efe8ff 100%);
+      --surface: rgba(255, 255, 255, 0.84);
+      --surface-border: rgba(139, 92, 246, 0.18);
+      --accent: #7c3aed;
+      --text-strong: #3a2758;
+      --text-soft: #6a4a91;
+      --star-gold: #ffd149;
+      --star-shadow: rgba(221, 146, 22, 0.44);
+      --board-star: #f6bf3d;
+      --danger: #be185d;
+      --ok: #166534;
+    }
+    body.preview-body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, "Segoe UI", sans-serif;
+      background: var(--preview-bg);
+      color: var(--text-strong);
+      overflow-x: hidden;
+    }
+    .preview-shell {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 1rem 1rem 2rem;
+      display: grid;
+      gap: 1rem;
+    }
+    .preview-banner {
+      border: 1px solid var(--surface-border);
+      border-radius: 1rem;
+      background: var(--surface);
+      backdrop-filter: blur(4px);
+      padding: 0.9rem 1rem;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .preview-tag {
+      background: #ede9fe;
+      color: #5b21b6;
+      border-radius: 999px;
+      padding: 0.25rem 0.7rem;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+    .preview-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.6fr) minmax(320px, 1fr);
+      gap: 1rem;
+      align-items: start;
+    }
+    @media (max-width: 1000px) {
+      .preview-layout {
+        grid-template-columns: 1fr;
+      }
+    }
+    .panel {
+      border: 1px solid var(--surface-border);
+      border-radius: 1rem;
+      background: var(--surface);
+      backdrop-filter: blur(3px);
+      box-shadow: 0 14px 34px rgba(76, 29, 149, 0.08);
+      padding: 1rem;
+    }
+    .child-stage {
+      position: relative;
+      min-height: 460px;
+      overflow: hidden;
+    }
+    .child-stage::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at 14% 0%, rgba(255, 255, 255, 0.7) 0%, transparent 56%);
+      pointer-events: none;
+    }
+    .child-name {
+      margin: 0;
+      font-size: 1.45rem;
+      font-weight: 800;
+      letter-spacing: -0.01em;
+    }
+    .totals {
+      margin-top: 0.85rem;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 0.5rem;
+    }
+    .total-card {
+      border-radius: 0.8rem;
+      background: rgba(255, 255, 255, 0.78);
+      border: 1px solid rgba(139, 92, 246, 0.12);
+      padding: 0.55rem 0.7rem;
+    }
+    .total-card .label {
+      margin: 0;
+      color: var(--text-soft);
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .total-card .value {
+      margin: 0.18rem 0 0;
+      font-size: 1.18rem;
+      font-weight: 800;
+      color: var(--text-strong);
+    }
+    .character-wrap {
+      margin-top: 1rem;
+      display: grid;
+      place-items: center;
+      min-height: 190px;
+    }
+    .star-character {
+      width: 172px;
+      aspect-ratio: 1;
+      position: relative;
+      filter: drop-shadow(0 18px 22px rgba(103, 53, 34, 0.28));
+      transform-origin: center 74%;
+      animation: idle-float 3.8s ease-in-out infinite;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+    .star-character .body {
+      position: absolute;
+      inset: 0;
+      clip-path: polygon(50% 0%, 62% 30%, 94% 35%, 70% 56%, 78% 90%, 50% 71%, 22% 90%, 30% 56%, 6% 35%, 38% 30%);
+      border-radius: 24px;
+      background:
+        radial-gradient(circle at 30% 28%, #fff9d8 0%, rgba(255, 249, 216, 0.98) 10%, transparent 46%),
+        radial-gradient(circle at 68% 72%, rgba(235, 153, 26, 0.38), transparent 62%),
+        linear-gradient(155deg, #ffe27a 10%, #ffd149 48%, #f4ad2f 100%);
+    }
+    .star-character .face {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      transform: translateY(6px);
+      pointer-events: none;
+    }
+    .eyes {
+      display: flex;
+      gap: 1rem;
+    }
+    .eye {
+      width: 23px;
+      height: 29px;
+      border-radius: 12px;
+      background: linear-gradient(180deg, #1f2937 0%, #111827 100%);
+      position: relative;
+      overflow: hidden;
+    }
+    .eye::before {
+      content: "";
+      position: absolute;
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      top: 5px;
+      left: 6px;
+      background: rgba(255, 255, 255, 0.92);
+    }
+    .eye::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: rgba(243, 244, 246, 0.96);
+      transform: scaleY(0);
+      transform-origin: top;
+      animation: blink 5.6s infinite;
+    }
+    .mouth {
+      margin-top: 0.6rem;
+      width: 28px;
+      height: 16px;
+      border-bottom: 3px solid #7b2e2e;
+      border-radius: 0 0 18px 18px;
+      transform: translateY(-2px);
+    }
+    .cheek {
+      position: absolute;
+      top: 58%;
+      width: 14px;
+      height: 9px;
+      border-radius: 999px;
+      background: rgba(255, 145, 173, 0.45);
+      filter: blur(0.5px);
+    }
+    .cheek.left { left: 44px; }
+    .cheek.right { right: 44px; }
+    .arm {
+      position: absolute;
+      width: 36px;
+      height: 10px;
+      border-radius: 999px;
+      background: linear-gradient(180deg, #ffd56a 0%, #f5b036 100%);
+      top: 53%;
+    }
+    .arm.left {
+      left: 4px;
+      transform-origin: 96% 50%;
+      transform: rotate(38deg);
+    }
+    .arm.right {
+      right: 4px;
+      transform-origin: 4% 50%;
+      transform: rotate(-32deg);
+    }
+    .character-wrap.notice .arm.right {
+      animation: wave 0.95s ease-in-out infinite;
+    }
+    .character-wrap.proud .star-character {
+      animation: proud-hop 0.9s ease-in-out;
+    }
+    .character-wrap.tap-react .star-character {
+      animation: tap-wiggle 0.55s ease-in-out;
+    }
+    .waiting-zone {
+      margin-top: 1.1rem;
+      border-radius: 0.9rem;
+      border: 1px dashed rgba(124, 58, 237, 0.34);
+      background: rgba(255, 255, 255, 0.68);
+      padding: 0.75rem;
+    }
+    .waiting-zone h3 {
+      margin: 0;
+      font-size: 0.9rem;
+      color: var(--text-soft);
+      font-weight: 700;
+    }
+    .waiting-stars {
+      margin-top: 0.5rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      min-height: 36px;
+    }
+    .waiting-star {
+      border: 0;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      background: rgba(255, 240, 196, 0.92);
+      box-shadow: 0 8px 12px rgba(166, 108, 20, 0.2);
+      color: #5c3f17;
+      font-weight: 700;
+      padding: 0.4rem 0.72rem;
+      cursor: pointer;
+      touch-action: manipulation;
+      transition: transform 150ms ease, box-shadow 150ms ease;
+    }
+    .waiting-star:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 10px 14px rgba(166, 108, 20, 0.24);
+    }
+    .waiting-star.compress {
+      transform: scale(0.88);
+    }
+    .board-stars {
+      margin-top: 1rem;
+      border-radius: 0.95rem;
+      background: rgba(255, 255, 255, 0.78);
+      border: 1px solid rgba(139, 92, 246, 0.14);
+      padding: 0.75rem;
+    }
+    .board-stars h3 {
+      margin: 0;
+      font-size: 0.9rem;
+      color: var(--text-soft);
+      font-weight: 700;
+    }
+    .board-grid {
+      margin-top: 0.55rem;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(24px, 1fr));
+      gap: 0.4rem;
+      max-height: 106px;
+      overflow: auto;
+      padding-right: 0.2rem;
+    }
+    .board-star {
+      width: 24px;
+      height: 24px;
+      background: radial-gradient(circle at 30% 30%, #fff6d1 0%, #fff6d1 20%, rgba(255, 246, 209, 0) 52%), linear-gradient(165deg, #ffd969 0%, #f3b43b 100%);
+      clip-path: polygon(50% 0%, 61% 33%, 94% 35%, 67% 56%, 76% 88%, 50% 70%, 24% 88%, 33% 56%, 6% 35%, 39% 33%);
+      filter: drop-shadow(0 2px 2px rgba(175, 104, 12, 0.33));
+      animation: star-drop 420ms ease;
+    }
+    .reward-card {
+      margin-top: 1rem;
+      border-radius: 0.9rem;
+      background: rgba(255, 255, 255, 0.82);
+      border: 1px solid rgba(124, 58, 237, 0.16);
+      padding: 0.8rem;
+    }
+    .reward-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 0.5rem;
+      align-items: center;
+    }
+    .history-list {
+      list-style: none;
+      margin: 0.7rem 0 0;
+      padding: 0;
+      display: grid;
+      gap: 0.45rem;
+      max-height: 290px;
+      overflow: auto;
+    }
+    .history-list li {
+      border-radius: 0.65rem;
+      padding: 0.5rem 0.6rem;
+      background: rgba(255, 255, 255, 0.72);
+      border: 1px solid rgba(148, 163, 184, 0.24);
+      display: grid;
+      gap: 0.2rem;
+    }
+    .history-stars {
+      font-size: 0.82rem;
+      font-weight: 700;
+    }
+    .history-stars.pos { color: var(--ok); }
+    .history-stars.neg { color: var(--danger); }
+    .demo-controls {
+      margin-top: 0.7rem;
+      display: grid;
+      gap: 0.55rem;
+    }
+    .btn {
+      border: 1px solid transparent;
+      border-radius: 0.72rem;
+      padding: 0.55rem 0.8rem;
+      font-weight: 700;
+      font-size: 0.87rem;
+      cursor: pointer;
+      transition: transform 120ms ease, filter 120ms ease;
+      touch-action: manipulation;
+    }
+    .btn:disabled {
+      cursor: not-allowed;
+      filter: grayscale(0.34) opacity(0.7);
+    }
+    .btn:hover:not(:disabled) { transform: translateY(-1px); }
+    .btn-primary { background: #7c3aed; color: #fff; }
+    .btn-secondary { background: #ede9fe; color: #5b21b6; border-color: #c4b5fd; }
+    .btn-danger { background: #ffe4e6; color: #be123c; border-color: #fecdd3; }
+    .small-muted { font-size: 0.78rem; color: var(--text-soft); margin: 0; }
+    .flying-star {
+      position: fixed;
+      width: 32px;
+      height: 32px;
+      z-index: 40;
+      pointer-events: none;
+      background: radial-gradient(circle at 30% 30%, #fff7d5 0%, #fff7d5 26%, rgba(255, 247, 213, 0) 56%), linear-gradient(155deg, #ffe17a 0%, #f4b43c 100%);
+      clip-path: polygon(50% 0%, 61% 33%, 94% 35%, 67% 56%, 76% 88%, 50% 70%, 24% 88%, 33% 56%, 6% 35%, 39% 33%);
+      filter: drop-shadow(0 4px 4px rgba(170, 112, 30, 0.35));
+      transform-origin: center;
+    }
+    .toast {
+      position: fixed;
+      right: 12px;
+      bottom: 12px;
+      background: rgba(17, 24, 39, 0.9);
+      color: #fff;
+      border-radius: 0.65rem;
+      padding: 0.55rem 0.7rem;
+      font-size: 0.84rem;
+      opacity: 0;
+      transform: translateY(8px);
+      transition: opacity 180ms ease, transform 180ms ease;
+      pointer-events: none;
+    }
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .sparkles {
+      position: absolute;
+      width: 40px;
+      height: 40px;
+      pointer-events: none;
+      z-index: 20;
+    }
+    .sparkles::before, .sparkles::after {
+      content: "";
+      position: absolute;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: rgba(255, 227, 138, 0.88);
+      animation: sparkle 450ms ease-out forwards;
+    }
+    .sparkles::before { top: 4px; left: 4px; }
+    .sparkles::after { right: 6px; bottom: 6px; animation-delay: 80ms; }
+    @keyframes idle-float {
+      0%, 100% { transform: translateY(0) rotate(-1.4deg); }
+      50% { transform: translateY(-5px) rotate(1.4deg); }
+    }
+    @keyframes blink {
+      0%, 44%, 50%, 100% { transform: scaleY(0); }
+      46%, 48% { transform: scaleY(1); }
+    }
+    @keyframes wave {
+      0%, 100% { transform: rotate(-28deg); }
+      50% { transform: rotate(-65deg); }
+    }
+    @keyframes proud-hop {
+      0% { transform: translateY(0) scale(1); }
+      35% { transform: translateY(-10px) scale(1.04); }
+      100% { transform: translateY(0) scale(1); }
+    }
+    @keyframes tap-wiggle {
+      0% { transform: rotate(0deg); }
+      25% { transform: rotate(-4deg); }
+      55% { transform: rotate(4deg); }
+      100% { transform: rotate(0deg); }
+    }
+    @keyframes star-drop {
+      0% { transform: translateY(-6px) scale(0.86); opacity: 0.6; }
+      65% { transform: translateY(2px) scale(1.05); opacity: 1; }
+      100% { transform: translateY(0) scale(1); opacity: 1; }
+    }
+    @keyframes sparkle {
+      0% { transform: scale(0.45); opacity: 0.9; }
+      100% { transform: scale(1.85); opacity: 0; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .star-character,
+      .eye::after,
+      .character-wrap.notice .arm.right {
+        animation: none !important;
+      }
+      .btn { transition: none; }
+    }
+  </style>
+</head>
+<body class="preview-body">
+  <div class="preview-shell">
+    <header class="preview-banner">
+      <div>
+        <span class="preview-tag">Gold Star Club Preview</span>
+        <h1 class="text-xl font-bold mt-2 mb-1">Mills-Roberts Home — Child Experience Prototype</h1>
+        <p class="small-muted">Signed in as {{ actor_name }}. This route uses isolated demo state only and does not write production rewards data.</p>
+      </div>
+      <div class="text-right">
+        <p class="small-muted mb-1">Route: <code>/gold-stars/preview</code></p>
+        <a class="btn btn-secondary inline-block" href="/gold-stars">Back to live rewards</a>
+      </div>
+    </header>
+
+    <div class="preview-layout">
+      <section class="panel child-stage">
+        <h2 class="child-name">Avery’s Star Board</h2>
+        <p class="small-muted">Playful preview for tablet-style child view (prototype only).</p>
+
+        <div class="totals">
+          <article class="total-card">
+            <p class="label">Available stars</p>
+            <p id="availableStars" class="value">0</p>
+          </article>
+          <article class="total-card">
+            <p class="label">All-time earned</p>
+            <p id="earnedStars" class="value">0</p>
+          </article>
+          <article class="total-card">
+            <p class="label">Spent on rewards</p>
+            <p id="spentStars" class="value">0</p>
+          </article>
+        </div>
+
+        <div id="characterWrap" class="character-wrap" aria-live="polite">
+          <div id="starCharacter" class="star-character" title="Tap me for a friendly reaction">
+            <div class="body"></div>
+            <span class="arm left"></span>
+            <span class="arm right"></span>
+            <div class="face">
+              <div>
+                <div class="eyes"><span class="eye"></span><span class="eye"></span></div>
+                <div class="mouth"></div>
+              </div>
+            </div>
+            <span class="cheek left"></span>
+            <span class="cheek right"></span>
+          </div>
+        </div>
+
+        <section class="waiting-zone">
+          <div class="flex items-center justify-between gap-2">
+            <h3>Waiting stars to collect</h3>
+            <p id="waitingCount" class="small-muted">0 waiting</p>
+          </div>
+          <div id="waitingStars" class="waiting-stars"></div>
+        </section>
+
+        <section class="board-stars">
+          <h3>Owned stars on board</h3>
+          <div id="boardGrid" class="board-grid" aria-label="Owned stars"></div>
+        </section>
+
+        <section class="reward-card">
+          <div class="reward-row">
+            <div>
+              <h3 id="rewardLabel" class="font-semibold m-0 text-sm">Reward example</h3>
+              <p class="small-muted mt-1 mb-0">Spending reduces available stars only; all-time earned stays unchanged.</p>
+            </div>
+            <p id="rewardStatus" class="small-muted m-0">Status: requested</p>
+          </div>
+          <button id="approveRewardBtn" type="button" class="btn btn-primary mt-3 w-full">Approve 5-star reward</button>
+        </section>
+      </section>
+
+      <aside class="panel">
+        <h2 class="text-base font-bold mt-0">Parent / Developer Demo Panel</h2>
+        <p class="small-muted">This panel is preview-only and will not appear in the child-facing production UI.</p>
+        <div class="demo-controls">
+          <button id="giveStarBtn" type="button" class="btn btn-primary">Give demo star (+1 earned, +1 waiting)</button>
+          <button id="resetDemoBtn" type="button" class="btn btn-danger">Reset demo state</button>
+          <label class="flex items-center justify-between gap-2 border rounded-xl px-3 py-2 border-violet-200 bg-violet-50/60">
+            <span class="small-muted">Animation enabled</span>
+            <input id="motionToggle" type="checkbox" />
+          </label>
+          <label class="flex items-center justify-between gap-2 border rounded-xl px-3 py-2 border-violet-200 bg-violet-50/60">
+            <span class="small-muted">Sound enabled (off by default)</span>
+            <input id="soundToggle" type="checkbox" />
+          </label>
+          <p class="small-muted">If reduced motion is enabled by device preference, animated transitions are minimized automatically.</p>
+        </div>
+        <hr class="my-3 border-violet-200/60" />
+        <h3 class="text-sm font-semibold mt-0 mb-2">Demo history</h3>
+        <ul id="historyList" class="history-list"></ul>
+      </aside>
+    </div>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    (function initGoldStarPreview() {
+      const initialState = {{ preview_state|tojson }};
+      const state = {
+        data: initialState,
+        requestInFlight: false,
+      };
+      const prefersReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const dom = {
+        availableStars: document.getElementById('availableStars'),
+        earnedStars: document.getElementById('earnedStars'),
+        spentStars: document.getElementById('spentStars'),
+        waitingCount: document.getElementById('waitingCount'),
+        waitingStars: document.getElementById('waitingStars'),
+        boardGrid: document.getElementById('boardGrid'),
+        rewardLabel: document.getElementById('rewardLabel'),
+        rewardStatus: document.getElementById('rewardStatus'),
+        giveStarBtn: document.getElementById('giveStarBtn'),
+        approveRewardBtn: document.getElementById('approveRewardBtn'),
+        resetDemoBtn: document.getElementById('resetDemoBtn'),
+        motionToggle: document.getElementById('motionToggle'),
+        soundToggle: document.getElementById('soundToggle'),
+        historyList: document.getElementById('historyList'),
+        toast: document.getElementById('toast'),
+        characterWrap: document.getElementById('characterWrap'),
+        starCharacter: document.getElementById('starCharacter'),
+      };
+
+      const pathConfig = {
+        state: '/api/gold-stars/preview/state',
+        give: '/api/gold-stars/preview/demo/give-star',
+        collect: '/api/gold-stars/preview/demo/collect',
+        approve: '/api/gold-stars/preview/demo/approve-reward',
+        reset: '/api/gold-stars/preview/reset',
+      };
+
+      function showToast(message) {
+        dom.toast.textContent = message || '';
+        dom.toast.classList.add('show');
+        window.setTimeout(() => dom.toast.classList.remove('show'), 2100);
+      }
+
+      function motionEnabled() {
+        return !!dom.motionToggle.checked && !prefersReducedMotion;
+      }
+
+      async function requestJson(url, options) {
+        const response = await fetch(url, Object.assign({
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+        }, options || {}));
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.ok) {
+          throw new Error(payload.error || 'Request failed');
+        }
+        return payload;
+      }
+
+      function setButtonsDisabled(disabled) {
+        state.requestInFlight = !!disabled;
+        dom.giveStarBtn.disabled = !!disabled;
+        dom.resetDemoBtn.disabled = !!disabled;
+        dom.approveRewardBtn.disabled = !!disabled || (state.data.reward_demo && state.data.reward_demo.status !== 'requested');
+      }
+
+      function renderHistory() {
+        dom.historyList.innerHTML = '';
+        const rows = Array.isArray(state.data.history) ? state.data.history : [];
+        if (!rows.length) {
+          const empty = document.createElement('li');
+          empty.textContent = 'No demo events yet.';
+          dom.historyList.appendChild(empty);
+          return;
+        }
+        rows.slice(0, 14).forEach((row) => {
+          const item = document.createElement('li');
+          const line = document.createElement('div');
+          line.textContent = row.message || 'Updated';
+          line.className = 'text-sm font-medium';
+          const stars = Number(row.stars || 0);
+          const meta = document.createElement('div');
+          meta.className = 'history-stars ' + (stars < 0 ? 'neg' : 'pos');
+          if (stars === 0) {
+            meta.className = 'small-muted';
+            meta.textContent = 'Info';
+          } else {
+            meta.textContent = `${stars > 0 ? '+' : ''}${stars} stars`;
+          }
+          item.appendChild(line);
+          item.appendChild(meta);
+          dom.historyList.appendChild(item);
+        });
+      }
+
+      function createBoardStars(total) {
+        dom.boardGrid.innerHTML = '';
+        const count = Math.max(0, Number(total || 0));
+        for (let i = 0; i < count; i += 1) {
+          const star = document.createElement('span');
+          star.className = 'board-star';
+          dom.boardGrid.appendChild(star);
+        }
+      }
+
+      function waitingChip(row) {
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'waiting-star';
+        chip.dataset.waitingId = String(row.id);
+        chip.innerHTML = '<span aria-hidden="true">⭐</span><span>Collect star</span>';
+        chip.addEventListener('click', () => collectWaitingStar(chip, row.id));
+        return chip;
+      }
+
+      function renderWaiting() {
+        dom.waitingStars.innerHTML = '';
+        const waiting = Array.isArray(state.data.waiting) ? state.data.waiting : [];
+        waiting.forEach((row) => dom.waitingStars.appendChild(waitingChip(row)));
+        dom.waitingCount.textContent = `${waiting.length} waiting`;
+        if (waiting.length) {
+          dom.characterWrap.classList.add('notice');
+        } else {
+          dom.characterWrap.classList.remove('notice');
+        }
+      }
+
+      function renderState() {
+        dom.availableStars.textContent = String(state.data.available || 0);
+        dom.earnedStars.textContent = String(state.data.earned || 0);
+        dom.spentStars.textContent = String(state.data.spent || 0);
+        const reward = state.data.reward_demo || {};
+        dom.rewardLabel.textContent = `${reward.label || 'Reward'} (${reward.cost || 0} stars)`;
+        dom.rewardStatus.textContent = `Status: ${reward.status || 'requested'}`;
+        createBoardStars(state.data.available || 0);
+        renderWaiting();
+        renderHistory();
+        setButtonsDisabled(false);
+      }
+
+      function addSparkles() {
+        const rect = dom.boardGrid.getBoundingClientRect();
+        const spark = document.createElement('span');
+        spark.className = 'sparkles';
+        spark.style.left = `${rect.left + rect.width - 44}px`;
+        spark.style.top = `${rect.top + 4}px`;
+        document.body.appendChild(spark);
+        window.setTimeout(() => spark.remove(), 520);
+      }
+
+      async function syncState() {
+        const payload = await requestJson(pathConfig.state, { method: 'GET' });
+        state.data = payload.state || state.data;
+      }
+
+      async function collectWaitingStar(chip, waitingId) {
+        if (state.requestInFlight) {
+          return;
+        }
+        const waitingBefore = Number(state.data.waiting_count || 0);
+        setButtonsDisabled(true);
+        chip.classList.add('compress');
+        try {
+          if (motionEnabled()) {
+            await animateCollection(chip);
+          }
+          const payload = await requestJson(pathConfig.collect, {
+            method: 'POST',
+            body: JSON.stringify({ waiting_id: waitingId }),
+          });
+          state.data = payload.state || state.data;
+          renderState();
+          dom.characterWrap.classList.remove('notice');
+          dom.characterWrap.classList.add('proud');
+          window.setTimeout(() => dom.characterWrap.classList.remove('proud'), 900);
+          if (motionEnabled()) {
+            addSparkles();
+          }
+          showToast(waitingBefore > Number(state.data.waiting_count || 0) ? 'Star collected! Great job, Avery.' : 'Collected.');
+        } catch (error) {
+          showToast(error.message || 'Unable to collect that star.');
+          setButtonsDisabled(false);
+        }
+      }
+
+      async function animateCollection(sourceEl) {
+        const sourceRect = sourceEl.getBoundingClientRect();
+        const targetRect = dom.boardGrid.getBoundingClientRect();
+        const star = document.createElement('span');
+        star.className = 'flying-star';
+        star.style.left = `${sourceRect.left + sourceRect.width / 2 - 16}px`;
+        star.style.top = `${sourceRect.top + sourceRect.height / 2 - 16}px`;
+        document.body.appendChild(star);
+        const dx = (targetRect.left + Math.min(targetRect.width - 16, 36)) - sourceRect.left;
+        const dy = (targetRect.top + 26) - sourceRect.top;
+        await star.animate([
+          { transform: 'translate(0, 0) scale(0.9)', opacity: 1, offset: 0 },
+          { transform: `translate(${dx * 0.55}px, ${dy * 0.3 - 56}px) scale(1.12)`, opacity: 1, offset: 0.55 },
+          { transform: `translate(${dx}px, ${dy}px) scale(0.66)`, opacity: 0.96, offset: 1 },
+        ], { duration: 620, easing: 'cubic-bezier(0.22, 0.84, 0.31, 1)' }).finished.catch(() => null);
+        star.remove();
+      }
+
+      async function giveDemoStar() {
+        if (state.requestInFlight) {
+          return;
+        }
+        setButtonsDisabled(true);
+        try {
+          const payload = await requestJson(pathConfig.give, { method: 'POST', body: '{}' });
+          state.data = payload.state || state.data;
+          renderState();
+          dom.characterWrap.classList.add('notice');
+          showToast('One demo star is now waiting to collect.');
+        } catch (error) {
+          showToast(error.message || 'Unable to add a waiting star.');
+          setButtonsDisabled(false);
+        }
+      }
+
+      async function approveReward() {
+        if (state.requestInFlight) {
+          return;
+        }
+        setButtonsDisabled(true);
+        try {
+          const payload = await requestJson(pathConfig.approve, { method: 'POST', body: '{}' });
+          state.data = payload.state || state.data;
+          renderState();
+          showToast('Reward approved. Available stars exchanged.');
+        } catch (error) {
+          showToast(error.message || 'Unable to approve reward.');
+          setButtonsDisabled(false);
+        }
+      }
+
+      async function resetDemo() {
+        if (state.requestInFlight) {
+          return;
+        }
+        setButtonsDisabled(true);
+        try {
+          const payload = await requestJson(pathConfig.reset, { method: 'POST', body: '{}' });
+          state.data = payload.state || state.data;
+          renderState();
+          showToast('Demo state reset.');
+        } catch (error) {
+          showToast(error.message || 'Unable to reset demo.');
+          setButtonsDisabled(false);
+        }
+      }
+
+      function bindEvents() {
+        dom.giveStarBtn.addEventListener('click', giveDemoStar);
+        dom.approveRewardBtn.addEventListener('click', approveReward);
+        dom.resetDemoBtn.addEventListener('click', resetDemo);
+        dom.starCharacter.addEventListener('click', () => {
+          dom.characterWrap.classList.remove('tap-react');
+          void dom.characterWrap.offsetWidth;
+          dom.characterWrap.classList.add('tap-react');
+          window.setTimeout(() => dom.characterWrap.classList.remove('tap-react'), 620);
+        });
+        dom.motionToggle.addEventListener('change', () => {
+          if (!dom.motionToggle.checked) {
+            dom.characterWrap.classList.remove('notice', 'proud', 'tap-react');
+          }
+          showToast(dom.motionToggle.checked ? 'Animation enabled.' : 'Animation reduced.');
+        });
+        dom.soundToggle.addEventListener('change', () => {
+          showToast(dom.soundToggle.checked ? 'Sound enabled (placeholder).' : 'Sound off.');
+        });
+      }
+
+      async function boot() {
+        dom.motionToggle.checked = !prefersReducedMotion;
+        dom.soundToggle.checked = false;
+        bindEvents();
+        try {
+          await syncState();
+        } catch (error) {
+          showToast(error.message || 'Preview failed to load.');
+        }
+        renderState();
+      }
+
+      boot();
+    })();
+  </script>
+</body>
+</html>

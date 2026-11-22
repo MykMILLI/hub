@@ -1580,6 +1580,241 @@ def api_routine_snapshot():
     return jsonify({'ok': True, 'routines': _build_routine_payload(row)})
 
 
+_GOLD_STAR_PREVIEW_SESSION_KEY = 'gold_star_preview_state'
+_GOLD_STAR_PREVIEW_REWARD = {
+    'id': 'dessert-night',
+    'label': 'Choose dessert night',
+    'cost': 5,
+}
+
+
+def _can_access_gold_star_preview(actor_name: str) -> bool:
+    clean_actor = sanitize_text(actor_name or '').strip().lower()
+    if not clean_actor:
+        return False
+    if _can_manage_kid_rewards(actor_name):
+        return True
+    admin_name = sanitize_text(current_app.config.get('HOMEHUB_CONFIG', {}).get('admin_name', 'Administrator')).strip().lower()
+    return bool(admin_name and clean_actor == admin_name)
+
+
+def _gold_star_preview_add_history(state: dict, *, kind: str, message: str, stars: int = 0) -> None:
+    history = state.get('history')
+    if not isinstance(history, list):
+        history = []
+    next_id = int(state.get('next_history_id') or 1)
+    entry = {
+        'id': next_id,
+        'kind': sanitize_text(kind or 'event').strip()[:32] or 'event',
+        'message': sanitize_text(message or '').strip()[:220] or 'Updated demo state',
+        'stars': int(stars or 0),
+        'created_at': datetime.utcnow().replace(tzinfo=timezone.utc).isoformat(),
+    }
+    history.insert(0, entry)
+    state['history'] = history[:40]
+    state['next_history_id'] = next_id + 1
+
+
+def _gold_star_preview_default_state(actor_name: str) -> dict:
+    state = {
+        'preview_mode': True,
+        'child_name': 'Avery',
+        'earned': 32,
+        'available': 7,
+        'spent': 25,
+        'waiting': [],
+        'next_waiting_id': 1,
+        'reward_demo': {
+            'id': _GOLD_STAR_PREVIEW_REWARD['id'],
+            'label': _GOLD_STAR_PREVIEW_REWARD['label'],
+            'cost': int(_GOLD_STAR_PREVIEW_REWARD['cost']),
+            'status': 'requested',
+        },
+        'next_history_id': 1,
+        'history': [],
+        'motion_enabled': True,
+        'sound_enabled': False,
+        'updated_by': sanitize_text(actor_name or '').strip() or 'Preview',
+        'updated_at': datetime.utcnow().replace(tzinfo=timezone.utc).isoformat(),
+    }
+    _gold_star_preview_add_history(state, kind='earned', message='Starting all-time earned stars', stars=32)
+    _gold_star_preview_add_history(state, kind='spent', message='Starting spent stars from past rewards', stars=-25)
+    _gold_star_preview_add_history(state, kind='preview', message='Preview state initialized for Avery board', stars=0)
+    return state
+
+
+def _gold_star_preview_waiting_count(state: dict) -> int:
+    waiting = state.get('waiting')
+    if not isinstance(waiting, list):
+        return 0
+    pending = [
+        row for row in waiting
+        if isinstance(row, dict) and not bool(row.get('collected'))
+    ]
+    return len(pending)
+
+
+def _gold_star_preview_normalize_state(raw_state: dict, actor_name: str) -> dict:
+    state = raw_state if isinstance(raw_state, dict) else _gold_star_preview_default_state(actor_name)
+    child_name = sanitize_text(state.get('child_name') or 'Avery').strip() or 'Avery'
+    if child_name not in {'Avery', 'Harley'}:
+        child_name = 'Avery'
+    state['child_name'] = child_name
+    try:
+        state['available'] = max(0, int(state.get('available', 7)))
+    except (TypeError, ValueError):
+        state['available'] = 7
+    try:
+        state['spent'] = max(0, int(state.get('spent', 25)))
+    except (TypeError, ValueError):
+        state['spent'] = 25
+    waiting_rows = state.get('waiting')
+    if not isinstance(waiting_rows, list):
+        waiting_rows = []
+    normalized_waiting = []
+    max_waiting_id = 0
+    for row in waiting_rows:
+        if not isinstance(row, dict):
+            continue
+        try:
+            waiting_id = int(row.get('id') or 0)
+        except (TypeError, ValueError):
+            continue
+        if waiting_id <= 0:
+            continue
+        max_waiting_id = max(max_waiting_id, waiting_id)
+        normalized_waiting.append({
+            'id': waiting_id,
+            'label': sanitize_text(row.get('label') or 'Parent awarded a star').strip()[:120] or 'Parent awarded a star',
+            'awarded_by': sanitize_text(row.get('awarded_by') or '').strip()[:64],
+            'awarded_at': sanitize_text(row.get('awarded_at') or '').strip(),
+            'collected': bool(row.get('collected')),
+            'collected_at': sanitize_text(row.get('collected_at') or '').strip(),
+        })
+    normalized_waiting.sort(key=lambda item: item['id'])
+    state['waiting'] = normalized_waiting
+    next_waiting_id = int(state.get('next_waiting_id') or 1)
+    state['next_waiting_id'] = max(next_waiting_id, max_waiting_id + 1, 1)
+    reward_demo = state.get('reward_demo')
+    if not isinstance(reward_demo, dict):
+        reward_demo = {}
+    reward_demo_status = sanitize_text(reward_demo.get('status') or 'requested').strip().lower()
+    if reward_demo_status not in {'requested', 'approved'}:
+        reward_demo_status = 'requested'
+    try:
+        reward_cost = int(reward_demo.get('cost') or _GOLD_STAR_PREVIEW_REWARD['cost'])
+    except (TypeError, ValueError):
+        reward_cost = int(_GOLD_STAR_PREVIEW_REWARD['cost'])
+    reward_demo = {
+        'id': sanitize_text(reward_demo.get('id') or _GOLD_STAR_PREVIEW_REWARD['id']).strip() or _GOLD_STAR_PREVIEW_REWARD['id'],
+        'label': sanitize_text(reward_demo.get('label') or _GOLD_STAR_PREVIEW_REWARD['label']).strip()[:140] or _GOLD_STAR_PREVIEW_REWARD['label'],
+        'cost': max(1, min(50, reward_cost)),
+        'status': reward_demo_status,
+    }
+    state['reward_demo'] = reward_demo
+    state['motion_enabled'] = bool(state.get('motion_enabled', True))
+    state['sound_enabled'] = bool(state.get('sound_enabled', False))
+    history = state.get('history')
+    if not isinstance(history, list):
+        history = []
+    normalized_history = []
+    max_history_id = 0
+    for row in history:
+        if not isinstance(row, dict):
+            continue
+        try:
+            event_id = int(row.get('id') or 0)
+        except (TypeError, ValueError):
+            event_id = 0
+        max_history_id = max(max_history_id, event_id)
+        try:
+            star_delta = int(row.get('stars') or 0)
+        except (TypeError, ValueError):
+            star_delta = 0
+        normalized_history.append({
+            'id': event_id,
+            'kind': sanitize_text(row.get('kind') or 'event').strip()[:32] or 'event',
+            'message': sanitize_text(row.get('message') or '').strip()[:220] or 'Updated demo state',
+            'stars': star_delta,
+            'created_at': sanitize_text(row.get('created_at') or '').strip(),
+        })
+    state['history'] = normalized_history[:40]
+    state['next_history_id'] = max(int(state.get('next_history_id') or 1), max_history_id + 1, 1)
+    waiting_count = _gold_star_preview_waiting_count(state)
+    invariant_value = state['available'] + waiting_count + state['spent']
+    try:
+        earned_value = int(state.get('earned', invariant_value))
+    except (TypeError, ValueError):
+        earned_value = invariant_value
+    state['earned'] = invariant_value if earned_value != invariant_value else earned_value
+    state['updated_by'] = sanitize_text(actor_name or '').strip() or sanitize_text(state.get('updated_by') or 'Preview').strip() or 'Preview'
+    state['updated_at'] = datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
+    return state
+
+
+def _gold_star_preview_get_state(actor_name: str, *, reset: bool = False) -> dict:
+    raw = session.get(_GOLD_STAR_PREVIEW_SESSION_KEY)
+    if reset or not isinstance(raw, dict):
+        state = _gold_star_preview_default_state(actor_name)
+    else:
+        state = raw
+    normalized = _gold_star_preview_normalize_state(state, actor_name)
+    session[_GOLD_STAR_PREVIEW_SESSION_KEY] = normalized
+    session.modified = True
+    return normalized
+
+
+def _gold_star_preview_payload(state: dict) -> dict:
+    waiting_rows = state.get('waiting') if isinstance(state.get('waiting'), list) else []
+    pending_waiting = [row for row in waiting_rows if isinstance(row, dict) and not bool(row.get('collected'))]
+    return {
+        'preview_mode': True,
+        'child_name': state.get('child_name') or 'Avery',
+        'earned': int(state.get('earned') or 0),
+        'available': int(state.get('available') or 0),
+        'spent': int(state.get('spent') or 0),
+        'waiting_count': len(pending_waiting),
+        'waiting': [
+            {
+                'id': int(row.get('id') or 0),
+                'label': sanitize_text(row.get('label') or '').strip(),
+                'awarded_by': sanitize_text(row.get('awarded_by') or '').strip(),
+                'awarded_at': sanitize_text(row.get('awarded_at') or '').strip(),
+            }
+            for row in pending_waiting
+        ],
+        'reward_demo': {
+            'id': sanitize_text((state.get('reward_demo') or {}).get('id') or '').strip(),
+            'label': sanitize_text((state.get('reward_demo') or {}).get('label') or '').strip(),
+            'cost': int((state.get('reward_demo') or {}).get('cost') or 0),
+            'status': sanitize_text((state.get('reward_demo') or {}).get('status') or 'requested').strip(),
+        },
+        'history': [
+            {
+                'id': int(row.get('id') or 0),
+                'kind': sanitize_text(row.get('kind') or '').strip(),
+                'message': sanitize_text(row.get('message') or '').strip(),
+                'stars': int(row.get('stars') or 0),
+                'created_at': sanitize_text(row.get('created_at') or '').strip(),
+            }
+            for row in (state.get('history') if isinstance(state.get('history'), list) else [])
+        ],
+        'motion_enabled': bool(state.get('motion_enabled', True)),
+        'sound_enabled': bool(state.get('sound_enabled', False)),
+        'invariant_ok': int(state.get('earned') or 0) == (
+            int(state.get('available') or 0)
+            + _gold_star_preview_waiting_count(state)
+            + int(state.get('spent') or 0)
+        ),
+    }
+
+
+def _gold_star_preview_require_parent(actor_name: str):
+    if _can_access_gold_star_preview(actor_name):
+        return None
+    return jsonify({'ok': False, 'error': 'Only Rachel, Mykal, or an admin can access this preview.'}), 403
+
+
 @main_bp.route('/gold-stars', methods=['GET'])
 def gold_stars_dashboard():
     actor = _current_actor_name()
@@ -1590,6 +1825,147 @@ def gold_stars_dashboard():
         actor_name=actor,
         kid_view=kid_view,
     )
+
+
+@main_bp.route('/gold-stars/preview', methods=['GET'])
+def gold_stars_preview():
+    actor = _current_actor_name()
+    denied = _gold_star_preview_require_parent(actor)
+    if denied is not None:
+        return denied
+    state = _gold_star_preview_get_state(actor)
+    return render_template(
+        'gold_stars_preview.html',
+        preview_state=_gold_star_preview_payload(state),
+        actor_name=actor,
+    )
+
+
+@main_bp.route('/api/gold-stars/preview/state', methods=['GET'])
+def api_gold_stars_preview_state():
+    actor = _current_actor_name()
+    denied = _gold_star_preview_require_parent(actor)
+    if denied is not None:
+        return denied
+    state = _gold_star_preview_get_state(actor)
+    return jsonify({'ok': True, 'state': _gold_star_preview_payload(state)})
+
+
+@main_bp.route('/api/gold-stars/preview/reset', methods=['POST'])
+def api_gold_stars_preview_reset():
+    actor = _current_actor_name()
+    denied = _gold_star_preview_require_parent(actor)
+    if denied is not None:
+        return denied
+    state = _gold_star_preview_get_state(actor, reset=True)
+    _gold_star_preview_add_history(state, kind='preview', message='Demo reset to starting totals')
+    state = _gold_star_preview_normalize_state(state, actor)
+    session[_GOLD_STAR_PREVIEW_SESSION_KEY] = state
+    session.modified = True
+    return jsonify({'ok': True, 'state': _gold_star_preview_payload(state)})
+
+
+@main_bp.route('/api/gold-stars/preview/demo/give-star', methods=['POST'])
+def api_gold_stars_preview_give_star():
+    actor = _current_actor_name()
+    denied = _gold_star_preview_require_parent(actor)
+    if denied is not None:
+        return denied
+    state = _gold_star_preview_get_state(actor)
+    pending_count = _gold_star_preview_waiting_count(state)
+    if pending_count >= 1:
+        return jsonify({'ok': False, 'error': 'A demo star is already waiting to be collected.'}), 409
+    waiting_id = int(state.get('next_waiting_id') or 1)
+    state['next_waiting_id'] = waiting_id + 1
+    waiting_row = {
+        'id': waiting_id,
+        'label': 'Parent-approved star waiting to collect',
+        'awarded_by': actor,
+        'awarded_at': datetime.utcnow().replace(tzinfo=timezone.utc).isoformat(),
+        'collected': False,
+        'collected_at': '',
+    }
+    waiting = state.get('waiting')
+    if not isinstance(waiting, list):
+        waiting = []
+    waiting.append(waiting_row)
+    state['waiting'] = waiting
+    state['earned'] = int(state.get('earned') or 0) + 1
+    _gold_star_preview_add_history(state, kind='earned', message='Parent granted one demo star', stars=1)
+    state = _gold_star_preview_normalize_state(state, actor)
+    session[_GOLD_STAR_PREVIEW_SESSION_KEY] = state
+    session.modified = True
+    return jsonify({'ok': True, 'state': _gold_star_preview_payload(state), 'waiting_id': waiting_id})
+
+
+@main_bp.route('/api/gold-stars/preview/demo/collect', methods=['POST'])
+def api_gold_stars_preview_collect_star():
+    actor = _current_actor_name()
+    denied = _gold_star_preview_require_parent(actor)
+    if denied is not None:
+        return denied
+    data = request.get_json(silent=True) or {}
+    try:
+        waiting_id = int(data.get('waiting_id') or 0)
+    except (TypeError, ValueError):
+        waiting_id = 0
+    if waiting_id <= 0:
+        return jsonify({'ok': False, 'error': 'waiting_id is required'}), 400
+    state = _gold_star_preview_get_state(actor)
+    waiting = state.get('waiting')
+    if not isinstance(waiting, list):
+        waiting = []
+    target = None
+    for row in waiting:
+        if not isinstance(row, dict):
+            continue
+        if int(row.get('id') or 0) != waiting_id:
+            continue
+        target = row
+        break
+    if not target:
+        return jsonify({'ok': False, 'error': 'Waiting star not found'}), 404
+    if bool(target.get('collected')):
+        return jsonify({'ok': False, 'error': 'This demo star was already collected.'}), 409
+    target['collected'] = True
+    target['collected_at'] = datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
+    state['available'] = int(state.get('available') or 0) + 1
+    _gold_star_preview_add_history(state, kind='collect', message='Avery collected one waiting star', stars=1)
+    state = _gold_star_preview_normalize_state(state, actor)
+    session[_GOLD_STAR_PREVIEW_SESSION_KEY] = state
+    session.modified = True
+    return jsonify({'ok': True, 'state': _gold_star_preview_payload(state)})
+
+
+@main_bp.route('/api/gold-stars/preview/demo/approve-reward', methods=['POST'])
+def api_gold_stars_preview_approve_reward():
+    actor = _current_actor_name()
+    denied = _gold_star_preview_require_parent(actor)
+    if denied is not None:
+        return denied
+    state = _gold_star_preview_get_state(actor)
+    reward_demo = state.get('reward_demo') if isinstance(state.get('reward_demo'), dict) else {}
+    reward_status = sanitize_text(reward_demo.get('status') or 'requested').strip().lower()
+    if reward_status != 'requested':
+        return jsonify({'ok': False, 'error': 'Demo reward has already been approved.'}), 409
+    reward_cost = max(1, int(reward_demo.get('cost') or _GOLD_STAR_PREVIEW_REWARD['cost']))
+    available = int(state.get('available') or 0)
+    if available < reward_cost:
+        return jsonify({'ok': False, 'error': 'Not enough available stars for the demo reward.'}), 400
+    state['available'] = available - reward_cost
+    state['spent'] = int(state.get('spent') or 0) + reward_cost
+    reward_demo['status'] = 'approved'
+    state['reward_demo'] = reward_demo
+    _gold_star_preview_add_history(
+        state,
+        kind='spent',
+        message=f"Reward approved: {sanitize_text(reward_demo.get('label') or 'Demo reward').strip()}",
+        stars=-reward_cost,
+    )
+    state = _gold_star_preview_normalize_state(state, actor)
+    session[_GOLD_STAR_PREVIEW_SESSION_KEY] = state
+    session.modified = True
+    return jsonify({'ok': True, 'state': _gold_star_preview_payload(state)})
 
 
 @main_bp.route('/kids-stars', methods=['GET'])

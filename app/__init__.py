@@ -641,6 +641,7 @@ def create_app(test_config: dict | None = None):
         prefix_route_map = {
             '/api/workspaces': 'shared_notes',
             '/api/rewards': 'reward_system',
+            '/api/gold-stars': 'reward_system',
             '/api/expenses': 'expense_tracker',
             '/api/money': 'expense_tracker',
             '/money': 'expense_tracker',

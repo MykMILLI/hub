@@ -477,3 +477,87 @@ def test_rewards_dispense_then_child_claims_stars(client, app):
         row = KidRewardPendingGrant.query.get(grants[0]['id'])
         assert row is not None
         assert bool(row.claimed) is True
+
+
+def test_gold_star_preview_requires_parent_or_admin(client):
+    with client.session_transaction() as session:
+        session['current_member'] = 'Avery'
+    page = client.get('/gold-stars/preview')
+    assert page.status_code == 403
+    api_state = client.get('/api/gold-stars/preview/state')
+    assert api_state.status_code == 403
+    payload = api_state.get_json()
+    assert payload['ok'] is False
+
+    with client.session_transaction() as session:
+        session['current_member'] = 'Rachel'
+    allowed_page = client.get('/gold-stars/preview')
+    assert allowed_page.status_code == 200
+    html = allowed_page.get_data(as_text=True)
+    assert 'Gold Star Club Preview' in html
+    assert 'Parent / Developer Demo Panel' in html
+    assert 'prefers-reduced-motion: reduce' in html
+    assert 'id="motionToggle"' in html
+
+
+def test_gold_star_preview_demo_accounting_flow(client):
+    with client.session_transaction() as session:
+        session['current_member'] = 'Rachel'
+
+    start = client.get('/api/gold-stars/preview/state')
+    assert start.status_code == 200
+    initial = start.get_json()['state']
+    assert initial['child_name'] == 'Avery'
+    assert initial['earned'] == 32
+    assert initial['available'] == 7
+    assert initial['spent'] == 25
+    assert initial['waiting_count'] == 0
+    assert initial['invariant_ok'] is True
+
+    give = client.post('/api/gold-stars/preview/demo/give-star', json={})
+    assert give.status_code == 200
+    after_give = give.get_json()['state']
+    assert after_give['earned'] == 33
+    assert after_give['available'] == 7
+    assert after_give['spent'] == 25
+    assert after_give['waiting_count'] == 1
+    assert len(after_give['waiting']) == 1
+    waiting_id = after_give['waiting'][0]['id']
+    assert after_give['invariant_ok'] is True
+
+    duplicate_give = client.post('/api/gold-stars/preview/demo/give-star', json={})
+    assert duplicate_give.status_code == 409
+
+    collect = client.post('/api/gold-stars/preview/demo/collect', json={'waiting_id': waiting_id})
+    assert collect.status_code == 200
+    after_collect = collect.get_json()['state']
+    assert after_collect['earned'] == 33
+    assert after_collect['waiting_count'] == 0
+    assert after_collect['available'] == 8
+    assert after_collect['spent'] == 25
+    assert after_collect['invariant_ok'] is True
+
+    duplicate_collect = client.post('/api/gold-stars/preview/demo/collect', json={'waiting_id': waiting_id})
+    assert duplicate_collect.status_code == 409
+
+    approve = client.post('/api/gold-stars/preview/demo/approve-reward', json={})
+    assert approve.status_code == 200
+    after_approve = approve.get_json()['state']
+    assert after_approve['earned'] == 33
+    assert after_approve['available'] == 3
+    assert after_approve['spent'] == 30
+    assert after_approve['reward_demo']['status'] == 'approved'
+    assert after_approve['invariant_ok'] is True
+
+    duplicate_approve = client.post('/api/gold-stars/preview/demo/approve-reward', json={})
+    assert duplicate_approve.status_code == 409
+
+    reset = client.post('/api/gold-stars/preview/reset', json={})
+    assert reset.status_code == 200
+    after_reset = reset.get_json()['state']
+    assert after_reset['earned'] == 32
+    assert after_reset['available'] == 7
+    assert after_reset['spent'] == 25
+    assert after_reset['waiting_count'] == 0
+    assert after_reset['reward_demo']['status'] == 'requested'
+    assert after_reset['invariant_ok'] is True
