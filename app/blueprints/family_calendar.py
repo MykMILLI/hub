@@ -18,6 +18,7 @@ from ..blueprints import main_bp
 from ..models import AppNotification, FamilyCalendarEvent, FamilyCalendarShareLink, FamilyMember, db
 from ..security import sanitize_text
 from ..services.notification_service import publish_notification
+from ..permissions import is_extended_member as _is_extended_member
 
 
 def _current_member_name() -> str:
@@ -219,8 +220,18 @@ def _can_view_event(event: FamilyCalendarEvent, member_name: str) -> bool:
     if _is_admin_member(member_name):
         return True
     visibility = (getattr(event, 'visibility', None) or 'family').strip().lower()
-    if visibility == 'family':
+    if visibility == 'everyone':
         return True
+    extended = _is_extended_member(member_name)
+    if visibility == 'family':
+        # Immediate household only; extended family sees it only if invited.
+        if not extended:
+            return True
+        try:
+            invited_names = json.loads(event.invited_members_json or '[]')
+        except Exception:
+            invited_names = []
+        return isinstance(invited_names, list) and member_name in invited_names
     if visibility == 'private':
         return member_name == event.created_by
     invited = []
@@ -233,7 +244,7 @@ def _can_view_event(event: FamilyCalendarEvent, member_name: str) -> bool:
     if visibility == 'restricted':
         return member_name == event.created_by or member_name in invited
     if not invited:
-        return True
+        return not extended
     return member_name == event.created_by or member_name in invited
 
 
@@ -380,7 +391,7 @@ def _apply_share_link_permissions(rows: list[FamilyCalendarEvent], share: Family
     perms = _share_link_permissions(share)
     if perms.get('include_private_events'):
         return rows
-    return [row for row in rows if (row.visibility or 'family') == 'family']
+    return [row for row in rows if (row.visibility or 'family') in {'family', 'everyone'}]
 
 
 def _share_link_summary(share: FamilyCalendarShareLink) -> dict:
@@ -1048,7 +1059,7 @@ def api_calendar_create_event():
 
     color = sanitize_text(data.get('color') or '#3b82f6').strip() or '#3b82f6'
     visibility = sanitize_text((data.get('visibility') or 'family')).strip().lower()
-    if visibility not in {'family', 'restricted', 'private'}:
+    if visibility not in {'family', 'everyone', 'restricted', 'private'}:
         visibility = 'family'
     reminder_at = _parse_optional_datetime(data.get('reminder_at'))
     is_all_day = str(data.get('is_all_day') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
@@ -1122,8 +1133,11 @@ def api_calendar_create_event():
     db.session.add(row)
     db.session.commit()
 
-    if visibility == 'family':
-        family_members = [m.name for m in FamilyMember.query.order_by(FamilyMember.name.asc()).all()]
+    if visibility in {'family', 'everyone'}:
+        family_members = [
+            m.name for m in FamilyMember.query.order_by(FamilyMember.name.asc()).all()
+            if visibility == 'everyone' or (getattr(m, 'access_tier', 'immediate') or 'immediate') != 'extended'
+        ]
         targets = [n for n in family_members if n and n != actor]
     else:
         targets = [n for n in invited_members if n and n != actor]
@@ -1186,7 +1200,7 @@ def api_calendar_update_event(event_id: int):
         if 'end_time' in data:
             end_time = _normalize_time_text(data.get('end_time'))
     visibility = sanitize_text((data.get('visibility') if 'visibility' in data else (row.visibility or 'family'))).strip().lower()
-    if visibility not in {'family', 'restricted', 'private'}:
+    if visibility not in {'family', 'everyone', 'restricted', 'private'}:
         visibility = (row.visibility or 'family')
     if 'is_recurring' in data:
         is_recurring = str(data.get('is_recurring') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
