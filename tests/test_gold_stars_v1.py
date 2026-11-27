@@ -216,6 +216,8 @@ def test_extended_family_sees_only_extended_modules_and_shared_events(client, ap
         db.session.add(FamilyCalendarEvent(title='Household dentist', start_date=date(2026, 12, 1), end_date=date(2026, 12, 1), visibility='family', created_by='Rachel', invited_members_json='[]'))
         db.session.add(FamilyCalendarEvent(title='Thanksgiving', start_date=date(2026, 12, 2), end_date=date(2026, 12, 2), visibility='everyone', created_by='Rachel', invited_members_json='[]'))
         db.session.commit()
+    # permission checks read the signed-in session, so they need a request context
+    with app.test_request_context('/'):
         assert can_access_app_module('shared_calendar', 'Grandma') is True
         assert can_access_app_module('shopping_list', 'Grandma') is True
         assert can_access_app_module('cameras', 'Grandma') is False

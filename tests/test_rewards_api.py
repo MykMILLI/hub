@@ -287,11 +287,11 @@ def test_welcome_parent_helper_card_shows_debug_for_rachel(client):
     html = response.get_data(as_text=True)
     assert 'Parent Helper' in html
     assert 'This Sunday meal-plan status' in html
-    assert 'Open Kids Dashboard' in html
-    assert 'Give a Gold Star' in html
-    assert 'Record Consequence' in html
-    assert 'Weekly Star Behavior' in html
-    assert 'Consequence reasons this week' in html
+    assert "Kids' screen" in html
+    assert 'id="goldStarLiveRows"' in html
+    # The old discipline summary was retired with Gold Star Club v1.
+    assert 'Weekly Star Behavior' not in html
+    assert 'Consequence reasons this week' not in html
     assert 'id="quickStarModal"' in html
     assert 'id="quickConsequenceModal"' in html
     assert 'Debug: next inspirational-notification windows' not in html
@@ -305,7 +305,8 @@ def test_welcome_parent_helper_card_hides_debug_for_non_admin(client):
     html = response.get_data(as_text=True)
     assert 'Parent Helper' in html
     assert 'This Sunday meal-plan status' in html
-    assert 'Open Kids Dashboard' in html
+    assert "Kids' screen" in html
+    assert 'text-xs gs-quick-star' not in html  # only parents get the +1 Star button
     assert 'id="quickStarModal"' not in html
     assert 'id="quickConsequenceModal"' not in html
     assert 'Debug: next inspirational-notification windows' not in html
