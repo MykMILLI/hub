@@ -211,6 +211,7 @@ def create_app(test_config: dict | None = None):
                 ensure_column('family_member', 'weather_longitude', 'REAL', None)
                 ensure_column('family_member', 'weather_location_name', 'TEXT', None)
                 ensure_column('family_member', 'weather_use_gps_location', 'INTEGER', 0)
+                ensure_column('family_member', 'access_tier', "TEXT DEFAULT 'immediate'", 'immediate')
                 ensure_column('plaid_account', 'plaid_item_id', 'TEXT', None)
                 ensure_column('plaid_account', 'item_account_key', 'TEXT', None)
                 ensure_column(_RecurringExpense.__tablename__, 'monthly_mode', 'TEXT', 'day_of_month')
@@ -496,6 +497,9 @@ def create_app(test_config: dict | None = None):
     # Register modular route modules to attach endpoints to main_bp
     from .blueprints import auth  # noqa: F401
     from .blueprints import dashboard  # noqa: F401
+    from .blueprints import gold_stars  # noqa: F401
+    from .blueprints import home_screen  # noqa: F401
+    from .blueprints import invites  # noqa: F401
     from .blueprints import notes  # noqa: F401
     from .blueprints import uploads  # noqa: F401
     from .blueprints import shortener  # noqa: F401
@@ -561,6 +565,8 @@ def create_app(test_config: dict | None = None):
             return None
         if path.startswith('/login') or path.startswith('/logout'):
             return None
+        if path.startswith('/invite/') or path.startswith('/api/invite/'):
+            return None
         if path.startswith('/api/auth/') or path.startswith('/api/member-login') or path.startswith('/api/member/set-pin') or path.startswith('/api/member-logout') or path.startswith('/api/current-member'):
             return None
         if path == '/api/notifications/mobile/poll':
@@ -601,12 +607,16 @@ def create_app(test_config: dict | None = None):
             allowed_prefixes = (
                 '/api/rewards/state',
                 '/api/rewards/claim',
+                '/api/gold-stars/state',
+                '/api/gold-stars/awards/collect',
+                '/api/gold-stars/requests',
+                '/api/rewards/kiosk-mode',
             )
             if path in allowed_exact_paths or any(path == prefix or path.startswith(prefix + '/') for prefix in allowed_prefixes):
                 return None
             if path.startswith('/api/'):
                 return {'ok': False, 'error': 'This tablet is locked to Kid Star Board mode.'}, 403
-            return redirect(url_for('main.kids_stars_tablet'))
+            return redirect('/kids-stars')
 
         exact_route_map = {
             '/': 'welcome',
@@ -628,6 +638,7 @@ def create_app(test_config: dict | None = None):
             '/expenses': 'expense_tracker',
             '/calendar': 'shared_calendar',
             '/daily-agenda': 'daily_agenda',
+            '/home-screen': 'home_screen',
             '/meal-planner': 'meal_planner',
             '/photos': 'photos',
             '/notifications': 'notifications',
@@ -647,6 +658,8 @@ def create_app(test_config: dict | None = None):
             '/money': 'expense_tracker',
             '/api/calendar': 'shared_calendar',
             '/api/daily-agenda': 'daily_agenda',
+            '/api/home-screen': 'home_screen',
+            '/api/access-tiers': 'settings',
             '/api/meal-planner': 'meal_planner',
             '/api/photos': 'photos',
             '/api/notifications': 'notifications',

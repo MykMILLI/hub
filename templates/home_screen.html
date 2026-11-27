@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f3ecff" />
+  <title>{{ hub_name }} · Home Screen</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <style>
+    :root {
+      --bg: radial-gradient(circle at 0% 0%, #fff8db 0%, #fdf2f8 30%, #f3ecff 62%, #e0e7ff 100%);
+      --card: rgba(255, 255, 255, 0.86);
+      --border: rgba(139, 92, 246, 0.16);
+      --text: #2e1065;
+      --muted: #6b5b8a;
+      --purple: #7c3aed;
+      --radius: 1.35rem;
+      --gap: clamp(.7rem, 1.4vw, 1.2rem);
+      --fs: clamp(15px, 1.05vw + 6px, 22px);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body { font-family: Inter, "Segoe UI", system-ui, sans-serif; font-size: var(--fs); color: var(--text); background: var(--bg); background-attachment: fixed;
+      padding: max(var(--gap), env(safe-area-inset-top)) max(var(--gap), env(safe-area-inset-right)) max(var(--gap), env(safe-area-inset-bottom)) max(var(--gap), env(safe-area-inset-left)); }
+    button { font: inherit; color: inherit; }
+    .screen { display: grid; gap: var(--gap); max-width: 2200px; margin: 0 auto; }
+
+    /* header */
+    .top { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: var(--gap); }
+    .clock { font-size: clamp(3rem, 6.2vw, 7.5rem); font-weight: 800; letter-spacing: -.03em; line-height: .95; font-variant-numeric: tabular-nums; }
+    .clock small { font-size: .38em; font-weight: 700; margin-left: .15em; color: var(--muted); letter-spacing: 0; }
+    .date { font-size: clamp(1.1rem, 1.6vw, 2rem); font-weight: 700; }
+    .greet { color: var(--muted); margin-top: .15rem; }
+    .top-actions { display: flex; gap: .5rem; flex-wrap: wrap; justify-content: flex-end; }
+    .icon-btn { border: 1px solid var(--border); background: var(--card); border-radius: 999px; padding: .55em .95em; font-weight: 700; cursor: pointer; text-decoration: none; color: var(--text); font-size: .85em; }
+
+    /* quick add */
+    .quick { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: var(--gap); }
+    .qa { border: 0; border-radius: var(--radius); padding: clamp(.8rem, 1.6vw, 1.4rem) 1rem; cursor: pointer; display: flex; align-items: center; gap: .7rem;
+      font-weight: 800; font-size: 1.12em; box-shadow: 0 10px 24px rgba(76, 29, 149, .10); transition: transform .12s ease, box-shadow .12s ease; text-align: left; touch-action: manipulation; }
+    .qa:active { transform: scale(.97); }
+    .qa .ico { font-size: 1.7em; line-height: 1; width: 1.6em; height: 1.6em; display: grid; place-items: center; border-radius: .7em; background: rgba(255,255,255,.65); }
+    .qa small { display: block; font-weight: 600; font-size: .7em; opacity: .75; }
+    .qa-grocery { background: linear-gradient(135deg, #dcfce7, #bbf7d0); color: #14532d; }
+    .qa-todo { background: linear-gradient(135deg, #e0f2fe, #bae6fd); color: #0c4a6e; }
+    .qa-memo { background: linear-gradient(135deg, #fef9c3, #fde68a); color: #713f12; }
+    .qa-event { background: linear-gradient(135deg, #ede9fe, #ddd6fe); color: #4c1d95; }
+    .qa-star { background: linear-gradient(135deg, #fff7d6, #fcd34d); color: #78350f; }
+
+    /* panels */
+    .grid { display: grid; grid-template-columns: 1.25fr 1fr 1fr; gap: var(--gap); align-items: start; }
+    @media (max-width: 1100px) { .grid { grid-template-columns: 1fr 1fr; } .grid .col-agenda { grid-column: 1 / -1; } }
+    @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } .top { grid-template-columns: 1fr; } .top-actions { justify-content: flex-start; } }
+    .panel { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: clamp(.8rem, 1.4vw, 1.3rem); box-shadow: 0 12px 30px rgba(76, 29, 149, .07); }
+    .panel h2 { margin: 0 0 .6rem; font-size: 1.05em; display: flex; justify-content: space-between; align-items: center; gap: .5rem; }
+    .panel h2 a { font-size: .75em; color: var(--purple); text-decoration: none; font-weight: 700; }
+    .stack { display: grid; gap: var(--gap); }
+    .empty { color: var(--muted); padding: .4rem 0; }
+
+    .day-label { font-size: .78em; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: .7rem 0 .35rem; }
+    .day-label:first-child { margin-top: 0; }
+    .ev { display: grid; grid-template-columns: 5.6em 1fr; gap: .7rem; align-items: stretch; padding: .45rem 0; }
+    .ev-time { font-weight: 800; font-variant-numeric: tabular-nums; font-size: .92em; padding-top: .1em; }
+    .ev-time small { display: block; font-weight: 600; color: var(--muted); font-size: .8em; }
+    .ev-body { border-left: 5px solid var(--ev, var(--purple)); background: color-mix(in srgb, var(--ev, #7c3aed) 12%, white); border-radius: .8rem; padding: .45rem .7rem; }
+    .ev-body b { display: block; }
+    .ev-body span { color: var(--muted); font-size: .82em; }
+    .ev.now .ev-body { box-shadow: 0 0 0 2px color-mix(in srgb, var(--ev, #7c3aed) 60%, white); }
+
+    .check { display: flex; align-items: center; gap: .7rem; width: 100%; border: 0; background: transparent; padding: .5rem .1rem; text-align: left; cursor: pointer; border-bottom: 1px dashed rgba(139, 92, 246, .15); touch-action: manipulation; }
+    .check:last-child { border-bottom: 0; }
+    .box { flex: 0 0 1.5em; height: 1.5em; border-radius: .45em; border: 2px solid #a78bfa; display: grid; place-items: center; font-size: .9em; color: #fff; }
+    .check.done .box { background: #22c55e; border-color: #22c55e; }
+    .check.done .label { text-decoration: line-through; opacity: .5; }
+    .label small { display: block; color: var(--muted); font-size: .78em; }
+
+    .memos { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: .65rem; }
+    .memo { position: relative; background: #fef9c3; border-radius: .9rem; padding: .7rem .8rem 1.9rem; box-shadow: 0 6px 14px rgba(113, 63, 18, .10); transform: rotate(var(--tilt, -1deg)); min-height: 6.5em; }
+    .memo:nth-child(3n+2) { background: #dcfce7; --tilt: .8deg; }
+    .memo:nth-child(3n) { background: #fce7f3; --tilt: -.4deg; }
+    .memo p { margin: 0; white-space: pre-wrap; word-break: break-word; font-weight: 600; }
+    .memo .by { position: absolute; left: .8rem; bottom: .5rem; font-size: .72em; color: rgba(0, 0, 0, .5); }
+    .memo .x { position: absolute; right: .35rem; bottom: .3rem; border: 0; background: rgba(255,255,255,.6); border-radius: 999px; width: 1.8em; height: 1.8em; cursor: pointer; }
+
+    .stars { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: .6rem; }
+    .star-kid { background: #fffbeb; border: 1px solid #fde68a; border-radius: 1rem; padding: .6rem .75rem; }
+    .star-kid b { font-size: 1.05em; }
+    .star-kid .big { font-size: 1.6em; font-weight: 800; color: #b45309; }
+    .star-kid button { margin-top: .4rem; width: 100%; border: 0; border-radius: .7rem; background: #f59e0b; color: #fff; font-weight: 800; padding: .5rem; cursor: pointer; }
+
+    /* modal (centered with safe viewport padding; content scrolls) */
+    .modal { position: fixed; inset: 0; z-index: 50; display: none; align-items: center; justify-content: center; padding: clamp(1rem, 4vw, 2.5rem); background: rgba(30, 16, 56, .45); backdrop-filter: blur(3px); }
+    .modal.open { display: flex; }
+    .sheet { width: 100%; max-width: 640px; max-height: calc(100dvh - 2 * clamp(1rem, 4vw, 2.5rem)); overflow-y: auto; background: #fff; border-radius: 1.5rem; padding: clamp(1rem, 2.5vw, 1.8rem); box-shadow: 0 30px 60px rgba(30, 16, 56, .3); }
+    .sheet h3 { margin: 0 0 .8rem; font-size: 1.35em; display: flex; align-items: center; gap: .5rem; }
+    .field { margin-top: .8rem; }
+    .field > label { display: block; font-weight: 700; font-size: .85em; color: var(--muted); margin-bottom: .35rem; }
+    .field input[type=text], .field input[type=date], .field input[type=time], .field textarea, .field select {
+      width: 100%; font: inherit; font-size: 1.1em; padding: .75rem .9rem; border: 2px solid #ddd6fe; border-radius: .9rem; background: #faf5ff; color: var(--text); }
+    .field textarea { min-height: 6em; resize: vertical; }
+    .chips { display: flex; flex-wrap: wrap; gap: .45rem; }
+    .chip { border: 2px solid #ddd6fe; background: #fff; border-radius: 999px; padding: .45em .9em; font-weight: 700; cursor: pointer; touch-action: manipulation; }
+    .chip.on { background: var(--purple); border-color: var(--purple); color: #fff; }
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; }
+    .actions { display: flex; gap: .6rem; margin-top: 1.2rem; }
+    .actions button { flex: 1; border: 0; border-radius: 1rem; padding: .95rem; font-weight: 800; font-size: 1.05em; cursor: pointer; }
+    .primary { background: var(--purple); color: #fff; }
+    .secondary { background: #ede9fe; color: #5b21b6; }
+    .err { color: #be123c; font-weight: 700; min-height: 1.2em; margin-top: .6rem; }
+    .added { color: #15803d; font-weight: 700; }
+
+    .toast { position: fixed; left: 50%; bottom: max(1.2rem, env(safe-area-inset-bottom)); transform: translateX(-50%) translateY(250%); opacity: 0; background: #2e1065; color: #fff; padding: .8rem 1.2rem; border-radius: 999px; font-weight: 700; transition: transform .25s ease, opacity .25s ease; z-index: 60; }
+    .toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+
+    .dim { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; transition: opacity 1s ease; z-index: 40; }
+    body.night .dim { opacity: .55; pointer-events: auto; }
+    @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+  </style>
+</head>
+<body>
+  <div class="screen">
+    <header class="top">
+      <div class="clock" id="clock" aria-live="off">--:--</div>
+      <div>
+        <div class="date" id="date"></div>
+        <div class="greet" id="greet">{{ hub_name }}</div>
+      </div>
+      <div class="top-actions">
+        <button class="icon-btn" id="fullscreenBtn" type="button">⛶ Full screen</button>
+        <a class="icon-btn" href="/">☰ Home Hub</a>
+      </div>
+    </header>
+
+    <section class="quick" id="quick" aria-label="Quick add">
+      <button class="qa qa-grocery hidden-by-access" data-access="shopping_list" data-open="grocery" type="button"><span class="ico">🛒</span><span>Grocery<small>Add to the list</small></span></button>
+      <button class="qa qa-todo hidden-by-access" data-access="chores" data-open="todo" type="button"><span class="ico">✅</span><span>To-do<small>Something to get done</small></span></button>
+      <button class="qa qa-memo" data-open="memo" type="button"><span class="ico">📝</span><span>Memo<small>Leave a note</small></span></button>
+      <button class="qa qa-event hidden-by-access" data-access="shared_calendar" data-open="event" type="button"><span class="ico">📅</span><span>Event<small>Put it on the calendar</small></span></button>
+    </section>
+
+    <section class="grid">
+      <div class="panel col-agenda hidden-by-access" data-access="shared_calendar">
+        <h2>Coming up <a href="/calendar">Calendar ›</a></h2>
+        <div id="agenda"><div class="empty">Loading…</div></div>
+      </div>
+      <div class="stack">
+        <div class="panel hidden-by-access" data-access="shopping_list">
+          <h2>Groceries <a href="/shopping">All lists ›</a></h2>
+          <div id="groceries"><div class="empty">Loading…</div></div>
+        </div>
+        <div class="panel hidden-by-access" data-access="chores">
+          <h2>To-dos <a href="/chores?tab=todo">All ›</a></h2>
+          <div id="todos"><div class="empty">Loading…</div></div>
+        </div>
+      </div>
+      <div class="stack">
+        <div class="panel">
+          <h2>Memos</h2>
+          <div id="memos" class="memos"><div class="empty">Loading…</div></div>
+        </div>
+        <div class="panel" id="starsPanel" hidden>
+          <h2>Gold Stars <a href="/gold-stars">Open ›</a></h2>
+          <div id="stars" class="stars"></div>
+          <p class="empty" id="starsNote" style="margin:.5rem 0 0"></p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <form class="sheet" id="sheet" autocomplete="off"></form>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <div class="dim" id="dim" title="Tap to wake"></div>
+
+  <script>
+  (() => {
+    const ME = {{ (actor_name or '')|tojson }};
+    const state = { summary: null, people: [], access: {}, groceryListId: null, wakeLock: null, wakeUntil: 0 };
+    const $ = (id) => document.getElementById(id);
+    const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m]));
+    const pad = (n) => String(n).padStart(2, '0');
+    const iso = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+
+    async function api(url, options) {
+      const res = await fetch(url, Object.assign({ credentials: 'same-origin', headers: { 'Content-Type': 'application/json' } }, options || {}));
+      const body = await res.json().catch(() => ({}));
+      if (res.status === 401) { window.location.href = '/'; throw new Error('Please sign in'); }
+      if (!res.ok || (body && body.ok === false)) throw new Error((body && body.error) || 'Something went wrong');
+      return body;
+    }
+    function toast(msg) {
+      const t = $('toast'); t.textContent = msg; t.classList.add('show');
+      clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), 2600);
+    }
+
+    // ---------------------------------------------------------- clock
+    function tick() {
+      const now = new Date();
+      const h = now.getHours();
+      $('clock').innerHTML = `${((h + 11) % 12) + 1}:${pad(now.getMinutes())}<small>${h < 12 ? 'AM' : 'PM'}</small>`;
+      $('date').textContent = now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+      const part = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+      $('greet').textContent = ME ? `${part}, ${ME}` : part;
+      // Night dimming 9pm–6am (tap to wake for 2 minutes)
+      const night = (h >= 21 || h < 6) && Date.now() > state.wakeUntil;
+      document.body.classList.toggle('night', night);
+    }
+    $('dim').addEventListener('click', () => { state.wakeUntil = Date.now() + 120000; tick(); });
+
+    // ---------------------------------------------------------- render
+    function applyAccess() {
+      document.querySelectorAll('.hidden-by-access').forEach((el) => {
+        el.style.display = state.access[el.dataset.access] ? '' : 'none';
+      });
+    }
+
+    function eventTimeRange(ev) {
+      if (ev.is_all_day || !ev.start_time) return { a: 'All day', b: '' };
+      const fmt = (t) => { const [H, M] = t.split(':').map(Number); return `${((H + 11) % 12) + 1}${M ? ':' + pad(M) : ''} ${H < 12 ? 'AM' : 'PM'}`; };
+      return { a: fmt(ev.start_time), b: ev.end_time ? `to ${fmt(ev.end_time)}` : '' };
+    }
+
+    async function loadAgenda() {
+      if (!state.access.shared_calendar) return;
+      const start = new Date();
+      const end = addDays(start, 6);
+      const body = await api(`/api/calendar/events?start=${iso(start)}&end=${iso(end)}`);
+      const events = (body.events || []).slice();
+      const nowMins = start.getHours() * 60 + start.getMinutes();
+      const days = [];
+      for (let i = 0; i < 7; i++) {
+        const d = addDays(start, i);
+        const key = iso(d);
+        const list = events.filter((ev) => ev.start_date <= key && ev.end_date >= key)
+          .filter((ev) => i > 0 || ev.is_all_day || !ev.end_time || (() => { const [H, M] = ev.end_time.split(':').map(Number); return H * 60 + M >= nowMins; })())
+          .sort((a, b) => (a.is_all_day ? -1 : 0) - (b.is_all_day ? -1 : 0) || String(a.start_time || '').localeCompare(String(b.start_time || '')));
+        if (list.length) days.push({ d, i, list });
+      }
+      const label = (d, i) => i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+      let shown = 0;
+      const html = days.map(({ d, i, list }) => {
+        if (shown >= 12) return '';
+        const rows = list.slice(0, Math.max(0, 12 - shown)).map((ev) => {
+          shown += 1;
+          const t = eventTimeRange(ev);
+          let isNow = false;
+          if (i === 0 && ev.start_time && ev.end_time) {
+            const [sh, sm] = ev.start_time.split(':').map(Number); const [eh, em] = ev.end_time.split(':').map(Number);
+            isNow = nowMins >= sh * 60 + sm && nowMins < eh * 60 + em;
+          }
+          const who = [ev.created_by, ...(ev.invited_members || [])].filter(Boolean);
+          return `<div class="ev ${isNow ? 'now' : ''}" style="--ev:${esc(ev.color || '#7c3aed')}">
+              <div class="ev-time">${esc(t.a)}<small>${esc(t.b)}</small></div>
+              <div class="ev-body"><b>${isNow ? '🔴 ' : ''}${esc(ev.title)}</b><span>${esc(who.join(', '))}</span></div>
+            </div>`;
+        }).join('');
+        return `<div class="day-label">${esc(label(d, i))}</div>${rows}`;
+      }).join('');
+      $('agenda').innerHTML = html || '<div class="empty">Nothing on the calendar this week. 🎉</div>';
+    }
+
+    async function loadGroceries() {
+      if (!state.access.shopping_list) return;
+      const body = await api('/api/shopping/items');
+      state.groceryListId = body.list_id;
+      const items = (body.items || []).filter((i) => !i.checked).slice(0, 14);
+      $('groceries').innerHTML = items.map((i) => `
+        <button type="button" class="check" data-grocery="${i.id}">
+          <span class="box">✓</span><span class="label">${esc(i.item)}${i.quantity && i.quantity > 1 ? ` ×${esc(i.quantity)}` : ''}<small>${esc(i.creator || '')}</small></span>
+        </button>`).join('') || '<div class="empty">The list is empty.</div>';
+    }
+
+    async function loadTodos() {
+      if (!state.access.chores) return;
+      const list = await api('/api/chores');
+      const items = (Array.isArray(list) ? list : []).filter((t) => !t.done).slice(0, 10);
+      $('todos').innerHTML = items.map((t) => {
+        const who = (t.assignees || []).join(', ');
+        const due = t.due_date ? new Date(`${t.due_date}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) : '';
+        return `<button type="button" class="check" data-todo="${t.id}">
+          <span class="box">✓</span><span class="label">${esc(t.description)}<small>${esc([who, due && `due ${due}`].filter(Boolean).join(' · '))}</small></span>
+        </button>`;
+      }).join('') || '<div class="empty">All done!</div>';
+    }
+
+    function renderMemos(memos) {
+      $('memos').innerHTML = (memos || []).map((m) => `
+        <div class="memo"><p>${esc(m.text)}</p><span class="by">— ${esc(m.creator)}</span>
+        ${(m.creator === ME || state.summary?.is_admin) ? `<button class="x" type="button" data-memo="${m.id}" aria-label="Clear memo">✕</button>` : ''}</div>`).join('')
+        || '<div class="empty">No memos. Tap 📝 to leave one.</div>';
+    }
+
+    function renderStars(gold) {
+      $('starsPanel').hidden = !gold;
+      if (!gold) return;
+      $('stars').innerHTML = (gold.children || []).map((c) => `
+        <div class="star-kid"><b>${esc(c.name)}</b><div class="big">${c.available} ⭐</div>
+        <div class="empty" style="padding:0">${c.waiting} waiting to collect</div>
+        <button type="button" data-star="${esc(c.name)}">+1 Star</button></div>`).join('');
+      const bits = [];
+      if (gold.pending_requests) bits.push(`${gold.pending_requests} reward request(s) to approve`);
+      if (gold.ready_to_deliver) bits.push(`${gold.ready_to_deliver} reward(s) to hand over`);
+      $('starsNote').textContent = bits.join(' · ');
+    }
+
+    async function refresh() {
+      try {
+        const summary = await api('/api/home-screen/summary');
+        state.summary = summary;
+        state.people = summary.people || [];
+        state.access = summary.access || {};
+        applyAccess();
+        renderMemos(summary.memos);
+        renderStars(summary.gold_stars);
+        await Promise.allSettled([loadAgenda(), loadGroceries(), loadTodos()]);
+      } catch (err) {
+        console.warn(err);
+      }
+    }
+
+    // ---------------------------------------------------------- list taps
+    document.addEventListener('click', async (e) => {
+      const g = e.target.closest('[data-grocery]');
+      const t = e.target.closest('[data-todo]');
+      const m = e.target.closest('[data-memo]');
+      const s = e.target.closest('[data-star]');
+      try {
+        if (g) {
+          g.classList.add('done');
+          await api(`/api/shopping/${g.dataset.grocery}`, { method: 'PUT', body: JSON.stringify({ checked: true }) });
+          setTimeout(loadGroceries, 700);
+        }
+        if (t) {
+          t.classList.add('done');
+          await api(`/api/chores/${t.dataset.todo}/done`, { method: 'POST', body: JSON.stringify({ done: true }) });
+          toast('Nice work! ✅');
+          setTimeout(loadTodos, 700);
+        }
+        if (m) {
+          const body = await api(`/api/home-screen/memos/${m.dataset.memo}/done`, { method: 'POST' });
+          renderMemos(body.memos);
+        }
+        if (s) {
+          s.disabled = true;
+          const token = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
+          await api('/api/gold-stars/awards', { method: 'POST', body: JSON.stringify({ child_name: s.dataset.star, client_token: token }) });
+          toast(`⭐ Star sent to ${s.dataset.star}'s tablet`);
+          refresh();
+        }
+      } catch (err) {
+        toast(err.message);
+        refresh();
+      }
+    });
+
+    // ---------------------------------------------------------- quick add
+    const modal = $('modal');
+    const sheet = $('sheet');
+    let mode = null;
+
+    function peopleChips(name, { multi = true, preselect = [] } = {}) {
+      return `<div class="chips" data-chips="${name}" data-multi="${multi ? 1 : 0}">${state.people.map((p) =>
+        `<button type="button" class="chip ${preselect.includes(p.name) ? 'on' : ''}" data-value="${esc(p.name)}">${esc(p.name)}</button>`).join('')}</div>`;
+    }
+    function choiceChips(name, options, selected) {
+      return `<div class="chips" data-chips="${name}" data-multi="0">${options.map(([v, l]) =>
+        `<button type="button" class="chip ${v === selected ? 'on' : ''}" data-value="${esc(v)}">${esc(l)}</button>`).join('')}</div>`;
+    }
+    function chipValues(name) {
+      return Array.from(sheet.querySelectorAll(`[data-chips="${name}"] .chip.on`)).map((c) => c.dataset.value);
+    }
+    sheet.addEventListener('click', (e) => {
+      const chip = e.target.closest('.chip');
+      if (!chip) return;
+      const group = chip.closest('[data-chips]');
+      if (group.dataset.multi !== '1') group.querySelectorAll('.chip').forEach((c) => c.classList.remove('on'));
+      chip.classList.toggle('on', group.dataset.multi === '1' ? !chip.classList.contains('on') : true);
+      if (group.dataset.chips === 'when') sheet.querySelector('#evDateWrap').style.display = chip.dataset.value === 'pick' ? '' : 'none';
+      if (group.dataset.chips === 'evkind') sheet.querySelector('#evTimes').style.display = chip.dataset.value === 'timed' ? '' : 'none';
+    });
+
+    const forms = {
+      grocery: () => `
+        <h3 id="modalTitle">🛒 Add groceries</h3>
+        <div class="field"><label for="gItem">What do we need?</label><input type="text" id="gItem" placeholder="e.g. Milk" enterkeyhint="done" required></div>
+        <div class="field"><label>Added so far</label><div id="gAdded" class="added">—</div></div>
+        <div class="err" id="err"></div>
+        <div class="actions"><button type="button" class="secondary" data-close>Done</button><button type="submit" class="primary">Add</button></div>`,
+      todo: () => `
+        <h3 id="modalTitle">✅ New to-do</h3>
+        <div class="field"><label for="tText">What needs doing?</label><input type="text" id="tText" placeholder="e.g. Call the plumber" required></div>
+        <div class="field"><label>Who's doing it?</label>${peopleChips('who', { preselect: [ME] })}</div>
+        <div class="field"><label>When?</label>${choiceChips('due', [['', 'No date'], ['0', 'Today'], ['1', 'Tomorrow'], ['7', 'This week']], '')}</div>
+        <div class="err" id="err"></div>
+        <div class="actions"><button type="button" class="secondary" data-close>Cancel</button><button type="submit" class="primary">Add to-do</button></div>`,
+      memo: () => `
+        <h3 id="modalTitle">📝 Leave a memo</h3>
+        <div class="field"><label for="mText">Your note</label><textarea id="mText" placeholder="e.g. Plumber coming Tuesday at 10" required></textarea></div>
+        <div class="field"><label>Who can see it?</label>${choiceChips('vis', state.summary?.is_extended
+          ? [['everyone', 'Whole family'], ['private', 'Just me']]
+          : [['family', 'Our household'], ['everyone', 'Household + extended family'], ['private', 'Just me']], state.summary?.is_extended ? 'everyone' : 'family')}</div>
+        <div class="err" id="err"></div>
+        <div class="actions"><button type="button" class="secondary" data-close>Cancel</button><button type="submit" class="primary">Post memo</button></div>`,
+      event: () => `
+        <h3 id="modalTitle">📅 New event</h3>
+        <div class="field"><label for="eTitle">What's happening?</label><input type="text" id="eTitle" placeholder="e.g. Soccer practice" required></div>
+        <div class="field"><label>When?</label>${choiceChips('when', [['0', 'Today'], ['1', 'Tomorrow'], ['pick', 'Pick a date']], '0')}
+          <div id="evDateWrap" style="display:none;margin-top:.5rem"><input type="date" id="eDate"></div></div>
+        <div class="field">${choiceChips('evkind', [['timed', 'At a time'], ['allday', 'All day']], 'timed')}
+          <div class="row2" id="evTimes" style="margin-top:.5rem">
+            <div><label for="eStart">Starts</label><input type="time" id="eStart"></div>
+            <div><label for="eEnd">Ends</label><input type="time" id="eEnd"></div>
+          </div></div>
+        <div class="field"><label>Who's going?</label>${peopleChips('who', { preselect: [ME] })}</div>
+        ${state.summary?.is_extended ? '' : `<div class="field">${choiceChips('evvis', [['family', 'Household only'], ['everyone', 'Also extended family']], 'family')}</div>`}
+        <div class="err" id="err"></div>
+        <div class="actions"><button type="button" class="secondary" data-close>Cancel</button><button type="submit" class="primary">Add to calendar</button></div>`,
+    };
+
+    function open(which) {
+      mode = which;
+      sheet.innerHTML = forms[which]();
+      modal.classList.add('open');
+      if (which === 'event') {
+        const now = new Date();
+        const start = new Date(now); start.setMinutes(now.getMinutes() < 30 ? 30 : 60, 0, 0);
+        const end = new Date(start.getTime() + 60 * 60000);
+        sheet.querySelector('#eStart').value = `${pad(start.getHours())}:${pad(start.getMinutes())}`;
+        sheet.querySelector('#eEnd').value = `${pad(end.getHours())}:${pad(end.getMinutes())}`;
+        sheet.querySelector('#eDate').value = iso(now);
+      }
+      setTimeout(() => { const f = sheet.querySelector('input[type=text], textarea'); if (f) f.focus(); }, 60);
+    }
+    function close() { modal.classList.remove('open'); sheet.innerHTML = ''; mode = null; }
+    document.querySelectorAll('[data-open]').forEach((b) => b.addEventListener('click', () => open(b.dataset.open)));
+    modal.addEventListener('click', (e) => { if (e.target === modal || e.target.closest('[data-close]')) close(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+
+    sheet.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const err = sheet.querySelector('#err');
+      err.textContent = '';
+      const btn = sheet.querySelector('button[type=submit]');
+      btn.disabled = true;
+      try {
+        if (mode === 'grocery') {
+          const input = sheet.querySelector('#gItem');
+          const item = input.value.trim();
+          if (!item) throw new Error('Type an item first.');
+          await api('/api/shopping/items', { method: 'POST', body: JSON.stringify({ item, list_id: state.groceryListId, creator: ME }) });
+          const added = sheet.querySelector('#gAdded');
+          added.textContent = added.textContent === '—' ? item : `${added.textContent}, ${item}`;
+          input.value = '';
+          input.focus();
+          loadGroceries();
+          return; // stay open to add more
+        }
+        if (mode === 'todo') {
+          const description = sheet.querySelector('#tText').value.trim();
+          if (!description) throw new Error('Type the to-do first.');
+          const due = chipValues('due')[0];
+          const assignees = chipValues('who');
+          await api('/api/chores', { method: 'POST', body: JSON.stringify({
+            description, creator: ME, task_type: 'todo', assignees,
+            due_date: due === '' || due === undefined ? null : iso(addDays(new Date(), Number(due))),
+          }) });
+          toast('To-do added ✅');
+          close(); loadTodos();
+        }
+        if (mode === 'memo') {
+          const text = sheet.querySelector('#mText').value.trim();
+          if (!text) throw new Error('Write your memo first.');
+          const body = await api('/api/home-screen/memos', { method: 'POST', body: JSON.stringify({ text, visibility: chipValues('vis')[0] || 'family' }) });
+          renderMemos(body.memos);
+          toast('Memo posted 📝');
+          close();
+        }
+        if (mode === 'event') {
+          const title = sheet.querySelector('#eTitle').value.trim();
+          if (!title) throw new Error('Give the event a name.');
+          const when = chipValues('when')[0] || '0';
+          const date = when === 'pick' ? sheet.querySelector('#eDate').value : iso(addDays(new Date(), Number(when)));
+          if (!date) throw new Error('Pick a date.');
+          const allDay = (chipValues('evkind')[0] || 'timed') === 'allday';
+          const start = sheet.querySelector('#eStart').value;
+          const end = sheet.querySelector('#eEnd').value;
+          if (!allDay && !start) throw new Error('Add a start time, or choose All day.');
+          if (!allDay && end && end <= start) throw new Error('The end time should be after the start time.');
+          const who = chipValues('who').filter((n) => n !== ME);
+          await api('/api/calendar/events', { method: 'POST', body: JSON.stringify({
+            title, event_type: 'event', start_date: date, end_date: date,
+            is_all_day: allDay ? 'true' : 'false', start_time: allDay ? '' : start, end_time: allDay ? '' : end,
+            invited_members: who, visibility: state.summary?.is_extended ? 'everyone' : (chipValues('evvis')[0] || 'family'),
+          }) });
+          toast('Added to the calendar 📅');
+          close(); loadAgenda();
+        }
+      } catch (ex) {
+        err.textContent = ex.message;
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    // ---------------------------------------------------------- always-on
+    async function keepAwake() {
+      try {
+        if ('wakeLock' in navigator && !state.wakeLock) {
+          state.wakeLock = await navigator.wakeLock.request('screen');
+          state.wakeLock.addEventListener('release', () => { state.wakeLock = null; });
+        }
+      } catch (_) { /* not supported or not allowed yet */ }
+    }
+    document.addEventListener('pointerdown', keepAwake, { once: true });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) { keepAwake(); refresh(); } });
+    $('fullscreenBtn').addEventListener('click', async () => {
+      try {
+        if (document.fullscreenElement) await document.exitFullscreen();
+        else await document.documentElement.requestFullscreen();
+      } catch (_) { toast('Full screen is not available on this device'); }
+      keepAwake();
+    });
+
+    tick();
+    setInterval(tick, 1000 * 5);
+    refresh();
+    setInterval(() => { if (!document.hidden && !modal.classList.contains('open')) refresh(); }, 60 * 1000);
+  })();
+  </script>
+</body>
+</html>
