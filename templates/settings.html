@@ -136,10 +136,16 @@
                     <option value="child">Child</option>
                     <option value="admin">Admin</option>
                 </select>
+                <select id="newMemberTier" title="What this person can see" class="p-2 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-white">
+                    <option value="immediate" selected>Immediate family</option>
+                    <option value="extended">Extended family</option>
+                </select>
+                <label class="flex items-center gap-1 text-sm text-gray-600 dark:text-gray-300"><input type="checkbox" id="newMemberSendInvite" checked> Email them an invite</label>
                 <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition">
                     <i class="fa-solid fa-plus mr-1"></i>Add
                 </button>
             </form>
+            <p class="text-xs text-gray-500 dark:text-gray-400 mt-2"><b>Immediate family</b> sees the household areas. <b>Extended family</b> only sees the areas you tick under "Family access levels" below, and only calendar events shared with everyone or with them. Admins see everything; children only see their kid screens.</p>
         </div>
         
         <!-- Family members list -->
@@ -202,6 +208,27 @@
         </div>
     </div>
     
+    <!-- Family access levels (immediate vs extended) -->
+    <div class="card p-6 mb-6" id="accessLevelsCard">
+        <h3 class="text-lg font-semibold mb-1 flex items-center gap-2"><i class="fa-solid fa-user-shield text-purple-600"></i> Family access levels</h3>
+        <p class="text-sm text-gray-600 dark:text-gray-300 mb-4">Tick what each group can open. Everyone sees only what is ticked for their group, plus anything you grant a specific person under permissions. Admin settings are never included.</p>
+        <div id="accessLevelsGrid" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="text-sm text-gray-500">Loading…</div>
+        </div>
+        <ul id="accessLevelsNotes" class="mt-4 text-xs text-gray-500 dark:text-gray-400 space-y-1"></ul>
+    </div>
+
+    <!-- Invite result / email preview -->
+    <div id="inviteModal" class="hidden fixed inset-0 z-[80] items-center justify-center p-4 sm:p-6 bg-black/60">
+        <div class="card w-full max-w-2xl max-h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-3rem)] overflow-y-auto p-5">
+            <div class="flex items-center justify-between gap-2 mb-3">
+                <h3 id="inviteModalTitle" class="text-lg font-bold">Invite</h3>
+                <button type="button" id="inviteModalClose" class="btn btn-secondary">Close</button>
+            </div>
+            <div id="inviteModalBody" class="text-sm space-y-3"></div>
+        </div>
+    </div>
+
     <!-- Menu Visibility Settings -->
     <div class="card p-6 mb-6">
         <h3 class="text-lg font-semibold mb-4 flex items-center gap-2"><i class="fa-solid fa-bars text-blue-600"></i> Menu Visibility</h3>
@@ -613,11 +640,21 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch('/api/family-members', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, role, email, password })
+                body: JSON.stringify({
+                    name, role, email, password,
+                    access_tier: (document.getElementById('newMemberTier') || {}).value || 'immediate',
+                    send_invite: !!(document.getElementById('newMemberSendInvite') || {}).checked,
+                })
             });
             const data = await response.json();
             
-            if (data.ok) {
+            if (data.ok && data.invite) {
+                newMemberInput.value = '';
+                document.getElementById('newMemberEmail').value = '';
+                document.getElementById('newMemberPassword').value = '';
+                renderMembers();
+                window.__showInviteResult && window.__showInviteResult(name, data.invite);
+            } else if (data.ok) {
                 newMemberInput.value = '';
                 document.getElementById('newMemberEmail').value = '';
                 document.getElementById('newMemberPassword').value = '';
@@ -847,6 +884,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             <div class="text-xs text-gray-600 dark:text-gray-300">
                                 Login: ${member.supabase_linked ? `Supabase linked (${escapeHtml(member.email || '')})` : 'Local profile only'}
                             </div>
+                            ${window.__memberAccessRow ? window.__memberAccessRow(member, currentIsAdmin) : ''}
                             <div class="mt-3 pt-3 border-t border-gray-300 dark:border-gray-600">
                                 <div class="flex items-center justify-between">
                                     <div class="text-sm">
@@ -1756,6 +1794,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     
     pinCancelBtn.addEventListener('click', hidePinModal);
+    window.__renderMembers = renderMembers;
+    renderMembers();
 });
 </script>
 
@@ -1764,4 +1804,141 @@ document.addEventListener('DOMContentLoaded', () => {
         display: flex;
     }
 </style>
+<script>
+(() => {
+    const esc = (t) => String(t || '').replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m]));
+    const toastFn = (msg, kind) => (typeof toast === 'function' ? toast(msg, kind) : (typeof globalToast === 'function' ? globalToast(msg, kind) : null));
+    const modal = document.getElementById('inviteModal');
+    const modalTitle = document.getElementById('inviteModalTitle');
+    const modalBody = document.getElementById('inviteModalBody');
+    const openModal = (title, html) => {
+        modalTitle.textContent = title;
+        modalBody.innerHTML = html;
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+    };
+    const closeModal = () => { modal.classList.add('hidden'); modal.classList.remove('flex'); modalBody.innerHTML = ''; };
+    document.getElementById('inviteModalClose').addEventListener('click', closeModal);
+    modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+
+    const inviteLabels = { joined: '✅ Joined', sent: '✉️ Invite sent', link_created: '🔗 Link created (email not sent)', expired: '⌛ Invite expired', replaced: 'Invite replaced' };
+
+    window.__memberAccessRow = (member, isAdmin) => {
+        const special = member.role === 'admin' || member.role === 'child';
+        const tierControl = special
+            ? `<span class="text-gray-500">${member.role === 'admin' ? 'Admin · sees everything' : 'Child · kid screens only'}</span>`
+            : `<select class="member-tier-select p-1 border rounded dark:bg-gray-800 dark:border-gray-600" data-member-id="${member.id}" ${isAdmin ? '' : 'disabled'}>
+                    <option value="immediate" ${member.access_tier !== 'extended' ? 'selected' : ''}>Immediate family</option>
+                    <option value="extended" ${member.access_tier === 'extended' ? 'selected' : ''}>Extended family</option>
+               </select>`;
+        const invite = member.invite ? (inviteLabels[member.invite.status] || member.invite.status) : (member.email && !member.email_is_placeholder ? 'Not invited yet' : 'No email');
+        const canInvite = isAdmin && member.email && !member.email_is_placeholder && member.role !== 'child';
+        return `
+            <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+                <span>Access:</span> ${tierControl}
+                <span class="ml-2">${esc(invite)}</span>
+                ${canInvite ? `<button type="button" class="send-invite-btn btn btn-primary" style="padding:.25rem .6rem;font-size:.75rem" data-member-id="${member.id}" data-member-name="${esc(member.name)}">${member.invite && member.invite.status !== 'joined' ? 'Resend invite' : (member.invite ? 'Send new invite' : 'Send invite')}</button>
+                <button type="button" class="preview-invite-btn btn btn-secondary" style="padding:.25rem .6rem;font-size:.75rem" data-member-id="${member.id}">Preview email</button>` : ''}
+                ${isAdmin ? `<button type="button" class="can-see-btn btn btn-secondary" style="padding:.25rem .6rem;font-size:.75rem" data-member-id="${member.id}">What can they see?</button>` : ''}
+            </div>`;
+    };
+
+    window.__showInviteResult = (name, invite) => {
+        if (invite.sent) {
+            toastFn(`Invite emailed to ${name}. The link works for 7 days.`, 'success');
+            return;
+        }
+        const reason = invite.error ? esc(invite.error) : (invite.email_configured ? 'The email could not be sent.' : 'Email (SMTP) is not set up on this Home Hub yet.');
+        openModal(`Invite link for ${name}`, invite.invite_url ? `
+            <p>${reason} You can send this link yourself by text or chat instead. It works once, for 7 days.</p>
+            <div class="flex gap-2"><input id="inviteLinkCopy" class="flex-1 p-2 border rounded dark:bg-gray-800 dark:border-gray-600" readonly value="${esc(invite.invite_url)}" />
+            <button type="button" class="btn btn-primary" id="copyInviteLink">Copy</button></div>
+            <p class="text-xs text-gray-500">They open the link, check their name, and choose a 4-digit PIN. Next time they just tap their name and enter the PIN.</p>` : `<p>${reason}</p>`);
+        const copyBtn = document.getElementById('copyInviteLink');
+        if (copyBtn) copyBtn.addEventListener('click', async () => {
+            const input = document.getElementById('inviteLinkCopy');
+            try { await navigator.clipboard.writeText(input.value); toastFn('Link copied', 'success'); } catch (_) { input.select(); }
+        });
+    };
+
+    const membersList = document.getElementById('membersList');
+    membersList.addEventListener('change', async (e) => {
+        const select = e.target.closest('.member-tier-select');
+        if (!select) return;
+        const res = await fetch(`/api/family-members/${select.dataset.memberId}/access-tier`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ access_tier: select.value }) });
+        const body = await res.json().catch(() => ({}));
+        toastFn(body.ok ? `Saved: ${select.value === 'extended' ? 'Extended' : 'Immediate'} family` : (body.error || 'Could not save'), body.ok ? 'success' : 'error');
+        loadAccessLevels();
+    });
+    membersList.addEventListener('click', async (e) => {
+        const sendBtn = e.target.closest('.send-invite-btn');
+        const previewBtn = e.target.closest('.preview-invite-btn');
+        const seeBtn = e.target.closest('.can-see-btn');
+        if (sendBtn) {
+            sendBtn.disabled = true;
+            try {
+                const res = await fetch(`/api/family-members/${sendBtn.dataset.memberId}/invite`, { method: 'POST' });
+                const body = await res.json().catch(() => ({}));
+                if (!body.ok) { toastFn(body.error || 'Could not create the invite', 'error'); return; }
+                window.__showInviteResult(sendBtn.dataset.memberName, body);
+                if (window.__renderMembers) window.__renderMembers();
+            } finally { sendBtn.disabled = false; }
+        }
+        if (previewBtn) {
+            const res = await fetch(`/api/family-members/${previewBtn.dataset.memberId}/invite-preview`);
+            const body = await res.json().catch(() => ({}));
+            if (!body.ok) { toastFn(body.error || 'Could not load preview', 'error'); return; }
+            openModal(`Email preview · ${body.subject}`, `<iframe title="Invite email preview" sandbox="" style="width:100%;height:65vh;border:1px solid #e5e7eb;border-radius:12px;background:#fff" srcdoc="${esc(body.html)}"></iframe>`);
+        }
+        if (seeBtn) {
+            const res = await fetch(`/api/family-members/${seeBtn.dataset.memberId}/can-see`);
+            const body = await res.json().catch(() => ({}));
+            if (!body.ok) { toastFn(body.error || 'Could not load', 'error'); return; }
+            openModal(`What ${body.name} can see`, `<ul class="list-disc pl-5 space-y-1">${(body.areas || []).map((a) => `<li>${esc(a)}</li>`).join('') || '<li>Only the home page</li>'}</ul>`);
+        }
+    });
+
+    async function loadAccessLevels() {
+        const grid = document.getElementById('accessLevelsGrid');
+        const notes = document.getElementById('accessLevelsNotes');
+        const res = await fetch('/api/access-tiers');
+        const body = await res.json().catch(() => ({}));
+        if (!body.ok) { document.getElementById('accessLevelsCard').classList.add('hidden'); return; }
+        grid.innerHTML = body.tiers.map((tier) => `
+            <form class="rounded-xl border border-gray-200 dark:border-gray-700 p-4" data-tier="${tier.key}">
+                <div class="flex items-center justify-between gap-2 mb-2">
+                    <h4 class="font-semibold">${esc(tier.label)}</h4>
+                    <span class="text-xs text-gray-500">${tier.members.length ? esc(tier.members.join(', ')) : 'Nobody yet'}</span>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-1">
+                    ${body.modules.map((m) => `<label class="flex items-start gap-2 text-sm py-0.5" title="${esc(m.description)}">
+                        <input type="checkbox" name="module" value="${m.key}" ${tier.modules.includes(m.key) ? 'checked' : ''} ${m.key === 'welcome' ? 'disabled checked' : ''}>
+                        <span>${esc(m.label)}</span></label>`).join('')}
+                </div>
+                <div class="flex gap-2 mt-3">
+                    <button type="submit" class="btn btn-primary text-sm">Save ${esc(tier.label.toLowerCase())}</button>
+                    <button type="button" class="btn btn-secondary text-sm reset-tier" data-defaults='${esc(JSON.stringify(tier.defaults))}'>Use defaults</button>
+                </div>
+            </form>`).join('');
+        notes.innerHTML = (body.notes || []).map((n) => `<li>• ${esc(n)}</li>`).join('');
+    }
+    document.getElementById('accessLevelsGrid').addEventListener('submit', async (e) => {
+        const form = e.target.closest('form[data-tier]');
+        if (!form) return;
+        e.preventDefault();
+        const modules = Array.from(form.querySelectorAll('input[name=module]:checked')).map((i) => i.value);
+        const res = await fetch(`/api/access-tiers/${form.dataset.tier}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ modules }) });
+        const body = await res.json().catch(() => ({}));
+        toastFn(body.ok ? 'Access level saved' : (body.error || 'Could not save'), body.ok ? 'success' : 'error');
+    });
+    document.getElementById('accessLevelsGrid').addEventListener('click', (e) => {
+        const btn = e.target.closest('.reset-tier');
+        if (!btn) return;
+        const defaults = JSON.parse(btn.dataset.defaults || '[]');
+        btn.closest('form').querySelectorAll('input[name=module]').forEach((i) => { i.checked = defaults.includes(i.value) || i.value === 'welcome'; });
+    });
+
+    loadAccessLevels();
+})();
+</script>
 {% endblock %}

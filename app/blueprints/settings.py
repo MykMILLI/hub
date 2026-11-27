@@ -13,7 +13,7 @@ from ..models import (
 )
 from ..blueprints import main_bp
 from ..security import is_http_url, sanitize_text
-from ..permissions import APP_MODULES, get_visible_app_modules, parse_allowed_members, sanitize_visibility
+from ..permissions import APP_MODULES, get_visible_app_modules, normalize_tier, parse_allowed_members, sanitize_visibility
 from ..services.notification_service import send_test_email, send_welcome_email
 from ..services.member_accounts import MIN_PASSWORD_LENGTH, is_placeholder_email, placeholder_email_for
 from ..services.supabase_service import supabase_service
@@ -73,6 +73,32 @@ def _sync_member_revoke_in_supabase(*, member_email: str | None) -> dict | None:
     return supabase_service.revoke_member_user_access(email=clean_email, actor=actor)
 
 
+def _current_member_name_for_invite() -> str:
+    from flask import session as _session
+    return sanitize_text(str(_session.get('current_member') or '')).strip() or 'Your family'
+
+
+def send_member_invite(member, invited_by: str) -> dict:
+    from ..services.invites import send_invite
+    return send_invite(member, invited_by)
+
+
+def _latest_invite_status(member_id: int) -> dict | None:
+    from ..models import MemberInvite
+    row = MemberInvite.query.filter_by(member_id=member_id).order_by(MemberInvite.id.desc()).first()
+    if not row:
+        return None
+    if row.accepted_at:
+        status = 'joined'
+    elif row.revoked_at:
+        status = 'replaced'
+    elif row.expires_at < datetime.utcnow():
+        status = 'expired'
+    else:
+        status = 'sent' if row.email_sent else 'link_created'
+    return {'status': status, 'created_at': row.created_at.isoformat() + 'Z' if row.created_at else ''}
+
+
 def _send_welcome_if_needed(member_name: str, email: str | None, sync: dict | None) -> bool:
     if not email or is_placeholder_email(email) or not sync or not sync.get('ok'):
         return False
@@ -126,6 +152,7 @@ def _permission_payload(visibility: str, allowed_members_json: str) -> dict:
 
 APP_MODULE_LABELS = {
     'welcome': 'Welcome',
+    'home_screen': 'Home Screen',
     'timeline': 'Timeline',
     'shared_notes': 'Projects & Spaces',
     'shared_cloud': 'Shared Cloud',
@@ -293,6 +320,8 @@ def api_get_family_members():
                 "avatar": m.avatar,
                 "role": _normalize_role(m.role),
                 "is_admin": _normalize_role(m.role) == 'admin' or _is_config_admin_name(m.name),
+                "access_tier": normalize_tier(getattr(m, 'access_tier', 'immediate')),
+                "invite": _latest_invite_status(m.id),
             }
             for m in members
         ],
@@ -331,7 +360,7 @@ def api_add_family_member():
         elif not email and role == 'child':
             return jsonify({"ok": False, "error": "Set a password so the child can sign in with their username"}), 400
 
-        member = FamilyMember(name=name, role=role, email=(email or None))
+        member = FamilyMember(name=name, role=role, email=(email or None), access_tier=normalize_tier(data.get('access_tier')))
         db.session.add(member)
         db.session.commit()
 
@@ -341,11 +370,21 @@ def api_add_family_member():
             member_role=member.role,
             password=password,
         )
-        welcome_email_sent = _send_welcome_if_needed(member.name, member.email, supabase_sync)
-        
+        invite_result = None
+        wants_invite = bool(data.get('send_invite', True)) and member.email and not is_placeholder_email(member.email) and role != 'child'
+        if wants_invite:
+            try:
+                invite_result = send_member_invite(member, _current_member_name_for_invite())
+            except Exception as invite_err:
+                invite_result = {'sent': False, 'error': str(invite_err)}
+            welcome_email_sent = bool(invite_result.get('sent'))
+        else:
+            welcome_email_sent = _send_welcome_if_needed(member.name, member.email, supabase_sync)
+
         return jsonify({
             "ok": True,
             "welcome_email_sent": welcome_email_sent,
+            "invite": invite_result,
             "member": {
                 "id": member.id,
                 "name": member.name,
@@ -408,6 +447,8 @@ def api_update_family_member(member_id):
         member.pin = pin if pin else None
         member.email = email or None
         member.role = role
+        if 'access_tier' in data:
+            member.access_tier = normalize_tier(data.get('access_tier'))
         db.session.commit()
 
         supabase_sync = None

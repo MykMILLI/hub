@@ -1,13 +1,63 @@
 import json
 from flask import current_app, session
 
-from .models import AppPermissionScheme, FamilyMember, PermissionGroup, PermissionGroupMember, ResourcePermission
+from .models import AccessTierPolicy, AppPermissionScheme, FamilyMember, PermissionGroup, PermissionGroupMember, ResourcePermission
 from .security import sanitize_text
 
 
-ALLOWED_VISIBILITY = {'family', 'restricted', 'private'}
+# family     = immediate household only (extended family cannot see it)
+# everyone   = immediate + extended family
+# restricted = only the people listed
+# private    = only the owner
+ALLOWED_VISIBILITY = {'family', 'everyone', 'restricted', 'private'}
+
+ACCESS_TIERS = ('immediate', 'extended')
+ACCESS_TIER_LABELS = {
+    'immediate': 'Immediate family',
+    'extended': 'Extended family',
+}
+# Defaults when no policy has been saved in Settings yet. Explicit grants
+# (member or group) in Settings always win over these.
+DEFAULT_TIER_MODULES = {
+    'immediate': [
+        'welcome', 'home_screen', 'timeline', 'notifications', 'shared_notes', 'shared_cloud', 'shopping_list',
+        'chores', 'reward_system', 'recipes', 'expiry_tracker', 'url_shortener', 'media_downloader',
+        'pdf_compressor', 'qr_generator', 'shared_calendar', 'daily_agenda', 'meal_planner', 'photos',
+        'cameras',
+    ],
+    'extended': [
+        'welcome', 'timeline', 'notifications', 'photos', 'shopping_list', 'chores', 'shared_calendar',
+    ],
+}
+# What each module means in plain words (used in Settings and invite emails).
+MODULE_PLAIN_DESCRIPTIONS = {
+    'welcome': 'the family home page',
+    'home_screen': 'the always-on home screen with quick add buttons',
+    'timeline': 'family posts and updates',
+    'notifications': 'family messages, polls and notifications',
+    'shared_notes': 'shared projects and notes',
+    'shared_cloud': 'shared files',
+    'shopping_list': 'grocery and shopping lists',
+    'chores': 'to-dos and chores',
+    'reward_system': "the kids' Gold Star Club",
+    'recipes': 'the family recipe book',
+    'expiry_tracker': 'the expiry tracker',
+    'url_shortener': 'the link shortener',
+    'media_downloader': 'the media downloader',
+    'pdf_compressor': 'the PDF tool',
+    'qr_generator': 'the QR code maker',
+    'expense_tracker': 'family finances',
+    'shared_calendar': 'the family calendar (only events shared with you)',
+    'daily_agenda': "each person's daily agenda",
+    'meal_planner': 'the meal planner',
+    'photos': 'family photos',
+    'home_assistant': 'smart home controls',
+    'cameras': 'home cameras',
+    'settings': 'admin settings',
+}
 APP_MODULES = [
     'welcome',
+    'home_screen',
     'timeline',
     'shared_notes',
     'shared_cloud',
@@ -78,6 +128,8 @@ APP_MODULE_NAV = [
      'menu_default': True, 'feature_key': 'shared_calendar', 'feature_default': True},
     {'id': 'daily_agenda', 'key': 'daily_agenda', 'label': 'Daily Agenda', 'path': '/daily-agenda', 'icon': 'route',
      'menu_default': True, 'feature_key': 'daily_agenda', 'feature_default': True},
+    {'id': 'home_screen', 'key': 'home_screen', 'label': 'Home Screen', 'path': '/home-screen', 'icon': 'display',
+     'menu_default': True, 'feature_key': None, 'feature_default': True},
     {'id': 'meal_planner', 'key': 'meal_planner', 'label': 'Meal Planner', 'path': '/meal-planner', 'icon': 'meal',
      'menu_default': True, 'feature_key': 'meal_planner', 'feature_default': True},
     {'id': 'notifications', 'key': 'notifications', 'label': 'Notifications', 'path': '/notifications', 'icon': 'bell',
@@ -171,6 +223,58 @@ def is_admin_name(name: str | None) -> bool:
     return role == 'admin'
 
 
+def normalize_tier(value) -> str:
+    clean = sanitize_text(str(value or '')).strip().lower()
+    return clean if clean in ACCESS_TIERS else 'immediate'
+
+
+def get_member_tier(member: str | None = None) -> str:
+    member_name = sanitize_text(member or current_member_name()).strip()
+    if not member_name:
+        return 'immediate'
+    row = FamilyMember.query.filter_by(name=member_name).first()
+    return normalize_tier(getattr(row, 'access_tier', 'immediate') if row else 'immediate')
+
+
+def is_extended_member(member: str | None = None) -> bool:
+    member_name = sanitize_text(member or current_member_name()).strip()
+    if not member_name or is_admin_name(member_name):
+        return False
+    return get_member_tier(member_name) == 'extended'
+
+
+def get_tier_modules(tier: str) -> list[str]:
+    tier = normalize_tier(tier)
+    row = AccessTierPolicy.query.filter_by(tier=tier).first()
+    if row:
+        try:
+            parsed = json.loads(row.modules_json or '[]')
+            if isinstance(parsed, list):
+                return [m for m in parsed if m in APP_MODULES]
+        except Exception:
+            pass
+    return list(DEFAULT_TIER_MODULES[tier])
+
+
+def set_tier_modules(tier: str, modules: list[str], updated_by: str) -> list[str]:
+    from . import db
+    from datetime import datetime
+
+    tier = normalize_tier(tier)
+    clean = [m for m in dict.fromkeys(modules or []) if m in APP_MODULES and m != 'settings']
+    if 'welcome' not in clean:
+        clean.insert(0, 'welcome')
+    row = AccessTierPolicy.query.filter_by(tier=tier).first()
+    if not row:
+        row = AccessTierPolicy(tier=tier)
+        db.session.add(row)
+    row.modules_json = json.dumps(clean)
+    row.updated_by = updated_by
+    row.updated_at = datetime.utcnow()
+    db.session.commit()
+    return clean
+
+
 def current_member_name() -> str:
     member = sanitize_text(session.get('current_member') or '').strip()
     if member:
@@ -185,8 +289,12 @@ def has_visibility_access(visibility: str, owner: str, allowed_members_json: str
     if sanitize_text(owner or '').strip() == member_name:
         return True
     clean_visibility = sanitize_visibility(visibility)
-    if clean_visibility == 'family':
+    if clean_visibility == 'everyone':
         return True
+    if clean_visibility == 'family':
+        # 'family' means the immediate household; extended family must be
+        # shared with explicitly ('everyone' or by name).
+        return not is_extended_member(member_name)
     if clean_visibility == 'private':
         return False
     allowed = parse_allowed_members(allowed_members_json)
@@ -206,11 +314,22 @@ def can_access_app_module(module_key: str, member: str | None = None) -> bool:
     if has_resource_permission('app_module', resource_key=key, member=member_name, action='read'):
         return True
 
+    member_row = FamilyMember.query.filter_by(name=member_name).first()
+    role = sanitize_text(getattr(member_row, 'role', '') or '').strip().lower()
+    if role == 'child':
+        # Children only get their kid areas unless an admin grants more.
+        return key in {'welcome', 'reward_system'}
+
+    tier = normalize_tier(getattr(member_row, 'access_tier', 'immediate') if member_row else 'immediate')
+    tier_allows = key in get_tier_modules(tier)
+    if tier == 'extended':
+        # Extended family is capped by the extended policy; a per-module
+        # scheme cannot widen it (only an explicit grant above can).
+        return tier_allows
+
     row = AppPermissionScheme.query.filter_by(resource_type='app_module', resource_key=key).first()
     if not row:
-        if key == 'reward_system':
-            return True
-        return False
+        return tier_allows or key == 'reward_system'
     return has_visibility_access(row.visibility, row.updated_by, row.allowed_members_json, member_name)
 
 

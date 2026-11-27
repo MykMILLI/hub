@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>Join {{ hub_name }}</title>
+  <style>
+    :root { --purple: #7c3aed; --text: #2e1065; --muted: #6b5b8a; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; font-family: Inter, "Segoe UI", system-ui, sans-serif; color: var(--text);
+      background: radial-gradient(circle at top left, #fff8db 0%, #fef3c7 24%, #f3ecff 66%, #e0e7ff 100%);
+      display: flex; align-items: flex-start; justify-content: center; padding: 1.5rem 1rem 3rem; }
+    .card { width: 100%; max-width: 520px; background: rgba(255,255,255,0.94); border: 1px solid rgba(139,92,246,0.2);
+      border-radius: 1.25rem; box-shadow: 0 18px 40px rgba(76,29,149,0.12); overflow: hidden; }
+    .head { padding: 1.5rem 1.5rem 1.2rem; background: linear-gradient(135deg, #fde68a, #e9d5ff 55%, #c7d2fe); }
+    .eyebrow { font-size: .78rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #6d28d9; }
+    h1 { margin: .35rem 0 .25rem; font-size: 1.6rem; }
+    .body { padding: 1.25rem 1.5rem 1.5rem; }
+    .steps { list-style: none; margin: 0 0 1rem; padding: 0; display: grid; gap: .6rem; }
+    .steps li { display: flex; gap: .7rem; align-items: flex-start; line-height: 1.4; }
+    .num { flex: 0 0 26px; height: 26px; border-radius: 13px; background: var(--purple); color: #fff; font-weight: 700; display: grid; place-items: center; font-size: .9rem; }
+    .num.done { background: #16a34a; }
+    label { display: block; font-weight: 600; margin-top: .9rem; }
+    .hint { color: var(--muted); font-size: .85rem; font-weight: 400; }
+    input { width: 100%; margin-top: .35rem; padding: .8rem .9rem; font-size: 1.15rem; border: 1px solid #c4b5fd; border-radius: .8rem; }
+    input.pin { letter-spacing: .6em; text-align: center; font-size: 1.6rem; max-width: 220px; }
+    button { margin-top: 1.2rem; width: 100%; border: 0; border-radius: .9rem; background: var(--purple); color: #fff; font-weight: 700; font-size: 1.05rem; padding: .95rem; cursor: pointer; }
+    button:disabled { opacity: .6; }
+    .see { background: #faf5ff; border: 1px solid #e9d5ff; border-radius: 1rem; padding: .9rem 1rem; margin-top: 1.2rem; }
+    .see h2 { font-size: 1rem; margin: 0 0 .4rem; color: #5b21b6; }
+    .see ul { margin: 0; padding-left: 1.1rem; display: grid; gap: .2rem; }
+    .error { color: #be123c; font-weight: 600; margin-top: .8rem; min-height: 1.2em; }
+    .done-box { text-align: center; padding: 1rem 0; }
+    .muted { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="head">
+      <div class="eyebrow">{{ hub_name }}</div>
+      {% if error %}
+        <h1>This link can't be used</h1>
+        <p class="muted" style="margin:0">{{ error }}</p>
+      {% else %}
+        <h1>Welcome, {{ member_name }}!</h1>
+        <p style="margin:0">{{ invited_by }} invited you to the family hub.</p>
+      {% endif %}
+    </div>
+    <div class="body">
+      {% if error %}
+        <p>If you already joined, <a href="/">open Home Hub</a>, tap your name and enter your {{ 'password' if mode == 'password' else 'PIN' }}.</p>
+      {% else %}
+        <div id="setupView">
+          <ol class="steps">
+            <li><span class="num done">✓</span><span>You opened your invite.</span></li>
+            <li><span class="num">2</span><span>Not {{ member_name }}? Close this page and let {{ invited_by }} know. Otherwise, choose your {{ 'password' if mode == 'password' else '4-digit PIN' }} below.</span></li>
+            <li><span class="num">3</span><span>Next time: open Home Hub, tap <b>{{ member_name }}</b> and enter it. That's it.</span></li>
+          </ol>
+
+          <form id="acceptForm" autocomplete="off">
+            {% if mode == 'password' %}
+              <label for="password">Choose a password <span class="hint">(at least {{ min_password }} characters)</span></label>
+              <input id="password" type="password" autocomplete="new-password" required minlength="{{ min_password }}" />
+              <label for="pin">Optional 4-digit PIN <span class="hint">for quick sign-in on shared tablets</span></label>
+              <input id="pin" class="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" />
+            {% else %}
+              <label for="pin">Choose a 4-digit PIN <span class="hint">you'll use to sign in</span></label>
+              <input id="pin" class="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" required />
+              <label for="pin2">Type it again</label>
+              <input id="pin2" class="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" required />
+            {% endif %}
+            <div class="error" id="err" role="alert"></div>
+            <button type="submit" id="submitBtn">Join {{ hub_name }}</button>
+          </form>
+
+          <section class="see">
+            <h2>What you'll be able to see · {{ tier_label }}</h2>
+            <ul>
+              {% for area in areas %}<li>{{ area[:1]|upper }}{{ area[1:] }}</li>{% else %}<li>The family home page</li>{% endfor %}
+            </ul>
+            <p class="hint" style="margin:.6rem 0 0">Some things are kept for certain people only, like private events or household lists. If you need more, ask {{ invited_by }}.</p>
+          </section>
+        </div>
+
+        <div id="doneView" class="done-box" hidden>
+          <div style="font-size:3rem">🎉</div>
+          <h2 style="margin:.3rem 0">You're in!</h2>
+          <p class="muted">Tip: on your phone, choose <b>Add to Home Screen</b> from the browser menu so Home Hub opens like an app.</p>
+          <button type="button" onclick="window.location.href='/'">Open Home Hub</button>
+        </div>
+      {% endif %}
+    </div>
+  </main>
+  {% if not error %}
+  <script>
+    (() => {
+      const form = document.getElementById("acceptForm");
+      const err = document.getElementById("err");
+      const btn = document.getElementById("submitBtn");
+      const mode = {{ mode|tojson }};
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        err.textContent = "";
+        const pin = (document.getElementById("pin").value || "").trim();
+        const pin2El = document.getElementById("pin2");
+        const passwordEl = document.getElementById("password");
+        if (pin && !/^\d{4}$/.test(pin)) { err.textContent = "Your PIN must be exactly 4 numbers."; return; }
+        if (pin2El && pin !== pin2El.value.trim()) { err.textContent = "The two PINs don't match. Try again."; return; }
+        btn.disabled = true;
+        try {
+          const res = await fetch({{ ('/api/invite/' ~ token ~ '/accept')|tojson }}, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ pin, password: passwordEl ? passwordEl.value : "" }),
+          });
+          const body = await res.json().catch(() => ({}));
+          if (!res.ok || !body.ok) { err.textContent = body.error || "Something went wrong. Please try again."; return; }
+          document.getElementById("setupView").hidden = true;
+          document.getElementById("doneView").hidden = false;
+        } catch (_) {
+          err.textContent = "Couldn't reach Home Hub. Check your connection and try again.";
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    })();
+  </script>
+  {% endif %}
+</body>
+</html>

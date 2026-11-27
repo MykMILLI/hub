@@ -155,6 +155,48 @@ def _send_smtp_email(to_email: str, subject: str, body: str, *, force: bool = Fa
         return False
 
 
+def send_html_email(to_email: str, subject: str, text_body: str, html_body: str) -> bool:
+    """Send a multipart (plain + HTML) email. Ignores the notification email
+    toggle because invites are explicit admin actions."""
+    from email.mime.multipart import MIMEMultipart
+
+    smtp = _smtp_cfg()
+    if not smtp.get('enabled'):
+        return False
+    host = str(smtp.get('host') or '').strip()
+    port = int(smtp.get('port') or 587)
+    username = str(smtp.get('username') or '').strip()
+    password = str(smtp.get('password') or '').strip()
+    sender = str(smtp.get('sender') or username).strip()
+    secure = bool(smtp.get('secure', False))
+    target = sanitize_text(to_email or '').strip()
+    if not host or not sender or not target:
+        return False
+
+    msg = MIMEMultipart('alternative')
+    msg['Subject'] = subject or 'Home Hub'
+    msg['From'] = sender
+    msg['To'] = target
+    msg.attach(MIMEText(text_body or '', 'plain', 'utf-8'))
+    msg.attach(MIMEText(html_body or '', 'html', 'utf-8'))
+    try:
+        if secure and port == 465:
+            server = smtplib.SMTP_SSL(host, port, timeout=15)
+        else:
+            server = smtplib.SMTP(host, port, timeout=15)
+        try:
+            if not (secure and port == 465):
+                server.starttls()
+            if username and password:
+                server.login(username, password)
+            server.sendmail(sender, [target], msg.as_string())
+        finally:
+            server.quit()
+        return True
+    except Exception:
+        return False
+
+
 def send_welcome_email(
     to_email: str,
     member_name: str,

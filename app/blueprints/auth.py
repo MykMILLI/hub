@@ -70,7 +70,7 @@ def reload_config_and_auth():
             '/api/supabase/auth/logout',
             '/api/supabase/client-config',
         }
-        if path in public_api_paths:
+        if path in public_api_paths or path.startswith('/api/invite/'):
             return None
         if not session.get('current_member'):
             return jsonify({'ok': False, 'error': 'Authentication required'}), 401
@@ -86,6 +86,8 @@ def reload_config_and_auth():
         'main.api_supabase_auth_me',
         'main.api_supabase_auth_logout',
         'main.api_supabase_client_config',
+        'main.invite_accept_page',
+        'main.api_invite_accept',
     }
 
     if supabase_auth:

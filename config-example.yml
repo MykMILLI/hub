@@ -1,6 +1,11 @@
 instance_name: "My Home Hub"
 password: "" #leave blank for password less access
 admin_name: "Administrator"
+# Address family members use to open Home Hub. Used in invite emails.
+# Leave blank to use the address you are on when you send the invite (e.g. http://192.168.1.225:5001,
+# which only works at home). Set it to your Tailscale / reverse-proxy URL so extended family can join from anywhere.
+public_url: ""
+
 feature_toggles:
   shopping_list: true
   media_downloader: true
