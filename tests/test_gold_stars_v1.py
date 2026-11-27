@@ -335,7 +335,7 @@ def test_home_screen_inspiration_seed_add_and_household_greeting(client, app):
     summary = client.get('/api/home-screen/summary').get_json()
     assert 'Grandma' not in summary['household'] and 'Avery' in summary['household']
     page = client.get('/home-screen').get_data(as_text=True)
-    assert 'MILLITOP TV' in page and 'tvadmin.millitop.net' in page
+    assert 'MILLITOP TV' in page and 'https://tvadmin.millitop.net/app' in page
     # private memos never show on the shared screen
     client.post('/api/home-screen/memos', json={'text': 'Secret', 'visibility': 'private'})
     assert all(m['text'] != 'Secret' for m in client.get('/api/home-screen/summary').get_json()['memos'])

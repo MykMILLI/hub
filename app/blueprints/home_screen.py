@@ -72,7 +72,7 @@ def home_screen():
     actor = _actor()
     cfg = current_app.config.get('HOMEHUB_CONFIG', {}) or {}
     import os
-    millitoptv_url = str(os.environ.get('HOMEHUB_MILLITOPTV_URL') or cfg.get('millitoptv_url') or 'https://tvadmin.millitop.net').strip()
+    millitoptv_url = str(os.environ.get('HOMEHUB_MILLITOPTV_URL') or cfg.get('millitoptv_url') or 'https://tvadmin.millitop.net/app').strip()
     return render_template('home_screen.html', actor_name=actor, hub_name=_hub_name(), config=cfg, millitoptv_url=millitoptv_url)
 
 
