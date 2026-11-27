@@ -696,3 +696,97 @@ def state_payload(actor: str, *, only_child: str | None = None) -> dict:
             'image_refs': list(IMAGE_REFS),
         },
     }
+
+
+# ------------------------------------------------------------- poster board
+# The home-screen "star poster": a weekly sticker chart. A tap either sticks a
+# star a parent already gave (waiting), or - when the screen is signed in as a
+# parent - gives and sticks a new star in one step. Weekly view only; the
+# all-time total never resets.
+
+POSTER_UNDO_SECONDS = 120
+
+
+def _parse_week_start(value) -> datetime:
+    from datetime import timedelta
+    try:
+        parsed = datetime.fromisoformat(str(value or '').replace('Z', '+00:00'))
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+        return parsed
+    except (TypeError, ValueError):
+        now = _now()
+        start = now - timedelta(days=(now.weekday() + 1) % 7)
+        return start.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def poster_payload(actor: str, week_start) -> dict:
+    from datetime import timedelta
+    start = _parse_week_start(week_start)
+    end = start + timedelta(days=7)
+    rows = []
+    for name in children():
+        bal = balances(name)
+        stars = GoldStarAward.query.filter(
+            GoldStarAward.child_name == name,
+            GoldStarAward.voided_at.is_(None),
+            GoldStarAward.collected_at.isnot(None),
+            GoldStarAward.collected_at >= start,
+            GoldStarAward.collected_at < end,
+        ).order_by(GoldStarAward.collected_at).all()
+        rows.append({
+            'name': name,
+            'all_time': bal['earned'],
+            'available': bal['available'],
+            'waiting': bal['waiting'],
+            'week_stars': [
+                {'id': a.id, 'at': _iso(a.collected_at), 'note': a.note or '', 'by': a.awarded_by}
+                for a in stars
+            ],
+        })
+    return {
+        'week_start': _iso(start),
+        'children': rows,
+        'can_give': is_parent(actor),
+        'undo_seconds': POSTER_UNDO_SECONDS,
+    }
+
+
+def poster_add_star(actor: str, child_name: str, client_token: str = '') -> GoldStarAward:
+    child = resolve_child(child_name)
+    if not child:
+        raise GoldStarError('Unknown child.')
+    waiting = GoldStarAward.query.filter(
+        GoldStarAward.child_name == child,
+        GoldStarAward.voided_at.is_(None),
+        GoldStarAward.collected_at.is_(None),
+    ).order_by(GoldStarAward.id).first()
+    if waiting and can_act_for_child(actor, child):
+        collect_star(actor, child, waiting.id)
+        return db.session.get(GoldStarAward, waiting.id)
+    if not is_parent(actor):
+        raise GoldStarError('Ask a grown-up to give you a star first!', 403)
+    award = award_star(actor, child, 'Star poster', client_token)
+    if award.collected_at is None:
+        collect_star(actor, child, award.id)
+    return db.session.get(GoldStarAward, award.id)
+
+
+def poster_undo(actor: str, award_id: int) -> None:
+    """Oops button: remove a star stuck on the poster in the last 2 minutes."""
+    from datetime import timedelta
+    if not is_parent(actor):
+        raise GoldStarError('Only a grown-up can undo a star.', 403)
+    award = db.session.get(GoldStarAward, int(award_id))
+    if not award or award.voided_at or not award.collected_at:
+        raise GoldStarError('Star not found.', 404)
+    if award.collected_at < _now() - timedelta(seconds=POSTER_UNDO_SECONDS):
+        raise GoldStarError('That star has been on the poster too long to undo here. Use the Gold Star Club page.', 409)
+    if balances(award.child_name)['available'] < 1:
+        raise GoldStarError('That star was already spent on a reward.', 409)
+    award.voided_at = _now()
+    award.voided_by = _clean(actor, 128)
+    award.void_reason = 'Undone on the star poster (tapped by mistake)'
+    _log('corrected', actor, child_name=award.child_name, stars_delta=-1,
+         message='Star removed from the poster (tapped by mistake).', context=award.void_reason)
+    db.session.commit()

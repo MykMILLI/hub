@@ -1410,3 +1410,14 @@ class MemberInvite(db.Model):
     accepted_at = db.Column(db.DateTime, nullable=True)
     revoked_at = db.Column(db.DateTime, nullable=True)
     email_sent = db.Column(db.Boolean, default=False)
+
+
+class HomeScreenInspiration(db.Model):
+    """Rotating quotes and Bible verses on the family home screen."""
+    id = db.Column(db.Integer, primary_key=True)
+    kind = db.Column(db.String(16), nullable=False, default='quote')  # quote|verse
+    text = db.Column(db.String(600), nullable=False)
+    reference = db.Column(db.String(120), default='')  # e.g. "Joshua 1:9 (CEB)"
+    active = db.Column(db.Boolean, default=True, nullable=False)
+    created_by = db.Column(db.String(128), default='')
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)

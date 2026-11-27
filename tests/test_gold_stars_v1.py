@@ -286,3 +286,56 @@ def test_home_screen_summary_memos_and_visibility(client, app):
     # extended family land on the home screen instead of the household welcome page
     landing = client.get('/')
     assert landing.status_code in (301, 302) and '/home-screen' in landing.headers['Location']
+
+
+def test_star_poster_add_week_view_undo_and_child_limits(client, app):
+    from datetime import datetime, timedelta
+    week_start = (datetime.utcnow() - timedelta(days=1)).isoformat() + 'Z'
+    as_member(client, 'Mykal')
+    added = client.post('/api/gold-stars/poster/add', json={'child_name': 'Avery', 'client_token': 'p1', 'week_start': week_start})
+    assert added.status_code == 200
+    body = added.get_json()
+    avery = next(c for c in body['poster']['children'] if c['name'] == 'Avery')
+    assert avery['all_time'] == 1 and len(avery['week_stars']) == 1 and avery['available'] == 1
+    # same tap token twice = one star
+    client.post('/api/gold-stars/poster/add', json={'child_name': 'Avery', 'client_token': 'p1', 'week_start': week_start})
+    poster = client.get(f'/api/gold-stars/poster?week_start={week_start}').get_json()['poster']
+    assert next(c for c in poster['children'] if c['name'] == 'Avery')['all_time'] == 1
+    # an older week does not show this week's stars, but all-time still counts them
+    old = client.get('/api/gold-stars/poster?week_start=2020-01-05T00:00:00Z').get_json()['poster']
+    old_avery = next(c for c in old['children'] if c['name'] == 'Avery')
+    assert old_avery['week_stars'] == [] and old_avery['all_time'] == 1
+
+    undo = client.post('/api/gold-stars/poster/undo', json={'award_id': body['award_id']})
+    assert undo.status_code == 200
+    assert next(c for c in undo.get_json()['poster']['children'] if c['name'] == 'Avery')['all_time'] == 0
+
+    # a child signed in can only stick stars a parent already gave
+    as_member(client, 'Harley')
+    assert client.post('/api/gold-stars/poster/add', json={'child_name': 'Harley'}).status_code == 403
+    as_member(client, 'Rachel')
+    client.post('/api/gold-stars/awards', json={'child_name': 'Harley'})
+    as_member(client, 'Harley')
+    stuck = client.post('/api/gold-stars/poster/add', json={'child_name': 'Harley'})
+    assert stuck.status_code == 200
+    assert next(c for c in stuck.get_json()['poster']['children'] if c['name'] == 'Harley')['waiting'] == 0
+
+
+def test_home_screen_inspiration_seed_add_and_household_greeting(client, app):
+    with app.app_context():
+        db.session.add(FamilyMember(name='Grandma', role='standard', access_tier='extended'))
+        db.session.commit()
+    as_member(client, 'Rachel')
+    items = client.get('/api/home-screen/inspiration').get_json()['items']
+    assert any(i['kind'] == 'verse' and '(CEB)' in i['reference'] for i in items)
+    assert any(i['kind'] == 'quote' for i in items)
+    assert client.post('/api/home-screen/inspiration', json={'kind': 'verse', 'text': 'x'}).status_code == 400
+    ok = client.post('/api/home-screen/inspiration', json={'kind': 'quote', 'text': 'Be kind today.'})
+    assert ok.status_code == 200
+    summary = client.get('/api/home-screen/summary').get_json()
+    assert 'Grandma' not in summary['household'] and 'Avery' in summary['household']
+    page = client.get('/home-screen').get_data(as_text=True)
+    assert 'MILLITOP TV' in page and 'tvadmin.millitop.net' in page
+    # private memos never show on the shared screen
+    client.post('/api/home-screen/memos', json={'text': 'Secret', 'visibility': 'private'})
+    assert all(m['text'] != 'Secret' for m in client.get('/api/home-screen/summary').get_json()['memos'])

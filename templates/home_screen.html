@@ -47,10 +47,71 @@
     .qa-event { background: linear-gradient(135deg, #ede9fe, #ddd6fe); color: #4c1d95; }
     .qa-star { background: linear-gradient(135deg, #fff7d6, #fcd34d); color: #78350f; }
 
-    /* panels */
-    .grid { display: grid; grid-template-columns: 1.25fr 1fr 1fr; gap: var(--gap); align-items: start; }
-    @media (max-width: 1100px) { .grid { grid-template-columns: 1fr 1fr; } .grid .col-agenda { grid-column: 1 / -1; } }
-    @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } .top { grid-template-columns: 1fr; } .top-actions { justify-content: flex-start; } }
+    /* layout: big photos top-left, agenda right, star poster bottom-right */
+    .grid { display: grid; gap: var(--gap); align-items: stretch;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-areas: "photos photos photos agenda" "inspire inspire inspire agenda" "lists memos stars stars"; }
+    .a-photos { grid-area: photos; } .a-agenda { grid-area: agenda; } .a-inspire { grid-area: inspire; }
+    .a-lists { grid-area: lists; } .a-memos { grid-area: memos; } .a-stars { grid-area: stars; align-self: start; }
+    @media (max-width: 1200px) { .grid { grid-template-columns: 1fr 1fr; grid-template-areas: "photos photos" "inspire inspire" "agenda lists" "memos memos" "stars stars"; } }
+    @media (max-width: 700px) { .grid { grid-template-columns: 1fr; grid-template-areas: "photos" "inspire" "agenda" "lists" "memos" "stars"; } .top { grid-template-columns: 1fr; } .top-actions { justify-content: flex-start; } }
+    .a-agenda { max-height: none; }
+    #agenda { max-height: calc(100vh - 14rem); overflow-y: auto; }
+
+    /* photo album */
+    .photos { position: relative; padding: 0; overflow: hidden; min-height: clamp(260px, 42vw, 720px); background: #1e1b2e; }
+    .photos img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0; transition: opacity 1.2s ease; }
+    .photos img.bg { object-fit: cover; filter: blur(28px) brightness(.55); transform: scale(1.15); opacity: 1; transition: none; }
+    .photos img.show { opacity: 1; }
+    .photos .ph-label { position: absolute; left: 1rem; top: .8rem; z-index: 2; color: #fff; font-weight: 800; text-shadow: 0 2px 8px rgba(0,0,0,.5); font-size: .95em; }
+    .photos .ph-msg { position: absolute; inset: 0; display: grid; place-items: center; color: #e9d5ff; text-align: center; padding: 2rem; z-index: 2; }
+    .photos .ph-nav { position: absolute; right: .8rem; bottom: .8rem; z-index: 2; display: flex; gap: .4rem; }
+    .photos .ph-nav button { border: 0; border-radius: 999px; background: rgba(255,255,255,.85); width: 2.6em; height: 2.6em; cursor: pointer; font-weight: 800; }
+
+    /* quotes & verses */
+    .inspire { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 1rem; background: linear-gradient(135deg, rgba(254,243,199,.9), rgba(237,233,254,.9)); }
+    .inspire .kind { font-size: .75em; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #7c3aed; }
+    .inspire blockquote { margin: .3rem 0 0; font-size: clamp(1.2rem, 1.9vw, 2.1rem); font-weight: 700; line-height: 1.3; font-family: Georgia, "Times New Roman", serif; transition: opacity .6s ease; }
+    .inspire cite { display: block; margin-top: .4rem; font-style: normal; color: var(--muted); font-weight: 700; }
+    .inspire .fade { opacity: 0; }
+
+    /* star poster board */
+    .poster { position: relative; border-radius: 1.2rem; padding: clamp(.9rem, 1.6vw, 1.5rem); color: #3b2414;
+      background: radial-gradient(circle at 20% 15%, rgba(255,255,255,.35), transparent 40%), repeating-linear-gradient(45deg, rgba(120,80,30,.03) 0 6px, transparent 6px 12px), #f6deb0;
+      border: 10px solid #b7793f; box-shadow: inset 0 0 0 3px #e7c189, 0 14px 30px rgba(76, 40, 10, .25); }
+    .poster::before, .poster::after { content: ""; position: absolute; top: -14px; width: 22px; height: 22px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #ff8a8a, #c81e1e); box-shadow: 0 3px 4px rgba(0,0,0,.3); }
+    .poster::before { left: 18px; } .poster::after { right: 18px; }
+    .poster h2 { margin: 0 0 .7rem; font-family: "Marker Felt", "Comic Sans MS", "Chalkboard SE", cursive; font-size: 1.5em; color: #9a3412; display: flex; justify-content: space-between; align-items: baseline; gap: .5rem; flex-wrap: wrap; }
+    .poster h2 small { font-family: Inter, system-ui, sans-serif; font-size: .5em; color: #7c5a3a; font-weight: 700; }
+    .chart { display: grid; grid-template-columns: minmax(6.5em, 1.1fr) repeat(7, minmax(2.6em, 1fr)) minmax(6.2em, auto); border: 3px solid #7c4a1e; border-radius: .6rem; overflow: hidden; background: rgba(255,255,255,.55); }
+    .chart > div { border-right: 2px solid rgba(124,74,30,.45); border-bottom: 2px solid rgba(124,74,30,.45); padding: .35rem; min-height: 4.6em; }
+    .chart .hd { min-height: auto; text-align: center; font-family: "Marker Felt", "Comic Sans MS", cursive; font-weight: 700; background: #fde68a; color: #7c2d12; }
+    .chart .hd.today { background: #f59e0b; color: #fff; }
+    .chart .kid { display: flex; flex-direction: column; justify-content: center; gap: .15rem; background: #fff7ed; }
+    .chart .kid b { font-family: "Marker Felt", "Comic Sans MS", cursive; font-size: 1.35em; color: #1d4ed8; }
+    .chart .kid:nth-of-type(odd) b { color: #be185d; }
+    .chart .kid span { font-size: .8em; font-weight: 700; color: #7c5a3a; }
+    .chart .kid em { font-style: normal; font-size: .75em; font-weight: 800; color: #b45309; }
+    .chart .day { display: flex; flex-wrap: wrap; align-content: flex-start; justify-content: center; gap: 2px; }
+    .chart .day.today { background: rgba(254, 243, 199, .8); }
+    .sticker { width: 1.55em; height: 1.55em; display: inline-block; clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+      background: radial-gradient(circle at 35% 30%, #fff7c2 0 12%, #ffd84d 30%, #f5b70a 70%, #d48806 100%); filter: drop-shadow(0 1px 0 rgba(0,0,0,.25)); }
+    .sticker.pop { animation: stick .6s cubic-bezier(.2,1.6,.4,1); }
+    @keyframes stick { 0% { transform: scale(2.6) rotate(-40deg); opacity: 0; } 100% { transform: scale(1) rotate(0); opacity: 1; } }
+    .chart .add { display: flex; flex-direction: column; align-items: stretch; justify-content: center; gap: .3rem; background: #fff7ed; border-right: 0; }
+    .add-star { border: 0; border-radius: 1rem; padding: .7rem .5rem; font-weight: 900; font-size: 1.05em; color: #713f12; cursor: pointer; touch-action: manipulation;
+      background: linear-gradient(180deg, #fde047, #f59e0b); box-shadow: 0 5px 0 #b45309, 0 8px 14px rgba(180,83,9,.3); }
+    .add-star:active { transform: translateY(4px); box-shadow: 0 1px 0 #b45309; }
+    .add-star.waiting { animation: glow 1.4s ease-in-out infinite; }
+    @keyframes glow { 50% { box-shadow: 0 5px 0 #b45309, 0 0 0 6px rgba(253, 224, 71, .7); } }
+    .undo { border: 0; background: transparent; color: #9a3412; font-weight: 700; text-decoration: underline; cursor: pointer; font-size: .8em; }
+    .poster-note { margin: .6rem 0 0; font-size: .82em; color: #7c5a3a; font-weight: 600; }
+
+    /* "added!" confirmation */
+    .done-box { text-align: center; padding: 1rem 0 .2rem; }
+    .done-box .tick { width: 4.2rem; height: 4.2rem; border-radius: 50%; margin: 0 auto .6rem; display: grid; place-items: center; background: #22c55e; color: #fff; font-size: 2.2rem; animation: stick .5s ease; }
+    .done-box h3 { justify-content: center; }
+    .field select { appearance: auto; }
     .panel { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: clamp(.8rem, 1.4vw, 1.3rem); box-shadow: 0 12px 30px rgba(76, 29, 149, .07); }
     .panel h2 { margin: 0 0 .6rem; font-size: 1.05em; display: flex; justify-content: space-between; align-items: center; gap: .5rem; }
     .panel h2 a { font-size: .75em; color: var(--purple); text-decoration: none; font-weight: 700; }
@@ -123,11 +184,12 @@
       <div class="clock" id="clock" aria-live="off">--:--</div>
       <div>
         <div class="date" id="date"></div>
-        <div class="greet" id="greet">{{ hub_name }}</div>
+        <div class="greet"><span id="greetPart">Hello</span><span id="greetName" style="transition:opacity .5s ease"></span></div>
       </div>
       <div class="top-actions">
         <button class="icon-btn" id="fullscreenBtn" type="button">⛶ Full screen</button>
         <a class="icon-btn" href="/">☰ Home Hub</a>
+        <a class="icon-btn" href="{{ millitoptv_url }}" title="Open MILLITOP TV">📺 MILLITOP TV</a>
       </div>
     </header>
 
@@ -139,13 +201,31 @@
     </section>
 
     <section class="grid">
-      <div class="panel col-agenda hidden-by-access" data-access="shared_calendar">
+      <div class="panel photos a-photos" id="photos">
+        <div class="ph-label">📷 Family album</div>
+        <img class="bg" id="phBg" alt="" aria-hidden="true">
+        <img id="phA" alt="Family photo"><img id="phB" alt="Family photo">
+        <div class="ph-msg" id="phMsg">Loading photos…</div>
+        <div class="ph-nav"><button type="button" id="phPrev" aria-label="Previous photo">‹</button><button type="button" id="phNext" aria-label="Next photo">›</button></div>
+      </div>
+
+      <div class="panel a-agenda hidden-by-access" data-access="shared_calendar">
         <h2>Coming up <a href="/calendar">Calendar ›</a></h2>
         <div id="agenda"><div class="empty">Loading…</div></div>
       </div>
-      <div class="stack">
+
+      <div class="panel inspire a-inspire" id="inspire">
+        <div>
+          <div class="kind" id="inspKind">Today's encouragement</div>
+          <blockquote id="inspText">…</blockquote>
+          <cite id="inspRef"></cite>
+        </div>
+        <button class="icon-btn" type="button" data-open="inspire" id="inspAddBtn">＋ Add verse or quote</button>
+      </div>
+
+      <div class="stack a-lists">
         <div class="panel hidden-by-access" data-access="shopping_list">
-          <h2>Groceries <a href="/shopping">All lists ›</a></h2>
+          <h2><span>🛒 <span id="groceryListName">Groceries</span></span> <a href="/shopping">All lists ›</a></h2>
           <div id="groceries"><div class="empty">Loading…</div></div>
         </div>
         <div class="panel hidden-by-access" data-access="chores">
@@ -153,16 +233,16 @@
           <div id="todos"><div class="empty">Loading…</div></div>
         </div>
       </div>
-      <div class="stack">
-        <div class="panel">
-          <h2>Memos</h2>
-          <div id="memos" class="memos"><div class="empty">Loading…</div></div>
-        </div>
-        <div class="panel" id="starsPanel" hidden>
-          <h2>Gold Stars <a href="/gold-stars">Open ›</a></h2>
-          <div id="stars" class="stars"></div>
-          <p class="empty" id="starsNote" style="margin:.5rem 0 0"></p>
-        </div>
+
+      <div class="panel a-memos">
+        <h2>Memos</h2>
+        <div id="memos" class="memos"><div class="empty">Loading…</div></div>
+      </div>
+
+      <div class="poster a-stars hidden-by-access" data-access="reward_system" id="poster">
+        <h2>⭐ Our Star Chart <small id="posterWeek"></small></h2>
+        <div class="chart" id="chart"></div>
+        <p class="poster-note" id="posterNote"></p>
       </div>
     </section>
   </div>
@@ -176,7 +256,12 @@
   <script>
   (() => {
     const ME = {{ (actor_name or '')|tojson }};
-    const state = { summary: null, people: [], access: {}, groceryListId: null, wakeLock: null, wakeUntil: 0 };
+    const store = { get(k, d) { try { return localStorage.getItem(k) ?? d; } catch (_) { return d; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (_) {} } };
+    const state = {
+      summary: null, people: [], household: [], access: {}, lists: [],
+      groceryListId: Number(store.get('homeScreenGroceryList', 0)) || null,
+      wakeLock: null, wakeUntil: 0, poster: null, recent: {}, nameIdx: 0,
+    };
     const $ = (id) => document.getElementById(id);
     const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m]));
     const pad = (n) => String(n).padStart(2, '0');
@@ -201,13 +286,26 @@
       const h = now.getHours();
       $('clock').innerHTML = `${((h + 11) % 12) + 1}:${pad(now.getMinutes())}<small>${h < 12 ? 'AM' : 'PM'}</small>`;
       $('date').textContent = now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
-      const part = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
-      $('greet').textContent = ME ? `${part}, ${ME}` : part;
+      $('greetPart').textContent = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
       // Night dimming 9pm–6am (tap to wake for 2 minutes)
       const night = (h >= 21 || h < 6) && Date.now() > state.wakeUntil;
       document.body.classList.toggle('night', night);
     }
     $('dim').addEventListener('click', () => { state.wakeUntil = Date.now() + 120000; tick(); });
+
+    // The screen is shared, so the greeting cycles through everyone at home.
+    function rotateName() {
+      const names = state.household.length ? state.household : [];
+      const el = $('greetName');
+      if (!names.length) { el.textContent = ''; return; }
+      el.style.opacity = 0;
+      setTimeout(() => {
+        state.nameIdx = (state.nameIdx + 1) % names.length;
+        el.textContent = `, ${names[state.nameIdx]}!`;
+        el.style.opacity = 1;
+      }, 450);
+    }
+    setInterval(rotateName, 4000);
 
     // ---------------------------------------------------------- render
     function applyAccess() {
@@ -263,7 +361,14 @@
 
     async function loadGroceries() {
       if (!state.access.shopping_list) return;
-      const body = await api('/api/shopping/items');
+      const lists = await api('/api/shopping/lists');
+      state.lists = lists.lists || [];
+      if (!state.lists.some((l) => l.id === state.groceryListId)) {
+        state.groceryListId = (state.lists.find((l) => l.is_default) || state.lists[0] || {}).id || null;
+      }
+      const current = state.lists.find((l) => l.id === state.groceryListId);
+      $('groceryListName').textContent = current ? current.name : 'Groceries';
+      const body = await api(`/api/shopping/items${state.groceryListId ? `?list_id=${state.groceryListId}` : ''}`);
       state.groceryListId = body.list_id;
       const items = (body.items || []).filter((i) => !i.checked).slice(0, 14);
       $('groceries').innerHTML = items.map((i) => `
@@ -292,17 +397,42 @@
         || '<div class="empty">No memos. Tap 📝 to leave one.</div>';
     }
 
-    function renderStars(gold) {
-      $('starsPanel').hidden = !gold;
-      if (!gold) return;
-      $('stars').innerHTML = (gold.children || []).map((c) => `
-        <div class="star-kid"><b>${esc(c.name)}</b><div class="big">${c.available} ⭐</div>
-        <div class="empty" style="padding:0">${c.waiting} waiting to collect</div>
-        <button type="button" data-star="${esc(c.name)}">+1 Star</button></div>`).join('');
-      const bits = [];
-      if (gold.pending_requests) bits.push(`${gold.pending_requests} reward request(s) to approve`);
-      if (gold.ready_to_deliver) bits.push(`${gold.ready_to_deliver} reward(s) to hand over`);
-      $('starsNote').textContent = bits.join(' · ');
+    // ---------------------------------------------------------- star poster
+    function weekStart() {
+      const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - d.getDay()); return d;
+    }
+    async function loadPoster() {
+      if (!state.access.reward_system) return;
+      const body = await api(`/api/gold-stars/poster?week_start=${encodeURIComponent(weekStart().toISOString())}`);
+      state.poster = body.poster;
+      renderPoster();
+    }
+    function renderPoster(popId) {
+      const p = state.poster;
+      if (!p) return;
+      const start = weekStart();
+      const todayIdx = new Date().getDay();
+      $('posterWeek').textContent = `Week of ${start.toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}`;
+      const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      let html = '<div class="hd"></div>' + days.map((d, i) => `<div class="hd ${i === todayIdx ? 'today' : ''}">${d}</div>`).join('') + '<div class="hd">⭐</div>';
+      p.children.forEach((c) => {
+        const byDay = [[], [], [], [], [], [], []];
+        c.week_stars.forEach((st) => { byDay[new Date(st.at).getDay()].push(st); });
+        html += `<div class="kid"><b>${esc(c.name)}</b><span>🏅 ${c.all_time} all-time</span>${c.week_stars.length ? `<em>${c.week_stars.length} this week</em>` : ''}</div>`;
+        html += byDay.map((list, i) => `<div class="day ${i === todayIdx ? 'today' : ''}">${list.map((st) =>
+          `<span class="sticker ${st.id === popId ? 'pop' : ''}" title="${esc(new Date(st.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }))}"></span>`).join('')}</div>`).join('');
+        const recent = state.recent[c.name];
+        const canUndo = p.can_give && recent && Date.now() - recent.at < p.undo_seconds * 1000;
+        const label = c.waiting > 0 ? `Stick my star! (${c.waiting})` : 'Add my star ⭐';
+        html += `<div class="add">
+            <button type="button" class="add-star ${c.waiting > 0 ? 'waiting' : ''}" data-poster-add="${esc(c.name)}" ${(!p.can_give && c.waiting < 1) ? 'disabled' : ''}>${label}</button>
+            ${canUndo ? `<button type="button" class="undo" data-poster-undo="${recent.id}" data-child="${esc(c.name)}">Oops, undo</button>` : ''}
+          </div>`;
+      });
+      $('chart').innerHTML = html;
+      $('posterNote').textContent = p.can_give
+        ? 'Did something great? Tap "Add my star" and watch it stick! The chart starts fresh every Sunday; the all-time count keeps growing.'
+        : 'When a grown-up gives you a star, tap your button to stick it on the chart.';
     }
 
     async function refresh() {
@@ -312,9 +442,11 @@
         state.people = summary.people || [];
         state.access = summary.access || {};
         applyAccess();
+        state.household = summary.household || [];
+        $('inspAddBtn').hidden = !!summary.is_extended;
+        if (!$('greetName').textContent) rotateName();
         renderMemos(summary.memos);
-        renderStars(summary.gold_stars);
-        await Promise.allSettled([loadAgenda(), loadGroceries(), loadTodos()]);
+        await Promise.allSettled([loadAgenda(), loadGroceries(), loadTodos(), loadPoster()]);
       } catch (err) {
         console.warn(err);
       }
@@ -325,7 +457,8 @@
       const g = e.target.closest('[data-grocery]');
       const t = e.target.closest('[data-todo]');
       const m = e.target.closest('[data-memo]');
-      const s = e.target.closest('[data-star]');
+      const pa = e.target.closest('[data-poster-add]');
+      const pu = e.target.closest('[data-poster-undo]');
       try {
         if (g) {
           g.classList.add('done');
@@ -342,12 +475,25 @@
           const body = await api(`/api/home-screen/memos/${m.dataset.memo}/done`, { method: 'POST' });
           renderMemos(body.memos);
         }
-        if (s) {
-          s.disabled = true;
+        if (pa) {
+          if (pa.disabled) return;
+          pa.disabled = true;
+          const child = pa.dataset.posterAdd;
           const token = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
-          await api('/api/gold-stars/awards', { method: 'POST', body: JSON.stringify({ child_name: s.dataset.star, client_token: token }) });
-          toast(`⭐ Star sent to ${s.dataset.star}'s tablet`);
-          refresh();
+          const body = await api('/api/gold-stars/poster/add', { method: 'POST', body: JSON.stringify({ child_name: child, client_token: token, week_start: weekStart().toISOString() }) });
+          state.recent[child] = { id: body.award_id, at: Date.now() };
+          state.poster = body.poster;
+          renderPoster(body.award_id);
+          toast(`⭐ Great job, ${child}!`);
+          setTimeout(() => renderPoster(), (state.poster.undo_seconds + 1) * 1000);
+        }
+        if (pu) {
+          const child = pu.dataset.child;
+          const body = await api('/api/gold-stars/poster/undo', { method: 'POST', body: JSON.stringify({ award_id: Number(pu.dataset.posterUndo), week_start: weekStart().toISOString() }) });
+          delete state.recent[child];
+          state.poster = body.poster;
+          renderPoster();
+          toast('Star removed');
         }
       } catch (err) {
         toast(err.message);
@@ -384,14 +530,15 @@
     const forms = {
       grocery: () => `
         <h3 id="modalTitle">🛒 Add groceries</h3>
+        <div class="field"><label for="gList">Which list?</label>
+          <select id="gList">${state.lists.map((l) => `<option value="${l.id}" ${l.id === state.groceryListId ? 'selected' : ''}>${esc(l.name)}${l.active_count ? ` (${l.active_count})` : ''}</option>`).join('') || '<option value="">Groceries</option>'}</select></div>
         <div class="field"><label for="gItem">What do we need?</label><input type="text" id="gItem" placeholder="e.g. Milk" enterkeyhint="done" required></div>
-        <div class="field"><label>Added so far</label><div id="gAdded" class="added">—</div></div>
         <div class="err" id="err"></div>
         <div class="actions"><button type="button" class="secondary" data-close>Done</button><button type="submit" class="primary">Add</button></div>`,
       todo: () => `
         <h3 id="modalTitle">✅ New to-do</h3>
         <div class="field"><label for="tText">What needs doing?</label><input type="text" id="tText" placeholder="e.g. Call the plumber" required></div>
-        <div class="field"><label>Who's doing it?</label>${peopleChips('who', { preselect: [ME] })}</div>
+        <div class="field"><label>Who's doing it?</label>${peopleChips('who')}</div>
         <div class="field"><label>When?</label>${choiceChips('due', [['', 'No date'], ['0', 'Today'], ['1', 'Tomorrow'], ['7', 'This week']], '')}</div>
         <div class="err" id="err"></div>
         <div class="actions"><button type="button" class="secondary" data-close>Cancel</button><button type="submit" class="primary">Add to-do</button></div>`,
@@ -399,8 +546,8 @@
         <h3 id="modalTitle">📝 Leave a memo</h3>
         <div class="field"><label for="mText">Your note</label><textarea id="mText" placeholder="e.g. Plumber coming Tuesday at 10" required></textarea></div>
         <div class="field"><label>Who can see it?</label>${choiceChips('vis', state.summary?.is_extended
-          ? [['everyone', 'Whole family'], ['private', 'Just me']]
-          : [['family', 'Our household'], ['everyone', 'Household + extended family'], ['private', 'Just me']], state.summary?.is_extended ? 'everyone' : 'family')}</div>
+          ? [['everyone', 'Whole family']]
+          : [['family', 'Our household'], ['everyone', 'Household + extended family']], state.summary?.is_extended ? 'everyone' : 'family')}</div>
         <div class="err" id="err"></div>
         <div class="actions"><button type="button" class="secondary" data-close>Cancel</button><button type="submit" class="primary">Post memo</button></div>`,
       event: () => `
@@ -413,11 +560,36 @@
             <div><label for="eStart">Starts</label><input type="time" id="eStart"></div>
             <div><label for="eEnd">Ends</label><input type="time" id="eEnd"></div>
           </div></div>
-        <div class="field"><label>Who's going?</label>${peopleChips('who', { preselect: [ME] })}</div>
+        <div class="field"><label>Who's going?</label>${peopleChips('who')}</div>
         ${state.summary?.is_extended ? '' : `<div class="field">${choiceChips('evvis', [['family', 'Household only'], ['everyone', 'Also extended family']], 'family')}</div>`}
         <div class="err" id="err"></div>
         <div class="actions"><button type="button" class="secondary" data-close>Cancel</button><button type="submit" class="primary">Add to calendar</button></div>`,
     };
+
+    forms.inspire = () => `
+        <h3 id="modalTitle">✨ Add encouragement</h3>
+        <div class="field">${choiceChips('ikind', [['verse', 'Bible verse'], ['quote', 'Quote']], 'verse')}</div>
+        <div class="field"><label for="iText">Words</label><textarea id="iText" placeholder="Type the verse or quote" required></textarea></div>
+        <div class="field"><label for="iRef">Reference (for verses) or who said it</label><input type="text" id="iRef" placeholder="e.g. Psalm 118:24 (CEB)"></div>
+        <div class="err" id="err"></div>
+        <div class="actions"><button type="button" class="secondary" data-close>Cancel</button><button type="submit" class="primary">Add to the screen</button></div>`;
+
+    function showAdded(item, listName) {
+      sheet.innerHTML = `
+        <div class="done-box">
+          <div class="tick">✓</div>
+          <h3 id="modalTitle">Added!</h3>
+          <p style="margin:.2rem 0 0;font-size:1.15em"><b>${esc(item)}</b> was added to <b>${esc(listName)}</b>.</p>
+        </div>
+        <div class="actions"><button type="button" class="secondary" data-close>Done</button><button type="button" class="primary" data-open-again="grocery">Add another</button></div>`;
+      clearTimeout(showAdded._t);
+      showAdded._t = setTimeout(() => { if (mode === 'grocery-done') close(); }, 6000);
+      mode = 'grocery-done';
+    }
+    sheet.addEventListener('click', (e) => {
+      const again = e.target.closest('[data-open-again]');
+      if (again) { clearTimeout(showAdded._t); open(again.dataset.openAgain); }
+    });
 
     function open(which) {
       mode = which;
@@ -449,13 +621,14 @@
           const input = sheet.querySelector('#gItem');
           const item = input.value.trim();
           if (!item) throw new Error('Type an item first.');
-          await api('/api/shopping/items', { method: 'POST', body: JSON.stringify({ item, list_id: state.groceryListId, creator: ME }) });
-          const added = sheet.querySelector('#gAdded');
-          added.textContent = added.textContent === '—' ? item : `${added.textContent}, ${item}`;
-          input.value = '';
-          input.focus();
+          const listId = Number(sheet.querySelector('#gList').value) || state.groceryListId;
+          await api('/api/shopping/items', { method: 'POST', body: JSON.stringify({ item, list_id: listId, creator: ME }) });
+          state.groceryListId = listId;
+          store.set('homeScreenGroceryList', String(listId));
+          const listName = (state.lists.find((l) => l.id === listId) || {}).name || 'the list';
+          showAdded(item, listName);
           loadGroceries();
-          return; // stay open to add more
+          return;
         }
         if (mode === 'todo') {
           const description = sheet.querySelector('#tText').value.trim();
@@ -468,6 +641,16 @@
           }) });
           toast('To-do added ✅');
           close(); loadTodos();
+        }
+        if (mode === 'inspire') {
+          const text = sheet.querySelector('#iText').value.trim();
+          const reference = sheet.querySelector('#iRef').value.trim();
+          const kind = chipValues('ikind')[0] || 'verse';
+          if (!text) throw new Error('Type the words first.');
+          if (kind === 'verse' && !reference) throw new Error('Add the reference, like "Psalm 118:24 (CEB)".');
+          await api('/api/home-screen/inspiration', { method: 'POST', body: JSON.stringify({ kind, text, reference }) });
+          toast('Added ✨ It will show up in the rotation.');
+          close(); loadInspiration();
         }
         if (mode === 'memo') {
           const text = sheet.querySelector('#mText').value.trim();
@@ -504,6 +687,66 @@
       }
     });
 
+    // ---------------------------------------------------------- photo album
+    const photo = { list: [], idx: -1, front: 'phA', timer: null };
+    async function loadPhotos() {
+      try {
+        const body = await api('/api/immich/shared-family-album');
+        const images = (body.assets || []).filter((a) => a.type !== 'VIDEO');
+        for (let i = images.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [images[i], images[j]] = [images[j], images[i]]; }
+        photo.list = images;
+        if (!images.length) throw new Error('The family album has no photos yet.');
+        $('phMsg').style.display = 'none';
+        showPhoto(1);
+      } catch (err) {
+        $('phMsg').textContent = `📷 ${err.message.includes('not configured') || err.message.includes('Immich') ? 'Connect the Shared Family Album (Immich) in Settings to show photos here.' : err.message}`;
+      }
+    }
+    function showPhoto(step) {
+      if (!photo.list.length) return;
+      photo.idx = (photo.idx + step + photo.list.length) % photo.list.length;
+      const src = `/api/immich/assets/${encodeURIComponent(photo.list[photo.idx].id)}/thumbnail`;
+      const backId = photo.front === 'phA' ? 'phB' : 'phA';
+      const back = $(backId);
+      const pre = new Image();
+      pre.onload = () => {
+        back.src = src; $('phBg').src = src;
+        back.classList.add('show'); $(photo.front).classList.remove('show');
+        photo.front = backId;
+      };
+      pre.src = src;
+      clearTimeout(photo.timer);
+      photo.timer = setTimeout(() => showPhoto(1), 12000);
+    }
+    $('phNext').addEventListener('click', () => showPhoto(1));
+    $('phPrev').addEventListener('click', () => showPhoto(-1));
+
+    // ---------------------------------------------------------- quotes & verses
+    const insp = { list: [], idx: 0 };
+    async function loadInspiration() {
+      try {
+        const body = await api('/api/home-screen/inspiration');
+        insp.list = body.items || [];
+        // Start somewhere different each day, then loop.
+        const day = Math.floor(Date.now() / 86400000);
+        insp.idx = insp.list.length ? day % insp.list.length : 0;
+        showInspiration(true);
+      } catch (_) {}
+    }
+    function showInspiration(immediate) {
+      if (!insp.list.length) return;
+      const item = insp.list[insp.idx];
+      const textEl = $('inspText');
+      textEl.classList.add('fade');
+      setTimeout(() => {
+        $('inspKind').textContent = item.kind === 'verse' ? '📖 Bible verse' : '💛 Family encouragement';
+        textEl.textContent = item.kind === 'verse' ? `“${item.text}”` : item.text;
+        $('inspRef').textContent = item.reference || '';
+        textEl.classList.remove('fade');
+      }, immediate ? 0 : 600);
+    }
+    setInterval(() => { if (insp.list.length) { insp.idx = (insp.idx + 1) % insp.list.length; showInspiration(); } }, 20000);
+
     // ---------------------------------------------------------- always-on
     async function keepAwake() {
       try {
@@ -526,6 +769,9 @@
     tick();
     setInterval(tick, 1000 * 5);
     refresh();
+    loadPhotos();
+    loadInspiration();
+    setInterval(loadPhotos, 60 * 60 * 1000);
     setInterval(() => { if (!document.hidden && !modal.classList.contains('open')) refresh(); }, 60 * 1000);
   })();
   </script>

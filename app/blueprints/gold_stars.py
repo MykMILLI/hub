@@ -197,3 +197,47 @@ def api_gold_stars_deliver(delivery_id: int):
 @main_bp.route('/api/gold-stars/delivery/<int:delivery_id>/refund', methods=['POST'])
 def api_gold_stars_refund(delivery_id: int):
     return _run(lambda actor: gs.refund_purchase(actor, delivery_id, _json().get('reason') or ''))
+
+
+# ------------------------------------------------------------ star poster
+
+def _poster_response(actor: str, **extra):
+    week = request.args.get('week_start') or (request.get_json(silent=True) or {}).get('week_start')
+    payload = {'ok': True, 'poster': gs.poster_payload(actor, week)}
+    payload.update(extra)
+    return jsonify(payload)
+
+
+@main_bp.route('/api/gold-stars/poster', methods=['GET'])
+def api_gold_stars_poster():
+    actor = _actor()
+    if not actor:
+        return jsonify({'ok': False, 'error': 'Please sign in.'}), 401
+    return _poster_response(actor)
+
+
+@main_bp.route('/api/gold-stars/poster/add', methods=['POST'])
+def api_gold_stars_poster_add():
+    actor = _actor()
+    if not actor:
+        return jsonify({'ok': False, 'error': 'Please sign in.'}), 401
+    data = _json()
+    try:
+        award = gs.poster_add_star(actor, data.get('child_name'), data.get('client_token') or '')
+    except gs.GoldStarError as err:
+        db.session.rollback()
+        return jsonify({'ok': False, 'error': err.message}), err.status
+    return _poster_response(actor, award_id=award.id)
+
+
+@main_bp.route('/api/gold-stars/poster/undo', methods=['POST'])
+def api_gold_stars_poster_undo():
+    actor = _actor()
+    if not actor:
+        return jsonify({'ok': False, 'error': 'Please sign in.'}), 401
+    try:
+        gs.poster_undo(actor, int(_json().get('award_id') or 0))
+    except gs.GoldStarError as err:
+        db.session.rollback()
+        return jsonify({'ok': False, 'error': err.message}), err.status
+    return _poster_response(actor)

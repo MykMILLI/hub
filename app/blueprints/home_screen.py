@@ -12,7 +12,7 @@ from flask import current_app, jsonify, render_template, request, session
 
 from . import main_bp
 from .. import db
-from ..models import FamilyMember, Note
+from ..models import FamilyMember, HomeScreenInspiration, Note
 from ..permissions import (
     can_access_app_module,
     has_visibility_access,
@@ -46,6 +46,9 @@ def _memo_dict(note: Note) -> dict:
 
 
 def _visible_memos(actor: str, limit: int = 12) -> list[dict]:
+    """The home screen is shared by the whole family, so it only shows memos
+    meant for everyone in the household (never someone's private memos), and
+    only what the signed-in account is allowed to see."""
     rows = (
         Note.query.filter(Note.note_type == 'memo')
         .filter(Note.is_task.is_(False))
@@ -55,6 +58,8 @@ def _visible_memos(actor: str, limit: int = 12) -> list[dict]:
     )
     out = []
     for row in rows:
+        if (row.visibility or 'family') not in {'family', 'everyone'}:
+            continue
         if has_visibility_access(row.visibility or 'family', row.creator or '', row.allowed_members_json or '[]', actor):
             out.append(_memo_dict(row))
         if len(out) >= limit:
@@ -66,7 +71,9 @@ def _visible_memos(actor: str, limit: int = 12) -> list[dict]:
 def home_screen():
     actor = _actor()
     cfg = current_app.config.get('HOMEHUB_CONFIG', {}) or {}
-    return render_template('home_screen.html', actor_name=actor, hub_name=_hub_name(), config=cfg)
+    import os
+    millitoptv_url = str(os.environ.get('HOMEHUB_MILLITOPTV_URL') or cfg.get('millitoptv_url') or 'https://tvadmin.millitop.net').strip()
+    return render_template('home_screen.html', actor_name=actor, hub_name=_hub_name(), config=cfg, millitoptv_url=millitoptv_url)
 
 
 @main_bp.route('/api/home-screen/summary', methods=['GET'])
@@ -85,6 +92,8 @@ def api_home_screen_summary():
         for m in members
         if not extended or (m.access_tier or 'immediate') == 'extended' or (m.role or '') == 'admin' or m.name == actor
     ]
+    # Names the greeting rotates through: the household (not extended family).
+    household = [m.name for m in members if (m.access_tier or 'immediate') != 'extended']
     gold = None
     if access.get('reward_system'):
         try:
@@ -108,6 +117,7 @@ def api_home_screen_summary():
         'is_extended': extended,
         'access': access,
         'people': people,
+        'household': household,
         'memos': _visible_memos(actor),
         'gold_stars': gold,
         'server_time': datetime.utcnow().isoformat() + 'Z',
@@ -159,3 +169,93 @@ def api_home_screen_memo_done(memo_id: int):
     note.updated_by = actor
     db.session.commit()
     return jsonify({'ok': True, 'memos': _visible_memos(actor)})
+
+
+# ------------------------------------------------------- quotes & verses
+
+# A few Common English Bible verses to start with (CEB is copyrighted; short
+# quotations with attribution). Families add their own favourites on the screen.
+SEED_VERSES = [
+    ("I've commanded you to be brave and strong, haven't I? Don't be alarmed or terrified, because the LORD your God is with you wherever you go.", 'Joshua 1:9 (CEB)'),
+    ('This is the day the LORD acted; we will rejoice and celebrate in it!', 'Psalm 118:24 (CEB)'),
+    ('I can endure all these things through the power of the one who gives me strength.', 'Philippians 4:13 (CEB)'),
+    ('Be kind, compassionate, and forgiving to each other, in the same way God forgave you in Christ.', 'Ephesians 4:32 (CEB)'),
+    ('We love because God first loved us.', '1 John 4:19 (CEB)'),
+]
+# Original family encouragement lines.
+SEED_QUOTES = [
+    'Small steps every day add up to big things.',
+    'Be the reason someone in this house smiles today.',
+    'Mistakes mean you are trying. Keep going.',
+    'Kind words are free, so give them away often.',
+    'We do hard things together.',
+    'Listen first, then speak with love.',
+    'Your best is enough. Try your best today.',
+    'A thank-you makes everybody\'s day brighter.',
+    'Clean up, help out, and cheer each other on.',
+    'Brave is doing it even when you feel a little scared.',
+    'Today is a fresh start.',
+    'Teamwork makes our home work.',
+    'Be patient. Good things are growing.',
+    'Share, take turns, and play fair.',
+    'Every day is a good day to learn something new.',
+    'Home is where we love each other on the hard days too.',
+]
+
+
+def _ensure_inspiration_seed() -> None:
+    if HomeScreenInspiration.query.first():
+        return
+    for text, ref in SEED_VERSES:
+        db.session.add(HomeScreenInspiration(kind='verse', text=text, reference=ref, created_by='Home Hub'))
+    for text in SEED_QUOTES:
+        db.session.add(HomeScreenInspiration(kind='quote', text=text, reference='', created_by='Home Hub'))
+    db.session.commit()
+
+
+def _inspiration_dict(row: HomeScreenInspiration) -> dict:
+    return {'id': row.id, 'kind': row.kind, 'text': row.text, 'reference': row.reference or '', 'created_by': row.created_by or ''}
+
+
+@main_bp.route('/api/home-screen/inspiration', methods=['GET'])
+def api_home_screen_inspiration():
+    if not _actor():
+        return jsonify({'ok': False, 'error': 'Please sign in.'}), 401
+    _ensure_inspiration_seed()
+    rows = HomeScreenInspiration.query.filter_by(active=True).order_by(HomeScreenInspiration.id).all()
+    return jsonify({'ok': True, 'items': [_inspiration_dict(r) for r in rows]})
+
+
+@main_bp.route('/api/home-screen/inspiration', methods=['POST'])
+def api_home_screen_inspiration_add():
+    actor = _actor()
+    if not actor:
+        return jsonify({'ok': False, 'error': 'Please sign in.'}), 401
+    if is_extended_member(actor):
+        return jsonify({'ok': False, 'error': 'Only household members can add to the home screen.'}), 403
+    data = request.get_json(silent=True) or {}
+    kind = 'verse' if str(data.get('kind') or '').lower() == 'verse' else 'quote'
+    text = sanitize_text(str(data.get('text') or '')).strip()[:600]
+    reference = sanitize_text(str(data.get('reference') or '')).strip()[:120]
+    if not text:
+        return jsonify({'ok': False, 'error': 'Type the words first.'}), 400
+    if kind == 'verse' and not reference:
+        return jsonify({'ok': False, 'error': 'Add the reference, like "Joshua 1:9 (CEB)".'}), 400
+    _ensure_inspiration_seed()
+    row = HomeScreenInspiration(kind=kind, text=text, reference=reference, created_by=actor)
+    db.session.add(row)
+    db.session.commit()
+    return jsonify({'ok': True, 'item': _inspiration_dict(row)})
+
+
+@main_bp.route('/api/home-screen/inspiration/<int:item_id>/remove', methods=['POST'])
+def api_home_screen_inspiration_remove(item_id: int):
+    actor = _actor()
+    row = db.session.get(HomeScreenInspiration, item_id)
+    if not row:
+        return jsonify({'ok': False, 'error': 'Not found.'}), 404
+    if not (is_admin_name(actor) or (row.created_by or '') == actor):
+        return jsonify({'ok': False, 'error': 'Only an admin or the person who added it can remove it.'}), 403
+    row.active = False
+    db.session.commit()
+    return jsonify({'ok': True})
