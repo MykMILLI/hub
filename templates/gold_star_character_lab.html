@@ -195,10 +195,72 @@
       </div>
       <div class="flex gap-2 flex-wrap justify-end">
         <a class="btn" href="/gold-stars/preview">Back to preview workflow</a>
-        <a class="btn" href="/gold-stars">Back to live rewards</a>
+        <a class="btn" href="/gold-stars">Back to Gold Star Club</a>
       </div>
     </header>
 
+    <section class="card" id="importedAssetLab">
+      <div class="flex items-center justify-between gap-2 flex-wrap mb-3">
+        <div>
+          <span class="badge">Imported asset</span>
+          <h2 class="text-lg font-semibold mt-2 mb-0">Approved animated star — star-hop-blink.glb</h2>
+          <p class="mini mt-1">Clip <code>greet</code> (hop + blink). This is the renderer the child board uses; the procedural star below stays as the fallback.</p>
+        </div>
+        <span id="glbStatus" class="badge" role="status" aria-live="polite">Loading model…</span>
+      </div>
+      <div class="layout">
+        <div class="canvas-shell">
+          <div id="glbCanvasHost" class="canvas-host" aria-label="Imported 3D star character"></div>
+          <div id="glbFallback" class="fallback" role="status">The 3D model could not be shown here. The child board will use the 2D star instead.</div>
+        </div>
+        <aside class="control-column">
+          <section>
+            <h3 class="text-base font-semibold mb-2">Play</h3>
+            <div class="control-grid">
+              <button class="btn primary" data-glb="greet">Play greet</button>
+              <button class="btn" data-glb="pause">Pause / resume</button>
+              <button class="btn" data-glb="slow">Slow motion (¼×)</button>
+              <button class="btn" data-glb="normal">Normal speed</button>
+            </div>
+          </section>
+          <section>
+            <h3 class="text-base font-semibold mb-2 mt-3">Adapter actions</h3>
+            <div class="control-grid">
+              <button class="btn" data-glb-action="idle">idle</button>
+              <button class="btn" data-glb-action="noticeNewStar">noticeNewStar</button>
+              <button class="btn" data-glb-action="tapReaction">tapReaction</button>
+              <button class="btn" data-glb-action="collecting">collecting</button>
+              <button class="btn" data-glb-action="celebrate">celebrate</button>
+              <button class="btn" data-glb-action="rewardApproved">rewardApproved</button>
+            </div>
+          </section>
+          <section>
+            <h3 class="text-base font-semibold mb-2 mt-3">Camera</h3>
+            <div class="control-grid">
+              <button class="btn" data-glb-camera="front">Front</button>
+              <button class="btn" data-glb-camera="threeQuarter">3/4</button>
+              <button class="btn" data-glb-camera="side">Side</button>
+              <button class="btn" data-glb-camera="back">Back</button>
+            </div>
+            <label class="toggle-label mt-3"><input type="checkbox" id="glbReducedMotion" /> Reduced motion (static pose)</label>
+          </section>
+          <section>
+            <h3 class="text-base font-semibold mb-2 mt-3">Measurements (this device)</h3>
+            <dl class="diagnostic-grid">
+              <dt>Load time</dt><dd id="glbLoad">—</dd>
+              <dt>Clips</dt><dd id="glbClips">—</dd>
+              <dt>Frame rate</dt><dd id="glbFps">—</dd>
+              <dt>Triangles</dt><dd id="glbTris">—</dd>
+              <dt>GPU</dt><dd id="glbGpu">—</dd>
+              <dt>Action</dt><dd id="glbAction">—</dd>
+            </dl>
+            <p class="mini mt-2">Open this page on each child's tablet to measure real load time and frame rate before calling it tablet-ready.</p>
+          </section>
+        </aside>
+      </div>
+    </section>
+
+    <h2 class="text-base font-semibold mt-2 mb-0">Fallback: procedural star</h2>
     <main class="layout">
       <section class="card canvas-shell">
         <div id="characterLabCanvasHost" class="canvas-host" aria-label="3D star character scene"></div>
@@ -264,5 +326,6 @@
   </div>
 
   <script type="module" src="{{ url_for('static', filename='js/gold_star_character_lab.js') }}?v={{ asset_version|default('1') }}"></script>
+  <script type="module" src="{{ url_for('static', filename='js/gold_star_lab_imported.js') }}?v={{ asset_version|default('1') }}"></script>
 </body>
 </html>

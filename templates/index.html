@@ -336,76 +336,60 @@ window.REMINDERS_TIME_FORMAT = "{{ (config.reminders.time_format if config.remin
 		<div class="mt-4 rounded-xl border border-yellow-200 dark:border-yellow-700 p-4 bg-yellow-50/80 dark:bg-yellow-900/20">
 			<div class="flex flex-wrap items-start justify-between gap-3">
 				<div>
-					<div class="text-xs uppercase tracking-wide text-yellow-700 dark:text-yellow-200">Gold Star Summary</div>
-					<p class="text-sm text-gray-700 dark:text-gray-200">Kid dashboard is interactive, but only Rachel and Mykal can change stars and rules.</p>
+					<div class="text-xs uppercase tracking-wide text-yellow-700 dark:text-yellow-200">Gold Star Club</div>
+					<p class="text-sm text-gray-700 dark:text-gray-200">Give a star with one tap. It waits on the kid's tablet until they collect it.</p>
 				</div>
 				<div class="flex flex-wrap items-center gap-2">
-					<a href="/gold-stars?kid_view=1" class="btn btn-secondary text-sm"><i class="fa-solid fa-child-reaching mr-1"></i>Open Kids Dashboard</a>
-					<a href="/gold-stars" class="btn btn-secondary text-sm"><i class="fa-solid fa-star mr-1"></i>Open Gold Star Dashboard</a>
+					<a href="/kids-stars" class="btn btn-secondary text-sm"><i class="fa-solid fa-child-reaching mr-1"></i>Kids' screen</a>
+					<a href="/gold-stars" class="btn btn-secondary text-sm"><i class="fa-solid fa-star mr-1"></i>Gold Star Club</a>
 				</div>
 			</div>
-			<div id="goldStarSummaryRows" class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
-				{% if rewards_summary and rewards_summary.children %}
-					{% for child in rewards_summary.children %}
+			<div id="goldStarLiveRows" class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+				{% if gold_star_summary %}
+					{% for child in gold_star_summary %}
 						<div class="rounded-lg bg-white/70 dark:bg-gray-900/30 px-3 py-2 border border-yellow-200 dark:border-yellow-700">
 							<div class="flex items-center justify-between text-sm">
-								<span class="font-semibold">{{ child.child_name }}</span>
-								<span class="text-yellow-700 dark:text-yellow-200 font-bold">{{ child.stars }} ⭐</span>
+								<span class="font-semibold">{{ child.name }}</span>
+								<span class="text-yellow-700 dark:text-yellow-200 font-bold"><span data-gs-available="{{ child.name }}">{{ child.available }}</span> ⭐</span>
 							</div>
-							<div class="text-xs text-gray-500 mt-1">Next reward: {{ child.progress.next_label }}{% if child.progress.remaining > 0 %} ({{ child.progress.remaining }} to go){% endif %}</div>
-							{% if can_manage_kid_rewards %}
-							<div class="mt-2 flex justify-end gap-2">
-								<button type="button" class="btn btn-secondary text-xs quick-consequence-btn" data-child-name="{{ child.child_name }}">Consequence -1</button>
-								<button type="button" class="btn btn-primary text-xs quick-star-btn" data-child-name="{{ child.child_name }}">+1 Star</button>
+							<div class="text-xs text-gray-500 mt-1"><span data-gs-waiting="{{ child.name }}">{{ child.waiting_count }}</span> waiting · {{ child.earned }} earned all-time</div>
+							{% if gold_star_is_parent %}
+							<div class="mt-2 flex justify-end">
+								<button type="button" class="btn btn-primary text-xs gs-quick-star" data-child-name="{{ child.name }}">+1 Star</button>
 							</div>
 							{% endif %}
 						</div>
 					{% endfor %}
 				{% else %}
-					<div class="rounded-lg bg-white/70 dark:bg-gray-900/30 px-3 py-2 text-sm text-gray-500">No reward data yet.</div>
+					<div class="rounded-lg bg-white/70 dark:bg-gray-900/30 px-3 py-2 text-sm text-gray-500">No stars yet.</div>
 				{% endif %}
 			</div>
-			{% if rewards_summary and rewards_summary.weekly_summary %}
-			{% set weekly = rewards_summary.weekly_summary %}
-			{% set weekly_peak = [weekly.awarded_total, weekly.taken_total, 1]|max %}
-			<div class="mt-4 rounded-xl border border-yellow-200 dark:border-yellow-700 p-4 bg-white/70 dark:bg-gray-900/30">
-				<div class="flex flex-wrap items-center justify-between gap-2">
-					<div class="text-sm font-semibold">Weekly Star Behavior</div>
-					<div class="text-xs text-gray-500">{{ weekly.week_label }}</div>
-				</div>
-				<div class="mt-3 space-y-2">
-					<div>
-						<div class="flex justify-between text-xs text-gray-600 dark:text-gray-300"><span>Awarded</span><span>{{ weekly.awarded_total }} ⭐</span></div>
-						<div class="h-2.5 rounded-full bg-emerald-100 dark:bg-emerald-900/30 overflow-hidden mt-1"><div class="h-full bg-emerald-500" style="width: {{ ((weekly.awarded_total / weekly_peak) * 100)|round(0, 'floor') }}%;"></div></div>
-					</div>
-					<div>
-						<div class="flex justify-between text-xs text-gray-600 dark:text-gray-300"><span>Taken with consequences</span><span>{{ weekly.taken_total }} ⭐</span></div>
-						<div class="h-2.5 rounded-full bg-rose-100 dark:bg-rose-900/30 overflow-hidden mt-1"><div class="h-full bg-rose-500" style="width: {{ ((weekly.taken_total / weekly_peak) * 100)|round(0, 'floor') }}%;"></div></div>
-					</div>
-				</div>
-				<div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
-					{% for child in weekly.by_child %}
-					<div class="rounded-lg border border-yellow-100 dark:border-yellow-700 px-3 py-2 text-xs">
-						<div class="font-semibold text-sm">{{ child.child_name }}</div>
-						<div class="text-gray-600 dark:text-gray-300">+{{ child.awarded }} ⭐ awarded</div>
-						<div class="text-gray-600 dark:text-gray-300">-{{ child.taken }} ⭐ consequence</div>
-					</div>
-					{% endfor %}
-				</div>
-				<div class="mt-3">
-					<div class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Consequence reasons this week</div>
-					{% if weekly.consequence_reasons %}
-					<ul class="mt-1 space-y-1 text-xs text-gray-600 dark:text-gray-300">
-						{% for reason in weekly.consequence_reasons %}
-						<li>• {{ reason.reason }} <span class="text-gray-500">({{ reason.count }} time{% if reason.count != 1 %}s{% endif %}, {{ reason.stars_taken }} ⭐)</span></li>
-						{% endfor %}
-					</ul>
-					{% else %}
-					<div class="mt-1 text-xs text-gray-500">No consequence reasons logged this week.</div>
-					{% endif %}
-				</div>
-			</div>
-			{% endif %}
+			<script>
+			(() => {
+				const rows = document.getElementById('goldStarLiveRows');
+				if (!rows) return;
+				rows.addEventListener('click', async (event) => {
+					const btn = event.target.closest('.gs-quick-star');
+					if (!btn) return;
+					btn.disabled = true;
+					const child = btn.dataset.childName;
+					try {
+						const token = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + Math.random();
+						const res = await fetch('/api/gold-stars/awards', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ child_name: child, client_token: token }) });
+						const body = await res.json().catch(() => ({}));
+						if (!res.ok || !body.ok) throw new Error(body.error || 'Could not give a star');
+						const c = (body.state.children || {})[child] || {};
+						const w = rows.querySelector(`[data-gs-waiting="${CSS.escape(child)}"]`);
+						if (w) w.textContent = c.waiting_count;
+						if (typeof globalToast === 'function') globalToast(`⭐ Star sent to ${child}'s tablet`, 'success');
+					} catch (err) {
+						if (typeof globalToast === 'function') globalToast(err.message, 'error');
+					} finally {
+						btn.disabled = false;
+					}
+				});
+			})();
+			</script>
 		</div>
 	</div>
 
@@ -413,8 +397,8 @@ window.REMINDERS_TIME_FORMAT = "{{ (config.reminders.time_format if config.remin
 		<div class="flex flex-wrap items-center justify-between gap-2 mb-4">
 			<h2 class="text-lg font-bold"><i class="fa-solid fa-hands-helping mr-2 text-indigo-500"></i>Parent Helper</h2>
 			<div class="flex flex-wrap items-center gap-2">
-				<a href="/gold-stars?kid_view=1" class="btn btn-secondary text-sm"><i class="fa-solid fa-child-reaching mr-1"></i>Open Kids Dashboard</a>
-				<a href="/gold-stars" class="btn btn-secondary text-sm"><i class="fa-solid fa-star mr-1"></i>Open Gold Star Dashboard</a>
+				<a href="/kids-stars" class="btn btn-secondary text-sm"><i class="fa-solid fa-child-reaching mr-1"></i>Kids' screen</a>
+				<a href="/gold-stars" class="btn btn-secondary text-sm"><i class="fa-solid fa-star mr-1"></i>Gold Star Club</a>
 			</div>
 		</div>
 		<div class="grid grid-cols-1 lg:grid-cols-2 gap-4">

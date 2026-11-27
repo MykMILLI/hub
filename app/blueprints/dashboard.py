@@ -1184,6 +1184,18 @@ def _coalesce_timestamp(*values):
 def index():
     config = current_app.config['HOMEHUB_CONFIG']
     current_member_name = _current_actor_name()
+    from ..permissions import is_extended_member
+    if session.get('current_member') and is_extended_member(current_member_name):
+        # Extended family get the simpler home screen, which only shows the
+        # areas they are allowed to see (no household routines or kid data).
+        return redirect('/home-screen')
+    try:
+        from ..services import gold_stars as _gs
+        _gs_state = _gs.state_payload(current_member_name) if _gs.is_parent(current_member_name) else None
+        gold_star_summary = list((_gs_state or {}).get('children', {}).values())
+        gold_star_is_parent = bool(_gs_state)
+    except Exception:
+        gold_star_summary, gold_star_is_parent = [], False
     current_member_row = FamilyMember.query.filter_by(name=current_member_name).first()
     routine_state = _get_or_create_household_routine_state(current_member_name)
     routines = _build_routine_payload(routine_state)
@@ -1356,6 +1368,8 @@ def index():
         routines=routines,
         rewards_summary=rewards_state,
         can_manage_kid_rewards=can_manage_kid_rewards,
+        gold_star_summary=gold_star_summary,
+        gold_star_is_parent=gold_star_is_parent,
         parent_helper_summary=parent_helper_summary,
         timeline_media_items=timeline_media_items,
     )
@@ -2176,7 +2190,7 @@ def _gold_star_preview_resolve_request(state: dict, request_id: int) -> dict | N
     return None
 
 
-@main_bp.route('/gold-stars', methods=['GET'])
+@main_bp.route('/gold-stars/legacy', methods=['GET'])
 def gold_stars_dashboard():
     actor = _current_actor_name()
     kid_view = str(request.args.get('kid_view') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
@@ -2881,7 +2895,7 @@ def api_gold_stars_preview_demo_approve_compat():
     return api_gold_stars_preview_request_approve(int(pending.get('id') or 0))
 
 
-@main_bp.route('/kids-stars', methods=['GET'])
+@main_bp.route('/kids-stars/legacy', methods=['GET'])
 def kids_stars_tablet():
     actor = _current_actor_name()
     kiosk_requested = str(request.args.get('kiosk') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
@@ -2898,10 +2912,12 @@ def kids_stars_tablet():
 @main_bp.route('/api/rewards/kiosk-mode', methods=['POST'])
 def api_rewards_set_kiosk_mode():
     actor = _current_actor_name()
-    if not _can_manage_kid_rewards(actor):
-        return jsonify({'ok': False, 'error': 'Only Rachel or Mykal can change kiosk mode.'}), 403
     data = request.get_json(silent=True) or {}
     enabled = bool(data.get('enabled'))
+    # Turning the lock ON needs a parent session. Turning it OFF can be done
+    # from the locked kid tablet itself, but only with a parent's PIN (below).
+    if enabled and not _can_manage_kid_rewards(actor):
+        return jsonify({'ok': False, 'error': 'Only Rachel or Mykal can change kiosk mode.'}), 403
     if enabled:
         session['kid_kiosk_mode'] = True
         session['kid_kiosk_started_by'] = actor

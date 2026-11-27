@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Gold Star Club Preview</title>
+  <title>{% if live_mode %}Gold Star Club{% else %}Gold Star Club Preview{% endif %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='output.css') }}?v={{ asset_version|default('1') }}">
   <style>
     :root {
@@ -400,6 +400,16 @@
       font-size: 0.8rem;
       font-weight: 700;
     }
+    .mascot-slot { width: 100%; height: 100%; min-height: 260px; cursor: pointer; touch-action: manipulation; }
+    .mascot-host { width: 100%; height: 100%; min-height: 260px; }
+    body.child-only .shell { max-width: 1100px; }
+    body.child-only .tab-btn { font-size: 1.05rem; padding: 0.6rem 1rem; }
+    body.child-only .btn { font-size: 1.05rem; padding: 0.7rem 1rem; }
+    .grownup-corner { position: fixed; top: 0; right: 0; width: 64px; height: 64px; z-index: 90; }
+    .pin-modal { position: fixed; inset: 0; z-index: 130; display: flex; align-items: center; justify-content: center; padding: 1.25rem; background: rgba(30, 16, 56, 0.55); }
+    .pin-modal .card { width: 100%; max-width: 360px; max-height: calc(100dvh - 2.5rem); overflow-y: auto; }
+    .pin-modal input, .pin-modal select { width: 100%; padding: 0.55rem; border: 1px solid #c4b5fd; border-radius: 0.6rem; margin-top: 0.25rem; }
+    .reward-photo { width: 100%; height: 110px; object-fit: cover; border-radius: 0.75rem; }
     @keyframes eye-blink {
       0%, 42%, 46%, 100% { transform: scaleY(0); }
       43%, 45% { transform: scaleY(1); }
@@ -467,8 +477,23 @@
     }
   </style>
 </head>
-<body>
+<body class="{% if child_only %}child-only{% endif %}">
   <div class="shell">
+    {% if live_mode %}
+    {% if not child_only %}
+    <header class="card banner">
+      <div>
+        <span class="tag">Gold Star Club</span>
+        <h1 class="text-xl font-bold mt-2 mb-1">Mills-Roberts Home — Gold Star Club</h1>
+        <p class="mini">Signed in as {{ actor_name }}. Give a star with one tap; the kids collect it on their tablets.</p>
+      </div>
+      <div class="flex flex-wrap gap-2 justify-end">
+        <a class="btn btn-soft inline-block" href="/">Home Hub</a>
+        <a class="btn btn-soft inline-block" href="/gold-stars/preview/character-lab">3D star lab</a>
+      </div>
+    </header>
+    {% endif %}
+    {% else %}
     <header class="card banner">
       <div>
         <span class="tag">Gold Star Club preview</span>
@@ -483,23 +508,25 @@
         </div>
       </div>
     </header>
+    {% endif %}
 
-    <section class="card" id="parentToolbar">
-      <div class="tabs">
+    <section class="card {% if child_only %}hidden{% endif %}" id="parentToolbar">
+      <div class="tabs" id="parentTabs">
         <button class="tab-btn" data-view="parent-overview">Overview</button>
         <button class="tab-btn" data-view="parent-rewards">Rewards</button>
         <button class="tab-btn" data-view="parent-requests">Requests / delivery</button>
         <button class="tab-btn" data-view="parent-history">History</button>
-        <button class="tab-btn" data-view="child-board" data-child="Avery">View Avery child screen</button>
-        <button class="tab-btn" data-view="child-board" data-child="Harley">View Harley child screen</button>
+        {% for child_name in preview_state.child_names or ['Avery', 'Harley'] %}
+        <button class="tab-btn" data-view="child-board" data-child="{{ child_name }}">View {{ child_name }}'s screen</button>
+        {% endfor %}
       </div>
       <div class="flex gap-2 mt-3">
-        <button class="btn btn-danger" id="resetDemoBtn">Reset preview state</button>
+        {% if not live_mode %}<button class="btn btn-danger" id="resetDemoBtn">Reset preview state</button>{% endif %}
         <label class="mini flex items-center gap-2">
           <input type="checkbox" id="motionToggle" />
           Reduced motion override
         </label>
-        <span class="mini">Sound: unavailable in this prototype.</span>
+        {% if live_mode %}<a class="mini" href="/kids-stars?kiosk=1" title="Locks this device to the child screen until a parent enters their PIN">Lock this device to the kids' screen</a>{% else %}<span class="mini">Sound: unavailable in this prototype.</span>{% endif %}
       </div>
     </section>
 
@@ -519,12 +546,17 @@
       const initialState = {{ preview_state|tojson }};
       const initialView = {{ initial_view|tojson }};
       const initialChild = {{ initial_child|tojson }};
-      const emojiByImageRef = { dessert: "🍨", game: "🎲", weekend: "🎟️", star: "⭐", treat: "🧁" };
+      const LIVE = {{ (live_mode or false)|tojson }};
+      const CHILD_ONLY = {{ (child_only or false)|tojson }};
+      const API = LIVE ? "/api/gold-stars" : "/api/gold-stars/preview";
+      const MASCOT_URL = ((initialState.character || {}).asset_url) || "/static/assets/gold-star/star-hop-blink.glb";
+      const emojiByImageRef = { dessert: "🍨", game: "🎲", weekend: "🎟️", star: "⭐", treat: "🧁", toy: "🧸", outing: "🛝", screen: "📺", book: "📚", art: "🎨" };
+      const imageLabels = { dessert: "Dessert", game: "Game", weekend: "Weekend outing", star: "Star", treat: "Treat", toy: "Toy", outing: "Park / outing", screen: "Show / screen time", book: "Book", art: "Art & crafts" };
 
       const app = {
         state: initialState,
         view: initialView || "parent-overview",
-        child: initialChild || "Avery",
+        child: initialChild || ((initialState.child_names || [])[0]) || "Avery",
         historyFilterChild: "all",
         historyFilterType: "all",
         busy: false,
@@ -550,14 +582,71 @@
       };
 
       const api = {
-        state: "/api/gold-stars/preview/state",
-        reset: "/api/gold-stars/preview/reset",
-        prefs: "/api/gold-stars/preview/preferences",
-        awards: "/api/gold-stars/preview/awards",
-        collect: "/api/gold-stars/preview/awards/collect",
-        catalog: "/api/gold-stars/preview/catalog",
-        requestReward: "/api/gold-stars/preview/requests",
+        state: `${API}/state`,
+        reset: `${API}/reset`,
+        prefs: `${API}/preferences`,
+        awards: `${API}/awards`,
+        collect: `${API}/awards/collect`,
+        catalog: `${API}/catalog`,
+        requestReward: `${API}/requests`,
       };
+
+      function childNames() {
+        const names = app.state.child_names || Object.keys(app.state.children || {});
+        return names.length ? names : ["Avery", "Harley"];
+      }
+
+      function newToken() {
+        if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
+        return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      }
+
+      function rewardPicture(reward) {
+        if (reward.image_url) return `<img class="reward-photo" src="${escapeHtml(reward.image_url)}" alt="" />`;
+        return `<div class="reward-illus">${emojiByImageRef[reward.image_ref] || "⭐"}</div>`;
+      }
+
+      // ---- 3D mascot (falls back to the 2D star if WebGL/model fails) ----
+      const mascot = { adapter: null, host: null, failed: false, lastState: null, loading: false };
+      function mascotWanted() {
+        return app.view.startsWith("child-");
+      }
+      async function ensureMascot() {
+        if (mascot.adapter || mascot.failed || mascot.loading) return;
+        mascot.loading = true;
+        try {
+          const mod = await import("/static/js/gold_star_mascot.js");
+          if (!mod.webglAvailable()) throw new Error("no webgl");
+          mascot.host = document.createElement("div");
+          mascot.host.className = "mascot-host";
+          const slot = document.getElementById("mascotSlot");
+          (slot || document.body).appendChild(mascot.host);
+          mascot.adapter = await mod.createStarMascot(mascot.host, { url: MASCOT_URL, reducedMotion: motionReduced() });
+          window.__goldStarCharacterAdapter = mascot.adapter;
+        } catch (err) {
+          console.warn("[gold-stars] 3D star unavailable, using 2D star", err);
+          mascot.failed = true;
+          if (mascot.host) mascot.host.remove();
+          mascot.host = null;
+        } finally {
+          mascot.loading = false;
+          render();
+        }
+      }
+      function attachMascot() {
+        const slot = document.getElementById("mascotSlot");
+        if (slot && mascot.host && mascot.host.parentElement !== slot) {
+          slot.appendChild(mascot.host);
+          if (mascot.adapter) mascot.adapter.resize();
+        }
+      }
+      function driveMascot(stateName) {
+        if (!mascot.adapter) return;
+        mascot.adapter.setReducedMotion(motionReduced());
+        if (stateName === mascot.lastState) return;
+        mascot.lastState = stateName;
+        if (typeof mascot.adapter[stateName] === "function") mascot.adapter[stateName]();
+      }
 
       function currentChildData() {
         return (app.state.children || {})[app.child] || null;
@@ -630,6 +719,7 @@
       }
 
       function childUrl(childName) {
+        if (LIVE) return `/kids-stars?child=${encodeURIComponent(childName || "")}`;
         return `/gold-stars/preview/child/${encodeURIComponent(childName || "Avery")}`;
       }
 
@@ -638,13 +728,19 @@
       }
 
       function renderParentOverview() {
-        const cards = ["Avery", "Harley"].map((child) => {
+        const cards = childNames().map((child) => {
           const data = app.state.children[child];
+          if (!data) return "";
+          const waitingList = LIVE ? (data.waiting_awards || []).map((a) => `
+                <li class="mini flex items-center justify-between gap-2">
+                  <span>Waiting: ${escapeHtml(a.note || "star")} · from ${escapeHtml(a.awarded_by)}</span>
+                  <button class="btn btn-soft" data-action="void-award" data-award-id="${a.id}" title="Remove a star given by mistake">Undo</button>
+                </li>`).join("") : "";
           return `
             <article class="card">
               <div class="flex items-center justify-between gap-2">
                 <h2 class="text-lg font-bold m-0">${child}</h2>
-                <a class="btn btn-soft" href="${childUrl(child)}">Open child preview</a>
+                <a class="btn btn-soft" href="${childUrl(child)}">${LIVE ? "Open kid screen" : "Open child preview"}</a>
               </div>
               <div class="grid-three mt-3">
                 <div class="metric"><p class="label">Available</p><p class="value">${data.available}</p></div>
@@ -658,31 +754,32 @@
                 <input type="text" data-note-input="${child}" placeholder="Optional award note" />
                 <button class="btn btn-primary" data-action="award-star" data-child="${child}">Give ${child} one star</button>
               </div>
+              ${waitingList ? `<ul class="mt-2" style="list-style:none;padding:0;display:grid;gap:0.35rem">${waitingList}</ul>` : ""}
             </article>`;
         }).join("");
         dom.views.parentOverview.innerHTML = `
-          <h2 class="text-xl font-bold mt-0 mb-2">Parent overview</h2>
-          <p class="mini mb-3">Demo view identity never changes your real session authorization.</p>
+          <h2 class="text-xl font-bold mt-0 mb-2">${LIVE ? "Today" : "Parent overview"}</h2>
+          <p class="mini mb-3">${LIVE ? `${app.state.overview.pending_requests} reward request(s) waiting · ${app.state.overview.ready_to_deliver} reward(s) to hand over.` : "Demo view identity never changes your real session authorization."}</p>
           <div class="grid-two">${cards}</div>`;
       }
 
       function renderParentRewards() {
         const catalogCards = (app.state.catalog || []).map((reward) => `
           <article class="reward-item">
-            <div class="reward-illus">${emojiByImageRef[reward.image_ref] || "⭐"}</div>
+            ${rewardPicture(reward)}
             <h3 class="row-title mt-2 mb-1">${escapeHtml(reward.name)}</h3>
             <p class="mini">Cost: ${reward.cost} stars</p>
             <p class="mini">Eligible: ${(reward.eligible_children || []).join(", ")}</p>
             <p class="mini">Status: ${reward.active ? "Active" : "Archived"}</p>
             <div class="flex gap-2 mt-2">
               <button class="btn btn-soft" data-action="edit-reward" data-reward-id="${reward.id}">Edit</button>
-              ${reward.active ? `<button class="btn btn-danger" data-action="archive-reward" data-reward-id="${reward.id}">Archive</button>` : ""}
+              ${reward.active ? `<button class="btn btn-danger" data-action="archive-reward" data-reward-id="${reward.id}">Archive</button>` : (LIVE ? `<button class="btn btn-soft" data-action="restore-reward" data-reward-id="${reward.id}">Restore</button>` : "")}
             </div>
           </article>
         `).join("");
         dom.views.parentRewards.innerHTML = `
           <h2 class="text-xl font-bold mt-0 mb-2">Reward catalog editor</h2>
-          <p class="mini mb-3">Cost is validated server-side as integer 1-${app.state.notes.cost_bound}. Images are local illustration references for this prototype.</p>
+          <p class="mini mb-3">Cost is a whole number from 1 to ${app.state.notes.cost_bound}. Changing a price or who can get a reward cancels any waiting request for it, with an explanation.</p>
           <form id="rewardEditorForm" class="card mb-3">
             <div class="editor-grid">
               <label class="mini">Reward name
@@ -690,11 +787,7 @@
               </label>
               <label class="mini">Picture/illustration
                 <select id="rewardImageRef">
-                  <option value="dessert">Dessert illustration</option>
-                  <option value="game">Game illustration</option>
-                  <option value="weekend">Weekend illustration</option>
-                  <option value="star">Star illustration</option>
-                  <option value="treat">Treat illustration</option>
+                  ${(app.state.notes.image_refs || ["dessert", "game", "weekend", "star", "treat"]).map((ref) => `<option value="${ref}">${emojiByImageRef[ref] || "⭐"} ${imageLabels[ref] || ref}</option>`).join("")}
                 </select>
               </label>
               <label class="mini">Exact cost
@@ -705,8 +798,7 @@
               </label>
             </div>
             <div class="flex items-center gap-4 mt-2">
-              <label class="mini"><input type="checkbox" id="eligibleAvery" checked /> Avery</label>
-              <label class="mini"><input type="checkbox" id="eligibleHarley" checked /> Harley</label>
+              ${childNames().map((name) => `<label class="mini"><input type="checkbox" data-eligible-child="${escapeHtml(name)}" checked /> ${escapeHtml(name)}</label>`).join("")}
               <label class="mini"><input type="checkbox" id="rewardActive" checked /> Active</label>
               <button class="btn btn-primary" type="submit">Add reward</button>
             </div>
@@ -737,7 +829,8 @@
             <p class="mini mt-1 mb-0">Approved by ${escapeHtml(delivery.approved_by || "parent")}</p>
             ${(delivery.status === "ready")
               ? `<button class="btn btn-primary mt-2" data-action="deliver-reward" data-delivery-id="${delivery.id}">Mark delivered</button>`
-              : `<p class="mini mt-2 mb-0">Delivered by ${escapeHtml(delivery.delivered_by || "parent")}</p>`}
+              : `<p class="mini mt-2 mb-0">${delivery.status === "refunded" ? `Refunded: ${escapeHtml(delivery.refund_reason || "")}` : `Delivered by ${escapeHtml(delivery.delivered_by || "parent")}`}</p>`}
+            ${(LIVE && delivery.status !== "refunded") ? `<button class="btn btn-soft mt-2" data-action="refund-reward" data-delivery-id="${delivery.id}" title="Give the stars back">Refund stars</button>` : ""}
           </article>`).join("");
         dom.views.parentRequests.innerHTML = `
           <h2 class="text-xl font-bold mt-0 mb-2">Requests and shared delivery queue</h2>
@@ -775,8 +868,7 @@
           <div class="history-filters">
             <select id="historyFilterChild">
               <option value="all">All children</option>
-              <option value="Avery" ${app.historyFilterChild === "Avery" ? "selected" : ""}>Avery</option>
-              <option value="Harley" ${app.historyFilterChild === "Harley" ? "selected" : ""}>Harley</option>
+              ${childNames().map((name) => `<option value="${escapeHtml(name)}" ${app.historyFilterChild === name ? "selected" : ""}>${escapeHtml(name)}</option>`).join("")}
             </select>
             <select id="historyFilterType">
               <option value="all">All activity</option>
@@ -787,6 +879,8 @@
               <option value="declined" ${app.historyFilterType === "declined" ? "selected" : ""}>Declined</option>
               <option value="invalidated" ${app.historyFilterType === "invalidated" ? "selected" : ""}>Invalidated</option>
               <option value="delivered" ${app.historyFilterType === "delivered" ? "selected" : ""}>Delivered</option>
+              <option value="corrected" ${app.historyFilterType === "corrected" ? "selected" : ""}>Corrected</option>
+              <option value="refunded" ${app.historyFilterType === "refunded" ? "selected" : ""}>Refunded</option>
             </select>
           </div>
           <div class="table-like">${items || '<p class="mini">No history yet.</p>'}</div>`;
@@ -798,7 +892,7 @@
             <button class="tab-btn ${active === "child-board" ? "active" : ""}" data-view="child-board" data-child="${app.child}">My Board</button>
             <button class="tab-btn ${active === "child-rewards" ? "active" : ""}" data-view="child-rewards" data-child="${app.child}">My Rewards</button>
             <button class="tab-btn ${active === "child-story" ? "active" : ""}" data-view="child-story" data-child="${app.child}">My Star Story</button>
-            <button class="tab-btn" data-view="parent-overview">Back to parent preview</button>
+            ${CHILD_ONLY ? (app.state.is_parent ? `<a class="tab-btn" href="/gold-stars">Back to parent screen</a>` : "") : `<button class="tab-btn" data-view="parent-overview">${LIVE ? "Back to parent screen" : "Back to parent preview"}</button>`}
           </div>`;
       }
 
@@ -812,6 +906,13 @@
       }
 
       function characterHtml(stateName, childName) {
+        if (mascot.adapter) {
+          return `
+          <div class="character-wrap">
+            <div id="sceneSparkles" class="scene-sparkles" aria-hidden="true"></div>
+            <div id="mascotSlot" class="mascot-slot" data-action="tap-character" role="img" aria-label="${escapeHtml(childName)} star friend"></div>
+          </div>`;
+        }
         const safeState = ["idle", "noticeNewStar", "tapReaction", "collecting", "celebrate", "rewardApproved"].includes(stateName) ? stateName : "idle";
         const reducedClass = motionReduced() ? "motion-reduced" : "";
         return `
@@ -854,7 +955,7 @@
               </svg>
             </div>
           </div>
-          <p class="character-caption">Temporary procedural star stand-in (replaceable visual component)</p>`;
+          ${LIVE ? "" : '<p class="character-caption">Temporary procedural star stand-in (replaceable visual component)</p>'}`;
       }
 
       function renderChildBoard() {
@@ -863,16 +964,16 @@
         const board = boundedBoardPreview(child.board_stars);
         const waiting = (child.waiting_awards || []).map((award) => `
           <article class="row waiting-award" data-award-row="${award.id}">
-            <p class="row-title m-0">Waiting star #${award.id}</p>
-            <p class="mini mt-1 mb-0">${escapeHtml(award.note || "Parent approved a star")}</p>
-            <button class="btn btn-primary mt-2" data-action="collect-star" data-award-id="${award.id}" data-child="${app.child}">Collect star</button>
+            <p class="row-title m-0">⭐ A new star for you!</p>
+            <p class="mini mt-1 mb-0">${escapeHtml(award.note || `From ${award.awarded_by || "a parent"}`)}</p>
+            <button class="btn btn-primary mt-2" data-action="collect-star" data-award-id="${award.id}" data-child="${app.child}">Tap to put it on your board</button>
           </article>
         `).join("");
         const stars = new Array(board.visible).fill(0).map(() => '<span class="board-star"></span>').join("");
         dom.views.childBoard.innerHTML = `
           ${childNav("child-board")}
           <h2 class="text-xl font-bold mt-0 mb-1">${app.child} · My Board</h2>
-          <p class="mini mb-3">Collect stars, keep your all-time achievement, and trade available stars for rewards.</p>
+          <p class="mini mb-3">${(child.waiting_count || 0) > 0 ? "You have a new star! Tap it to put it on your board." : "Collect stars and trade them for rewards."}</p>
           <div class="child-scene">
             <section class="child-hero">
               ${characterHtml(stateClassForCharacter(child), app.child)}
@@ -890,9 +991,9 @@
               <div class="table-like">${waiting || '<p class="mini">No waiting stars right now.</p>'}</div>
               <h3 class="text-base font-semibold mt-3 mb-2">Collected board stars</h3>
               <div id="boardAnchor" class="board">${stars || '<p class="mini">No stars yet.</p>'}${board.overflow > 0 ? `<span class="board-more">+${board.overflow}</span>` : ""}</div>
-              <p class="mini mt-2">Grouped board preview keeps large balances readable; numeric balance is authoritative.</p>
+              ${LIVE ? "" : `<p class="mini mt-2">Grouped board preview keeps large balances readable; numeric balance is authoritative.</p>
               <p class="mini mt-1">Character states: idle, noticeNewStar, tapReaction, collecting, celebrate, rewardApproved.</p>
-              <p class="mini mt-1">Animation can fail without blocking accounting or API outcomes. Sound remains unavailable in this prototype.</p>
+              <p class="mini mt-1">Animation can fail without blocking accounting or API outcomes. Sound remains unavailable in this prototype.</p>`}
             </section>
           </div>`;
       }
@@ -902,11 +1003,11 @@
         if (!child) return;
         const cards = (child.active_rewards || []).map((reward) => `
           <article class="reward-item">
-            <div class="reward-illus">${emojiByImageRef[reward.image_ref] || "⭐"}</div>
+            ${rewardPicture(reward)}
             <h3 class="row-title mt-2 mb-1">${escapeHtml(reward.name)}</h3>
-            <p class="mini">Cost: ${reward.cost} stars</p>
-            <p class="mini">Remaining after request: ${reward.remaining_after_request}</p>
-            <button class="btn ${reward.affordable ? "btn-primary" : "btn-soft"} mt-2" data-action="request-reward" data-reward-id="${reward.id}" data-child="${app.child}" ${reward.affordable ? "" : "disabled"}>${reward.affordable ? "Request reward" : "Not enough stars"}</button>
+            <p class="mini" style="font-size:1.05rem">${"⭐".repeat(Math.min(reward.cost, 10))}${reward.cost > 10 ? ` ×${reward.cost}` : ""}</p>
+            <p class="mini">${reward.affordable ? `You'll have ${reward.remaining_after_request} left` : `${-reward.remaining_after_request} more to go`}</p>
+            <button class="btn ${reward.affordable ? "btn-primary" : "btn-soft"} mt-2" data-action="request-reward" data-reward-id="${reward.id}" data-child="${app.child}" ${(reward.affordable && !child.pending_request) ? "" : "disabled"}>${child.pending_request ? "Waiting for a parent" : (reward.affordable ? "I want this!" : "Not enough stars yet")}</button>
           </article>
         `).join("");
         const pending = child.pending_request;
@@ -914,7 +1015,7 @@
         dom.views.childRewards.innerHTML = `
           ${childNav("child-rewards")}
           <h2 class="text-xl font-bold mt-0 mb-2">${app.child} · My Rewards</h2>
-          ${pending ? `<div class="row mb-3">${badge(pending.status)} <p class="mini mt-2 mb-0">Waiting for parent: ${escapeHtml(pending.reward_name)} (${pending.requested_cost}⭐)</p></div>` : ""}
+          ${pending ? `<div class="row mb-3">${badge(pending.status)} <p class="mini mt-2 mb-0">Waiting for parent: ${escapeHtml(pending.reward_name)} (${pending.requested_cost}⭐)</p>${LIVE ? `<button class="btn btn-soft mt-2" data-action="cancel-request" data-request-id="${pending.id}">Change my mind</button>` : ""}</div>` : ""}
           ${delivery ? `<div class="row mb-3">${badge(delivery.status)} <p class="mini mt-2 mb-0">${escapeHtml(delivery.reward_name)} · ${delivery.status === "ready" ? "Approved / ready to enjoy" : "Delivered"}</p></div>` : ""}
           <div class="reward-grid">${cards || '<p class="mini">No eligible active rewards right now.</p>'}</div>`;
       }
@@ -965,6 +1066,12 @@
         }
         dom.parentToolbar.classList.toggle("hidden", childView);
         dom.motionToggle.checked = !app.state.motion_enabled;
+        if (mascotWanted()) {
+          if (!mascot.adapter && !mascot.failed) ensureMascot();
+          attachMascot();
+          const childData = currentChildData();
+          if (childData) driveMascot(stateClassForCharacter(childData));
+        }
         for (const tab of dom.tabButtons) {
           const tabView = tab.dataset.view || "";
           const tabChild = tab.dataset.child || "";
@@ -1053,7 +1160,7 @@
             render();
           });
         });
-        dom.resetDemoBtn.addEventListener("click", async () => {
+        if (dom.resetDemoBtn) dom.resetDemoBtn.addEventListener("click", async () => {
           await post(api.reset, {});
           app.view = "parent-overview";
           app.child = "Avery";
@@ -1079,9 +1186,9 @@
         const name = document.getElementById("rewardName").value;
         const costInput = document.getElementById("rewardCostInput");
         const imageRef = document.getElementById("rewardImageRef").value;
-        const eligibleChildren = [];
-        if (document.getElementById("eligibleAvery").checked) eligibleChildren.push("Avery");
-        if (document.getElementById("eligibleHarley").checked) eligibleChildren.push("Harley");
+        const eligibleChildren = Array.from(document.querySelectorAll("[data-eligible-child]"))
+          .filter((el) => el.checked)
+          .map((el) => el.getAttribute("data-eligible-child"));
         const active = document.getElementById("rewardActive").checked;
         await post(api.catalog, {
           name,
@@ -1129,6 +1236,7 @@
         const action = actionEl.getAttribute("data-action");
         if (!action) return;
         if (action === "tap-character") {
+          if (mascot.adapter) { mascot.adapter.tapReaction(); return; }
           clearCharacterTimers();
           queueCharacterState("tapReaction", motionReduced() ? 0 : 520, null);
           return;
@@ -1138,7 +1246,7 @@
             const child = actionEl.getAttribute("data-child");
             const noteInput = document.querySelector(`[data-note-input="${child}"]`);
             const note = noteInput ? noteInput.value : "";
-            await post(api.awards, { child_name: child, note });
+            await post(api.awards, { child_name: child, note, client_token: newToken() });
             if (noteInput) noteInput.value = "";
             if (app.child === child && app.view.startsWith("child-")) {
               clearCharacterTimers();
@@ -1178,21 +1286,22 @@
             return;
           }
           if (action === "approve-request") {
-            await post(`/api/gold-stars/preview/requests/${Number(actionEl.getAttribute("data-request-id"))}/approve`, {});
+            await post(`${API}/requests/${Number(actionEl.getAttribute("data-request-id"))}/approve`, {});
             clearCharacterTimers();
             queueCharacterState("rewardApproved", motionReduced() ? 0 : 760, null);
             return;
           }
           if (action === "decline-request") {
-            await post(`/api/gold-stars/preview/requests/${Number(actionEl.getAttribute("data-request-id"))}/decline`, {});
+            const reason = LIVE ? (window.prompt("Optional: tell them why (they'll see this)", "Not this time") || "") : "";
+            await post(`${API}/requests/${Number(actionEl.getAttribute("data-request-id"))}/decline`, { reason });
             return;
           }
           if (action === "deliver-reward") {
-            await post(`/api/gold-stars/preview/delivery/${Number(actionEl.getAttribute("data-delivery-id"))}/deliver`, {});
+            await post(`${API}/delivery/${Number(actionEl.getAttribute("data-delivery-id"))}/deliver`, {});
             return;
           }
           if (action === "archive-reward") {
-            await post(`/api/gold-stars/preview/catalog/${Number(actionEl.getAttribute("data-reward-id"))}/archive`, {});
+            await post(`${API}/catalog/${Number(actionEl.getAttribute("data-reward-id"))}/archive`, {});
             return;
           }
           if (action === "edit-reward") {
@@ -1201,7 +1310,27 @@
             if (!reward) return;
             const nextCost = Math.max(1, Math.min(app.state.notes.cost_bound, Number(window.prompt("New cost", String(reward.cost)) || reward.cost)));
             const nextName = window.prompt("New reward name", reward.name) || reward.name;
-            await put(`/api/gold-stars/preview/catalog/${rewardId}`, { name: nextName, cost: nextCost });
+            await put(`${API}/catalog/${rewardId}`, { name: nextName, cost: nextCost });
+            return;
+          }
+          if (action === "restore-reward") {
+            await put(`${API}/catalog/${Number(actionEl.getAttribute("data-reward-id"))}`, { active: true });
+            return;
+          }
+          if (action === "void-award") {
+            const reason = window.prompt("Remove this star? Type a short reason (kept in history).", "Given by mistake");
+            if (!reason) return;
+            await post(`${API}/awards/${Number(actionEl.getAttribute("data-award-id"))}/void`, { reason });
+            return;
+          }
+          if (action === "refund-reward") {
+            const reason = window.prompt("Give these stars back? Type a short reason (kept in history).", "");
+            if (!reason) return;
+            await post(`${API}/delivery/${Number(actionEl.getAttribute("data-delivery-id"))}/refund`, { reason });
+            return;
+          }
+          if (action === "cancel-request") {
+            await post(`${API}/requests/${Number(actionEl.getAttribute("data-request-id"))}/cancel`, {});
             return;
           }
         } catch (err) {
@@ -1212,13 +1341,75 @@
       async function boot() {
         wireStaticEvents();
         render();
+        if (LIVE) {
+          // keep tablets and both parents in sync without a page reload
+          window.setInterval(() => {
+            if (document.hidden || app.busy) return;
+            refreshState().catch(() => null);
+          }, 8000);
+          document.addEventListener("visibilitychange", () => {
+            if (!document.hidden) refreshState().catch(() => null);
+          });
+        }
         await refreshState();
       }
 
       boot().catch((error) => {
-        window.alert(error.message || "Failed to load preview");
+        console.warn(error);
       });
     })();
   </script>
+  {% if child_only %}
+  <!-- Grown-ups: press and hold the top-right corner for 2 seconds -->
+  <div class="grownup-corner" id="grownupCorner" aria-hidden="true"></div>
+  <div class="pin-modal hidden" id="pinModal" role="dialog" aria-modal="true" aria-labelledby="pinModalTitle">
+    <form class="card" id="pinForm">
+      <h2 class="text-lg font-bold mt-0 mb-2" id="pinModalTitle">Grown-ups only</h2>
+      <p class="mini mb-3">Enter a parent PIN to unlock this tablet and leave the kids' screen.</p>
+      <label class="mini">Parent
+        <select id="pinParent"><option>Mykal</option><option>Rachel</option></select>
+      </label>
+      <label class="mini mt-2 block">PIN
+        <input id="pinValue" type="password" inputmode="numeric" maxlength="4" autocomplete="off" />
+      </label>
+      <p class="mini mt-2" id="pinError" style="color:#be123c"></p>
+      <div class="flex gap-2 mt-3">
+        <button class="btn btn-primary" type="submit">Unlock</button>
+        <button class="btn btn-soft" type="button" id="pinCancel">Cancel</button>
+      </div>
+    </form>
+  </div>
+  <script>
+    (() => {
+      const corner = document.getElementById("grownupCorner");
+      const modal = document.getElementById("pinModal");
+      const form = document.getElementById("pinForm");
+      const err = document.getElementById("pinError");
+      let holdTimer = null;
+      const start = () => { holdTimer = window.setTimeout(() => { modal.classList.remove("hidden"); document.getElementById("pinValue").focus(); }, 2000); };
+      const stop = () => { window.clearTimeout(holdTimer); holdTimer = null; };
+      ["pointerdown"].forEach((e) => corner.addEventListener(e, start));
+      ["pointerup", "pointerleave", "pointercancel"].forEach((e) => corner.addEventListener(e, stop));
+      document.getElementById("pinCancel").addEventListener("click", () => { modal.classList.add("hidden"); err.textContent = ""; });
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        err.textContent = "";
+        try {
+          const res = await fetch("/api/rewards/kiosk-mode", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ enabled: false, parent_name: document.getElementById("pinParent").value, unlock_pin: document.getElementById("pinValue").value }),
+          });
+          const body = await res.json().catch(() => ({}));
+          if (!res.ok || !body.ok) { err.textContent = body.error || "That didn't work."; return; }
+          window.location.href = "/logout";
+        } catch (_) {
+          err.textContent = "Couldn't reach Home Hub.";
+        }
+      });
+    })();
+  </script>
+  {% endif %}
 </body>
 </html>

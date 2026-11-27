@@ -1,5 +1,6 @@
 from . import db
 from datetime import datetime
+from sqlalchemy import text as _sa_text
 
 class Note(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -1022,6 +1023,7 @@ class FamilyMember(db.Model):
     weather_longitude = db.Column(db.Float, nullable=True)
     weather_location_name = db.Column(db.String(256), nullable=True)
     weather_use_gps_location = db.Column(db.Boolean, default=False)
+    access_tier = db.Column(db.String(16), nullable=False, default='immediate')  # immediate|extended
     added_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
@@ -1266,3 +1268,145 @@ class PlaidTransaction(db.Model):
     pending = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     synced_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+# ---------------------------------------------------------------------------
+# Gold Star Club v1 (persistent). These tables replace the old KidReward*
+# discipline flow for the live /gold-stars page. They start empty ("fresh
+# start"); the old KidReward* tables are left untouched and unused.
+#
+# Balances are never stored. They are derived from rows so the invariant
+#   earned = available + waiting + net_spent
+# always holds:
+#   earned    = awards not voided
+#   waiting   = awards not voided and not collected
+#   net_spent = sum(purchase.cost) - sum(purchase.refunded_cost)
+#   available = earned - waiting - net_spent
+# ---------------------------------------------------------------------------
+
+class GoldStarAward(db.Model):
+    __table_args__ = (
+        db.Index('idx_gold_star_award_child', 'child_name', 'collected_at'),
+    )
+    id = db.Column(db.Integer, primary_key=True)
+    child_name = db.Column(db.String(128), nullable=False)
+    note = db.Column(db.String(140), default='')
+    awarded_by = db.Column(db.String(128), nullable=False)
+    awarded_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    # Client-generated token so a double tap / retried request creates one star.
+    client_token = db.Column(db.String(64), unique=True, nullable=True)
+    collected_at = db.Column(db.DateTime, nullable=True)
+    collected_by = db.Column(db.String(128), nullable=True)
+    voided_at = db.Column(db.DateTime, nullable=True)
+    voided_by = db.Column(db.String(128), nullable=True)
+    void_reason = db.Column(db.String(220), nullable=True)
+
+
+class GoldStarReward(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(140), nullable=False)
+    image_ref = db.Column(db.String(64), default='star')
+    image_url = db.Column(db.String(512), nullable=True)
+    cost = db.Column(db.Integer, nullable=False)
+    eligible_children_json = db.Column(db.Text, default='[]')
+    active = db.Column(db.Boolean, default=True, nullable=False)
+    version = db.Column(db.Integer, default=1, nullable=False)
+    created_by = db.Column(db.String(128), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_by = db.Column(db.String(128))
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow)
+    archived_at = db.Column(db.DateTime, nullable=True)
+
+
+class GoldStarRequest(db.Model):
+    __table_args__ = (
+        # At most one pending request per child, enforced by the database.
+        db.Index(
+            'uq_gold_star_request_one_pending',
+            'child_name',
+            unique=True,
+            sqlite_where=_sa_text("status = 'pending'"),
+            postgresql_where=_sa_text("status = 'pending'"),
+        ),
+    )
+    id = db.Column(db.Integer, primary_key=True)
+    child_name = db.Column(db.String(128), nullable=False, index=True)
+    reward_id = db.Column(db.Integer, nullable=False)
+    reward_version = db.Column(db.Integer, nullable=False, default=1)
+    reward_name = db.Column(db.String(140), nullable=False)  # snapshot
+    image_ref = db.Column(db.String(64), default='star')     # snapshot
+    image_url = db.Column(db.String(512), nullable=True)     # snapshot
+    requested_cost = db.Column(db.Integer, nullable=False)   # snapshot
+    status = db.Column(db.String(16), nullable=False, default='pending')  # pending|approved|declined|invalidated|cancelled
+    status_message = db.Column(db.String(220), default='')
+    requested_by = db.Column(db.String(128), nullable=False)
+    requested_at = db.Column(db.DateTime, default=datetime.utcnow)
+    resolved_by = db.Column(db.String(128))
+    resolved_at = db.Column(db.DateTime)
+
+
+class GoldStarPurchase(db.Model):
+    """An approved request. Deducts stars exactly once and doubles as the
+    shared delivery record either parent can complete."""
+    id = db.Column(db.Integer, primary_key=True)
+    request_id = db.Column(db.Integer, nullable=False, unique=True)
+    child_name = db.Column(db.String(128), nullable=False, index=True)
+    reward_id = db.Column(db.Integer, nullable=False)
+    reward_name = db.Column(db.String(140), nullable=False)
+    image_ref = db.Column(db.String(64), default='star')
+    image_url = db.Column(db.String(512), nullable=True)
+    cost = db.Column(db.Integer, nullable=False)
+    refunded_cost = db.Column(db.Integer, nullable=False, default=0)
+    status = db.Column(db.String(16), nullable=False, default='ready')  # ready|delivered|refunded
+    approved_by = db.Column(db.String(128), nullable=False)
+    approved_at = db.Column(db.DateTime, default=datetime.utcnow)
+    delivered_by = db.Column(db.String(128))
+    delivered_at = db.Column(db.DateTime)
+    refunded_by = db.Column(db.String(128))
+    refunded_at = db.Column(db.DateTime)
+    refund_reason = db.Column(db.String(220))
+
+
+class GoldStarEvent(db.Model):
+    """Append-only audit history."""
+    id = db.Column(db.Integer, primary_key=True)
+    event_type = db.Column(db.String(32), nullable=False)
+    actor = db.Column(db.String(128), nullable=False)
+    child_name = db.Column(db.String(128), default='', index=True)
+    stars_delta = db.Column(db.Integer, default=0)
+    message = db.Column(db.String(220), default='')
+    context = db.Column(db.String(220), default='')
+    reward_json = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+
+class GoldStarSetting(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(64), unique=True, nullable=False)
+    value = db.Column(db.Text, default='')
+    updated_by = db.Column(db.String(128))
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class AccessTierPolicy(db.Model):
+    """Which app modules each family access tier can open by default.
+    tier: 'immediate' | 'extended'. Explicit grants in Settings still win."""
+    id = db.Column(db.Integer, primary_key=True)
+    tier = db.Column(db.String(32), unique=True, nullable=False)
+    modules_json = db.Column(db.Text, default='[]')
+    updated_by = db.Column(db.String(128))
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class MemberInvite(db.Model):
+    """One-time invite link sent to a new family member."""
+    id = db.Column(db.Integer, primary_key=True)
+    member_id = db.Column(db.Integer, nullable=False, index=True)
+    email = db.Column(db.String(256), nullable=False)
+    token_hash = db.Column(db.String(128), unique=True, nullable=False)
+    invited_by = db.Column(db.String(128), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    accepted_at = db.Column(db.DateTime, nullable=True)
+    revoked_at = db.Column(db.DateTime, nullable=True)
+    email_sent = db.Column(db.Boolean, default=False)

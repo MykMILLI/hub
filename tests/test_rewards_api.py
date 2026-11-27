@@ -314,7 +314,7 @@ def test_welcome_parent_helper_card_hides_debug_for_non_admin(client):
 def test_gold_stars_kid_view_hides_admin_controls(client):
     with client.session_transaction() as session:
         session['current_member'] = 'Rachel'
-    response = client.get('/gold-stars?kid_view=1')
+    response = client.get('/gold-stars/legacy?kid_view=1')
     assert response.status_code == 200
     html = response.get_data(as_text=True)
     assert 'Kid-safe mode is on.' in html
@@ -325,7 +325,7 @@ def test_gold_stars_kid_view_hides_admin_controls(client):
 def test_kids_stars_tablet_view_renders(client):
     with client.session_transaction() as session:
         session['current_member'] = 'Avery'
-    response = client.get('/kids-stars')
+    response = client.get('/kids-stars/legacy')
     assert response.status_code == 200
     html = response.get_data(as_text=True)
     assert 'Kid Star Board' in html

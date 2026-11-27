@@ -1,0 +1,1 @@
+three.js r187 (MIT). three.module.js/three.core.js from npm three@0.187.0; addons/ copied verbatim from github.com/mrdoob/three.js tag r187 examples/jsm with the bare 'three' import rewritten to a relative path.
