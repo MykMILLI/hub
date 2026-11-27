@@ -15,19 +15,19 @@
       --muted: #6b5b8a;
       --purple: #7c3aed;
       --radius: 1.35rem;
-      --gap: clamp(.7rem, 1.4vw, 1.2rem);
-      --fs: clamp(15px, 1.05vw + 6px, 22px);
+      --gap: clamp(.5rem, .9vw, .9rem);
+      --fs: clamp(13px, .7vw + 5px, 20px);
     }
     * { box-sizing: border-box; }
     html, body { margin: 0; min-height: 100%; }
     body { font-family: Inter, "Segoe UI", system-ui, sans-serif; font-size: var(--fs); color: var(--text); background: var(--bg); background-attachment: fixed;
       padding: max(var(--gap), env(safe-area-inset-top)) max(var(--gap), env(safe-area-inset-right)) max(var(--gap), env(safe-area-inset-bottom)) max(var(--gap), env(safe-area-inset-left)); }
     button { font: inherit; color: inherit; }
-    .screen { display: grid; gap: var(--gap); max-width: 2200px; margin: 0 auto; }
+    .screen { display: grid; gap: var(--gap); max-width: 2400px; margin: 0 auto; }
 
     /* header */
     .top { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: var(--gap); }
-    .clock { font-size: clamp(3rem, 6.2vw, 7.5rem); font-weight: 800; letter-spacing: -.03em; line-height: .95; font-variant-numeric: tabular-nums; }
+    .clock { font-size: clamp(2.4rem, 4.2vw, 5.2rem); font-weight: 800; letter-spacing: -.03em; line-height: .95; font-variant-numeric: tabular-nums; }
     .clock small { font-size: .38em; font-weight: 700; margin-left: .15em; color: var(--muted); letter-spacing: 0; }
     .date { font-size: clamp(1.1rem, 1.6vw, 2rem); font-weight: 700; }
     .greet { color: var(--muted); margin-top: .15rem; }
@@ -35,8 +35,8 @@
     .icon-btn { border: 1px solid var(--border); background: var(--card); border-radius: 999px; padding: .55em .95em; font-weight: 700; cursor: pointer; text-decoration: none; color: var(--text); font-size: .85em; }
 
     /* quick add */
-    .quick { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: var(--gap); }
-    .qa { border: 0; border-radius: var(--radius); padding: clamp(.8rem, 1.6vw, 1.4rem) 1rem; cursor: pointer; display: flex; align-items: center; gap: .7rem;
+    .quick { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--gap); }
+    .qa { border: 0; border-radius: var(--radius); padding: clamp(.45rem, .8vw, .8rem) .9rem; cursor: pointer; display: flex; align-items: center; gap: .7rem;
       font-weight: 800; font-size: 1.12em; box-shadow: 0 10px 24px rgba(76, 29, 149, .10); transition: transform .12s ease, box-shadow .12s ease; text-align: left; touch-action: manipulation; }
     .qa:active { transform: scale(.97); }
     .qa .ico { font-size: 1.7em; line-height: 1; width: 1.6em; height: 1.6em; display: grid; place-items: center; border-radius: .7em; background: rgba(255,255,255,.65); }
@@ -47,19 +47,34 @@
     .qa-event { background: linear-gradient(135deg, #ede9fe, #ddd6fe); color: #4c1d95; }
     .qa-star { background: linear-gradient(135deg, #fff7d6, #fcd34d); color: #78350f; }
 
-    /* layout: big photos top-left, agenda right, star poster bottom-right */
-    .grid { display: grid; gap: var(--gap); align-items: stretch;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      grid-template-areas: "photos photos photos agenda" "inspire inspire inspire agenda" "lists memos stars stars"; }
+    /* layout: one screen, no scrolling (landscape tablets, laptops, TVs).
+       Row 1 verse/motivation strip; row 2 album | groceries | agenda;
+       row 3 to-dos | star chart | memos. Panels scroll inside if they overflow. */
+    .grid { display: grid; gap: var(--gap); min-height: 0;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr) minmax(0, 1fr);
+      grid-template-rows: auto minmax(0, 1fr) minmax(0, 1.25fr);
+      grid-template-areas: "inspire inspire inspire" "photos lists agenda" "todos stars memos"; }
     .a-photos { grid-area: photos; } .a-agenda { grid-area: agenda; } .a-inspire { grid-area: inspire; }
-    .a-lists { grid-area: lists; } .a-memos { grid-area: memos; } .a-stars { grid-area: stars; align-self: start; }
-    @media (max-width: 1200px) { .grid { grid-template-columns: 1fr 1fr; grid-template-areas: "photos photos" "inspire inspire" "agenda lists" "memos memos" "stars stars"; } }
-    @media (max-width: 700px) { .grid { grid-template-columns: 1fr; grid-template-areas: "photos" "inspire" "agenda" "lists" "memos" "stars"; } .top { grid-template-columns: 1fr; } .top-actions { justify-content: flex-start; } }
-    .a-agenda { max-height: none; }
-    #agenda { max-height: calc(100vh - 14rem); overflow-y: auto; }
+    .a-lists { grid-area: lists; } .a-todos { grid-area: todos; } .a-memos { grid-area: memos; } .a-stars { grid-area: stars; }
+    .grid > .panel, .grid > .poster { min-height: 0; display: flex; flex-direction: column; }
+    .scroll { overflow-y: auto; min-height: 0; flex: 1 1 auto; overscroll-behavior: contain; }
+    .grid > .panel.inspire { display: grid; }
+    @media (min-width: 1000px) and (min-height: 600px) {
+      html, body { height: 100%; overflow: hidden; }
+      .screen { height: 100%; grid-template-rows: auto auto minmax(0, 1fr); }
+    }
+    @media (max-width: 999px) {
+      .grid { grid-template-columns: 1fr 1fr; grid-template-rows: none;
+        grid-template-areas: "inspire inspire" "photos agenda" "lists memos" "stars stars" "todos todos"; }
+      .grid > .panel { max-height: 60vh; }
+    }
+    @media (max-width: 640px) {
+      .grid { grid-template-columns: 1fr; grid-template-areas: "inspire" "photos" "stars" "lists" "agenda" "todos" "memos"; }
+      .top { grid-template-columns: 1fr; } .top-actions { justify-content: flex-start; }
+    }
 
     /* photo album */
-    .photos { position: relative; padding: 0; overflow: hidden; min-height: clamp(260px, 42vw, 720px); background: #1e1b2e; }
+    .photos { position: relative; padding: 0; overflow: hidden; min-height: 200px; background: #1e1b2e; }
     .photos img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0; transition: opacity 1.2s ease; }
     .photos img.bg { object-fit: cover; filter: blur(28px) brightness(.55); transform: scale(1.15); opacity: 1; transition: none; }
     .photos img.show { opacity: 1; }
@@ -71,20 +86,21 @@
     /* quotes & verses */
     .inspire { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 1rem; background: linear-gradient(135deg, rgba(254,243,199,.9), rgba(237,233,254,.9)); }
     .inspire .kind { font-size: .75em; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #7c3aed; }
-    .inspire blockquote { margin: .3rem 0 0; font-size: clamp(1.2rem, 1.9vw, 2.1rem); font-weight: 700; line-height: 1.3; font-family: Georgia, "Times New Roman", serif; transition: opacity .6s ease; }
+    .inspire { padding-top: .6rem; padding-bottom: .6rem; }
+    .inspire blockquote { margin: .15rem 0 0; font-size: clamp(1rem, 1.25vw, 1.6rem); font-weight: 700; line-height: 1.3; font-family: Georgia, "Times New Roman", serif; transition: opacity .6s ease; }
     .inspire cite { display: block; margin-top: .4rem; font-style: normal; color: var(--muted); font-weight: 700; }
     .inspire .fade { opacity: 0; }
 
     /* star poster board */
-    .poster { position: relative; border-radius: 1.2rem; padding: clamp(.9rem, 1.6vw, 1.5rem); color: #3b2414;
+    .poster { position: relative; border-radius: 1.2rem; padding: clamp(.6rem, 1vw, 1rem); min-height: 0; overflow-y: auto; color: #3b2414;
       background: radial-gradient(circle at 20% 15%, rgba(255,255,255,.35), transparent 40%), repeating-linear-gradient(45deg, rgba(120,80,30,.03) 0 6px, transparent 6px 12px), #f6deb0;
       border: 10px solid #b7793f; box-shadow: inset 0 0 0 3px #e7c189, 0 14px 30px rgba(76, 40, 10, .25); }
     .poster::before, .poster::after { content: ""; position: absolute; top: -14px; width: 22px; height: 22px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #ff8a8a, #c81e1e); box-shadow: 0 3px 4px rgba(0,0,0,.3); }
     .poster::before { left: 18px; } .poster::after { right: 18px; }
-    .poster h2 { margin: 0 0 .7rem; font-family: "Marker Felt", "Comic Sans MS", "Chalkboard SE", cursive; font-size: 1.5em; color: #9a3412; display: flex; justify-content: space-between; align-items: baseline; gap: .5rem; flex-wrap: wrap; }
+    .poster h2 { margin: 0 0 .4rem; font-family: "Marker Felt", "Comic Sans MS", "Chalkboard SE", cursive; font-size: 1.5em; color: #9a3412; display: flex; justify-content: space-between; align-items: baseline; gap: .5rem; flex-wrap: wrap; }
     .poster h2 small { font-family: Inter, system-ui, sans-serif; font-size: .5em; color: #7c5a3a; font-weight: 700; }
     .chart { display: grid; grid-template-columns: minmax(6.5em, 1.1fr) repeat(7, minmax(2.6em, 1fr)) minmax(6.2em, auto); border: 3px solid #7c4a1e; border-radius: .6rem; overflow: hidden; background: rgba(255,255,255,.55); }
-    .chart > div { border-right: 2px solid rgba(124,74,30,.45); border-bottom: 2px solid rgba(124,74,30,.45); padding: .35rem; min-height: 4.6em; }
+    .chart > div { border-right: 2px solid rgba(124,74,30,.45); border-bottom: 2px solid rgba(124,74,30,.45); padding: .25rem; min-height: 3.4em; }
     .chart .hd { min-height: auto; text-align: center; font-family: "Marker Felt", "Comic Sans MS", cursive; font-weight: 700; background: #fde68a; color: #7c2d12; }
     .chart .hd.today { background: #f59e0b; color: #fff; }
     .chart .kid { display: flex; flex-direction: column; justify-content: center; gap: .15rem; background: #fff7ed; }
@@ -94,7 +110,7 @@
     .chart .kid em { font-style: normal; font-size: .75em; font-weight: 800; color: #b45309; }
     .chart .day { display: flex; flex-wrap: wrap; align-content: flex-start; justify-content: center; gap: 2px; }
     .chart .day.today { background: rgba(254, 243, 199, .8); }
-    .sticker { width: 1.55em; height: 1.55em; display: inline-block; clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+    .sticker { width: 1.25em; height: 1.25em; display: inline-block; clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
       background: radial-gradient(circle at 35% 30%, #fff7c2 0 12%, #ffd84d 30%, #f5b70a 70%, #d48806 100%); filter: drop-shadow(0 1px 0 rgba(0,0,0,.25)); }
     .sticker.pop { animation: stick .6s cubic-bezier(.2,1.6,.4,1); }
     @keyframes stick { 0% { transform: scale(2.6) rotate(-40deg); opacity: 0; } 100% { transform: scale(1) rotate(0); opacity: 1; } }
@@ -112,7 +128,7 @@
     .done-box .tick { width: 4.2rem; height: 4.2rem; border-radius: 50%; margin: 0 auto .6rem; display: grid; place-items: center; background: #22c55e; color: #fff; font-size: 2.2rem; animation: stick .5s ease; }
     .done-box h3 { justify-content: center; }
     .field select { appearance: auto; }
-    .panel { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: clamp(.8rem, 1.4vw, 1.3rem); box-shadow: 0 12px 30px rgba(76, 29, 149, .07); }
+    .panel { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: clamp(.6rem, 1vw, 1.1rem); box-shadow: 0 12px 30px rgba(76, 29, 149, .07); }
     .panel h2 { margin: 0 0 .6rem; font-size: 1.05em; display: flex; justify-content: space-between; align-items: center; gap: .5rem; }
     .panel h2 a { font-size: .75em; color: var(--purple); text-decoration: none; font-weight: 700; }
     .stack { display: grid; gap: var(--gap); }
@@ -136,7 +152,7 @@
     .label small { display: block; color: var(--muted); font-size: .78em; }
 
     .memos { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: .65rem; }
-    .memo { position: relative; background: #fef9c3; border-radius: .9rem; padding: .7rem .8rem 1.9rem; box-shadow: 0 6px 14px rgba(113, 63, 18, .10); transform: rotate(var(--tilt, -1deg)); min-height: 6.5em; }
+    .memo { position: relative; background: #fef9c3; border-radius: .9rem; padding: .55rem .7rem 1.8rem; box-shadow: 0 6px 14px rgba(113, 63, 18, .10); transform: rotate(var(--tilt, -1deg)); min-height: 5em; }
     .memo:nth-child(3n+2) { background: #dcfce7; --tilt: .8deg; }
     .memo:nth-child(3n) { background: #fce7f3; --tilt: -.4deg; }
     .memo p { margin: 0; white-space: pre-wrap; word-break: break-word; font-weight: 600; }
@@ -211,7 +227,7 @@
 
       <div class="panel a-agenda hidden-by-access" data-access="shared_calendar">
         <h2>Coming up <a href="/calendar">Calendar ›</a></h2>
-        <div id="agenda"><div class="empty">Loading…</div></div>
+        <div id="agenda" class="scroll"><div class="empty">Loading…</div></div>
       </div>
 
       <div class="panel inspire a-inspire" id="inspire">
@@ -223,20 +239,19 @@
         <button class="icon-btn" type="button" data-open="inspire" id="inspAddBtn">＋ Add verse or quote</button>
       </div>
 
-      <div class="stack a-lists">
-        <div class="panel hidden-by-access" data-access="shopping_list">
-          <h2><span>🛒 <span id="groceryListName">Groceries</span></span> <a href="/shopping">All lists ›</a></h2>
-          <div id="groceries"><div class="empty">Loading…</div></div>
-        </div>
-        <div class="panel hidden-by-access" data-access="chores">
-          <h2>To-dos <a href="/chores?tab=todo">All ›</a></h2>
-          <div id="todos"><div class="empty">Loading…</div></div>
-        </div>
+      <div class="panel a-lists hidden-by-access" data-access="shopping_list">
+        <h2><span>🛒 <span id="groceryListName">Groceries</span></span> <a href="/shopping">All lists ›</a></h2>
+        <div id="groceries" class="scroll"><div class="empty">Loading…</div></div>
+      </div>
+
+      <div class="panel a-todos hidden-by-access" data-access="chores">
+        <h2>✅ To-dos <a href="/chores?tab=todo">All ›</a></h2>
+        <div id="todos" class="scroll"><div class="empty">Loading…</div></div>
       </div>
 
       <div class="panel a-memos">
-        <h2>Memos</h2>
-        <div id="memos" class="memos"><div class="empty">Loading…</div></div>
+        <h2>📝 Memos</h2>
+        <div class="scroll"><div id="memos" class="memos"><div class="empty">Loading…</div></div></div>
       </div>
 
       <div class="poster a-stars hidden-by-access" data-access="reward_system" id="poster">
