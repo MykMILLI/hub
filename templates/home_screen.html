@@ -541,10 +541,12 @@
       $('memos').innerHTML = (memos || []).map((m) => {
         state.memos[m.id] = m;
         const seen = (m.acks || []).map((a) => a.name);
-        const someoneLeft = state.household.some((n) => n !== m.creator && !seen.includes(n));
+        const waiting = (state.ackers || []).filter((n) => n !== m.creator && !seen.includes(n));
+        const someoneLeft = waiting.length > 0;
         return `
-        <div class="memo"><p>${esc(m.text)}</p>
+        <div class="memo" data-memo-card="${m.id}"><p>${esc(m.text)}</p>
         ${seen.length ? `<span class="seen">👀 Seen by ${esc(seen.join(', '))}</span>` : ''}
+        ${waiting.length ? `<span class="seen">⏳ Waiting on ${esc(waiting.join(', '))}</span>` : (seen.length ? '<span class="seen">✅ Everyone has seen it</span>' : '')}
         <span class="by">— ${esc(m.creator)}</span>
         ${someoneLeft ? `<button class="ack" type="button" data-ack="${m.id}">👍 Got it</button>` : ''}
         ${(m.creator === ME || state.summary?.is_admin) ? `<button class="x" type="button" data-memo="${m.id}" aria-label="Clear memo">✕</button>` : ''}</div>`;
@@ -632,6 +634,7 @@
         state.access = summary.access || {};
         applyAccess();
         state.household = summary.household || [];
+        state.ackers = summary.ackers || state.household;
         $('inspAddBtn').hidden = !!summary.is_extended;
         if (!$('greetName').textContent) rotateName();
         renderMemos(summary.memos);
@@ -883,11 +886,13 @@
     forms.ack = () => {
       const m = posterCtx.memo;
       const seen = (m.acks || []).map((a) => a.name);
-      const names = state.household.filter((n) => n !== m.creator && !seen.includes(n));
+      const names = (state.ackers || state.household).filter((n) => n !== m.creator && !seen.includes(n));
+      const pre = names.includes(ME) ? ME : names[0];
       return `
         <h3 id="modalTitle">👍 Got it</h3>
         <p style="margin:0">“${esc(m.text)}” — ${esc(m.creator)}</p>
-        <div class="field"><label>Who saw it?</label>${choiceChips('acker', names.map((n) => [n, n]), names[0])}</div>
+        <div class="field"><label>Who saw it?</label>${choiceChips('acker', names.map((n) => [n, n]), pre)}</div>
+        <p style="margin:.4rem 0 0;color:var(--muted);font-size:.85em">${esc(m.creator)} gets a notification that you've seen it.</p>
         <div class="err" id="err"></div>
         <div class="actions"><button type="button" class="secondary" data-close>Cancel</button><button type="submit" class="primary">I saw it</button></div>`;
     };
@@ -1222,7 +1227,17 @@
 
     tick();
     setInterval(tick, 1000 * 5);
-    refresh();
+    refresh().then(() => {
+      const memoId = new URLSearchParams(location.search).get('memo');
+      if (!memoId) return;
+      history.replaceState(null, '', location.pathname);
+      const m = (state.memos || {})[memoId];
+      if (!m) { toast('That memo was cleared.'); return; }
+      const card = document.querySelector(`[data-memo-card="${memoId}"]`);
+      if (card) { card.scrollIntoView({ block: 'center' }); card.animate([{ transform: 'scale(1.06)' }, { transform: 'scale(1)' }], { duration: 600 }); }
+      const seen = (m.acks || []).map((a) => a.name);
+      if (m.creator !== ME && (state.ackers || []).includes(ME) && !seen.includes(ME)) { posterCtx = { memo: m }; open('ack'); }
+    });
     loadPhotos();
     loadInspiration();
     setInterval(loadPhotos, 60 * 60 * 1000);

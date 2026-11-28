@@ -49,10 +49,13 @@ def _memo_dict(note: Note) -> dict:
 
 
 def _household_names(exclude: str = '') -> list[str]:
+    """Grown-ups in the household who get memo notifications and are asked to
+    acknowledge them (young children are left out)."""
     rows = FamilyMember.query.order_by(FamilyMember.added_at).all()
     return [
         m.name for m in rows
         if (m.access_tier or 'immediate') != 'extended'
+        and (m.role or '') != 'child'
         and not is_system_account(m.name)
         and m.name != exclude
     ]
@@ -140,6 +143,7 @@ def api_home_screen_summary():
         'access': access,
         'people': people,
         'household': household,
+        'ackers': _household_names(),
         'memos': _visible_memos(actor),
         'gold_stars': gold,
         'server_time': datetime.utcnow().isoformat() + 'Z',
@@ -186,7 +190,7 @@ def api_home_screen_add_memo():
                 publish_notification(
                     event_type='memo_posted', title=f'New memo from {author}', message=text[:200],
                     target_members=targets, created_by=author,
-                    payload={'memo_id': note.id, 'url': '/home-screen'}, channels=['in_app', 'mobile'],
+                    payload={'memo_id': note.id, 'url': f'/home-screen?memo={note.id}'}, channels=['in_app', 'mobile'],
                 )
         except Exception:
             pass
@@ -216,7 +220,7 @@ def api_home_screen_memo_ack(memo_id: int):
                 publish_notification(
                     event_type='memo_acknowledged', title=f'{who} saw your memo', message=(note.title or '')[:200],
                     target_members=[note.creator], created_by=who,
-                    payload={'memo_id': note.id, 'url': '/home-screen'}, channels=['in_app'],
+                    payload={'memo_id': note.id, 'url': f'/home-screen?memo={note.id}'}, channels=['in_app', 'mobile'],
                 )
         except Exception:
             pass

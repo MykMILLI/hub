@@ -90,6 +90,17 @@
             <div class="text-sm text-gray-600 dark:text-gray-300 mt-1">${esc(item.message)}</div>
           </div>
           <div class="flex items-center gap-2">
+            ${(() => {
+              let p = {};
+              try { p = JSON.parse(item.payload_json || '{}') || {}; } catch (_) {}
+              if (item.event_type === 'memo_posted' && p.memo_id && !item.is_read) {
+                return `<button type="button" class="btn btn-primary text-xs notif-memo-ack" data-id="${item.id}" data-memo="${Number(p.memo_id)}">👍 Got it</button>`;
+              }
+              if (p.url && String(p.url).startsWith('/') && !String(p.url).startsWith('//')) {
+                return `<a class="btn btn-secondary text-xs" href="${esc(p.url)}">Open</a>`;
+              }
+              return '';
+            })()}
             ${item.is_read ? '<span class="text-xs text-gray-500">Read</span>' : `<button type="button" class="btn btn-secondary text-xs notif-read-btn" data-id="${item.id}">Mark Read</button>`}
           </div>
         </div>
@@ -138,6 +149,26 @@
     if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to mark notifications as read');
     return data.count || 0;
   }
+
+  document.addEventListener('click', async (event) => {
+    const ack = event.target.closest('.notif-memo-ack');
+    if (!ack) return;
+    ack.disabled = true;
+    try {
+      const res = await fetch(`/api/home-screen/memos/${Number(ack.dataset.memo)}/ack`, {
+        method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: '{}',
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || !body.ok) throw new Error(body.error || 'Could not acknowledge');
+      await markRead(Number(ack.dataset.id));
+      await loadFeed();
+      await loadHistory();
+      toast('Thanks! They know you saw it.', 'success');
+    } catch (err) {
+      ack.disabled = false;
+      toast(err.message || 'Failed', 'error');
+    }
+  });
 
   document.addEventListener('click', async (event) => {
     const btn = event.target.closest('.notif-read-btn');

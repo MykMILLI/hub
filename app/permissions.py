@@ -26,7 +26,7 @@ DEFAULT_TIER_MODULES = {
         'cameras',
     ],
     'extended': [
-        'welcome', 'timeline', 'notifications', 'photos', 'shopping_list', 'chores', 'shared_calendar',
+        'welcome', 'home_screen', 'timeline', 'notifications', 'photos', 'shopping_list', 'chores', 'shared_calendar',
     ],
 }
 # What each module means in plain words (used in Settings and invite emails).
@@ -249,17 +249,24 @@ def is_extended_member(member: str | None = None) -> bool:
     return get_member_tier(member_name) == 'extended'
 
 
+ALWAYS_ALLOWED_MODULES = ('welcome', 'home_screen')  # everyone's landing pages
+
+
 def get_tier_modules(tier: str) -> list[str]:
     tier = normalize_tier(tier)
+    modules = list(DEFAULT_TIER_MODULES[tier])
     row = AccessTierPolicy.query.filter_by(tier=tier).first()
     if row:
         try:
             parsed = json.loads(row.modules_json or '[]')
             if isinstance(parsed, list):
-                return [m for m in parsed if m in APP_MODULES]
+                modules = [m for m in parsed if m in APP_MODULES]
         except Exception:
             pass
-    return list(DEFAULT_TIER_MODULES[tier])
+    for key in ALWAYS_ALLOWED_MODULES:
+        if key not in modules:
+            modules.insert(0, key)
+    return modules
 
 
 def set_tier_modules(tier: str, modules: list[str], updated_by: str) -> list[str]:

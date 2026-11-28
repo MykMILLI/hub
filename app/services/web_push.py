@@ -93,6 +93,12 @@ def send_push_for_notification(notification) -> int:
         return 0
 
     url = '/messages' if notification.event_type == 'chat_message' else '/notifications'
+    try:
+        target = (json.loads(notification.payload_json or '{}') or {}).get('url')
+        if isinstance(target, str) and target.startswith('/') and not target.startswith('//'):
+            url = target
+    except Exception:
+        pass
     body = json.dumps({
         'id': notification.id,
         'title': notification.title,

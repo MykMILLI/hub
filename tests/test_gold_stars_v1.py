@@ -463,3 +463,31 @@ def test_administrator_login_is_not_a_family_member_for_chores(client, app):
     summary = client.get('/api/home-screen/summary').get_json()
     assert 'Administrator' not in [p['name'] for p in summary['people']]
     assert 'Administrator' not in summary['household']
+
+
+def test_memo_notifications_deep_link_ack_by_signed_in_member_and_access(client, app):
+    import json as _json
+    from app.models import AppNotification
+    from app.permissions import can_access_app_module
+    with app.app_context():
+        db.session.add(FamilyMember(name='Grandma', role='standard', access_tier='extended'))
+        db.session.commit()
+    with app.test_request_context('/'):
+        assert can_access_app_module('home_screen', 'Grandma') is True  # extended family's landing page
+
+    as_member(client, 'Rachel')
+    memo = client.post('/api/home-screen/memos', json={'text': 'Dinner at 6', 'visibility': 'family'}).get_json()['memo']
+    summary = client.get('/api/home-screen/summary').get_json()
+    assert 'Avery' not in summary['ackers'] and 'Mykal' in summary['ackers']  # kids aren't asked to acknowledge
+    with app.app_context():
+        posted = AppNotification.query.filter_by(event_type='memo_posted').all()
+        assert {n.target_member for n in posted} == {'Mykal'}
+        assert _json.loads(posted[0].payload_json)['url'] == f"/home-screen?memo={memo['id']}"
+
+    # Mykal acknowledges from his own phone (no name needed: it's him)
+    as_member(client, 'Mykal')
+    acked = client.post(f"/api/home-screen/memos/{memo['id']}/ack", json={})
+    assert acked.status_code == 200 and [a['name'] for a in acked.get_json()['memo']['acks']] == ['Mykal']
+    with app.app_context():
+        seen = AppNotification.query.filter_by(event_type='memo_acknowledged', target_member='Rachel').one()
+        assert 'Mykal' in seen.title and 'mobile' in seen.channels_json
