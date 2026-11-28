@@ -699,28 +699,85 @@ def state_payload(actor: str, *, only_child: str | None = None) -> dict:
 
 
 # ------------------------------------------------------------- poster board
-# The home-screen "star poster": a weekly sticker chart. A tap either sticks a
-# star a parent already gave (waiting), or - when the screen is signed in as a
-# parent - gives and sticks a new star in one step. Weekly view only; the
-# all-time total never resets.
+# The home-screen "star poster": a weekly sticker chart on a shared screen.
+#
+# Kids can only stick a star a parent already gave ("released" / waiting).
+# Anything else - a new star, a star on an earlier day, editing or removing
+# a star - needs a parent PIN. A correct PIN opens "parent mode" on that
+# screen for a few minutes; every change is written to the audit history.
 
 POSTER_UNDO_SECONDS = 120
+PARENT_MODE_SECONDS = 300
+MAX_BACKDATE_DAYS = 400
+
+
+class NeedsParent(GoldStarError):
+    def __init__(self, message='Ask a parent for help! A grown-up needs to give you this star.'):
+        super().__init__(message, 403)
+        self.code = 'needs_parent'
+
+
+def _parse_when(value, *, default=None) -> datetime | None:
+    if value in (None, ''):
+        return default
+    try:
+        parsed = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+    except (TypeError, ValueError):
+        raise GoldStarError('That date is not valid.')
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
 
 
 def _parse_week_start(value) -> datetime:
     from datetime import timedelta
     try:
-        parsed = datetime.fromisoformat(str(value or '').replace('Z', '+00:00'))
-        if parsed.tzinfo is not None:
-            parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+        parsed = _parse_when(value)
+    except GoldStarError:
+        parsed = None
+    if parsed:
         return parsed
-    except (TypeError, ValueError):
-        now = _now()
-        start = now - timedelta(days=(now.weekday() + 1) % 7)
-        return start.replace(hour=0, minute=0, second=0, microsecond=0)
+    now = _now()
+    start = now - timedelta(days=(now.weekday() + 1) % 7)
+    return start.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
-def poster_payload(actor: str, week_start) -> dict:
+def _check_star_day(when: datetime) -> datetime:
+    from datetime import timedelta
+    now = _now()
+    if when > now + timedelta(hours=14):  # allow for time zones; never a future day
+        raise GoldStarError("Stars can't be added to a day that hasn't happened yet.")
+    if when < now - timedelta(days=MAX_BACKDATE_DAYS):
+        raise GoldStarError('That date is too far back.')
+    return when
+
+
+def parents_with_pin() -> list[str]:
+    names = []
+    for m in FamilyMember.query.order_by(FamilyMember.added_at).all():
+        if (m.pin or '').strip() and is_parent(m.name):
+            names.append(m.name)
+    return names
+
+
+def verify_parent_pin(parent_name: str, pin: str) -> str:
+    """Returns the parent's name if the PIN is right, else raises."""
+    name = _clean(parent_name, 128)
+    row = FamilyMember.query.filter(func.lower(FamilyMember.name) == name.lower()).first() if name else None
+    if not row or not is_parent(row.name):
+        raise GoldStarError('Choose a parent.', 400)
+    if not (row.pin or '').strip():
+        raise GoldStarError(f'{row.name} needs to set a PIN in Settings first.', 400)
+    if str(pin or '').strip() != str(row.pin).strip():
+        raise GoldStarError('That PIN is not right.', 403)
+    return row.name
+
+
+def _star_dict(a: GoldStarAward) -> dict:
+    return {'id': a.id, 'at': _iso(a.collected_at), 'note': a.note or '', 'by': a.awarded_by}
+
+
+def poster_payload(actor: str, week_start, *, parent_mode_by: str | None = None, parent_mode_until: datetime | None = None) -> dict:
     from datetime import timedelta
     start = _parse_week_start(week_start)
     end = start + timedelta(days=7)
@@ -739,20 +796,24 @@ def poster_payload(actor: str, week_start) -> dict:
             'all_time': bal['earned'],
             'available': bal['available'],
             'waiting': bal['waiting'],
-            'week_stars': [
-                {'id': a.id, 'at': _iso(a.collected_at), 'note': a.note or '', 'by': a.awarded_by}
-                for a in stars
-            ],
+            'week_stars': [_star_dict(a) for a in stars],
         })
+    remaining = 0
+    if parent_mode_by and parent_mode_until:
+        remaining = max(0, int((parent_mode_until - _now()).total_seconds()))
     return {
         'week_start': _iso(start),
         'children': rows,
-        'can_give': is_parent(actor),
+        'parents': parents_with_pin(),
+        'parent_mode': {'by': parent_mode_by, 'seconds_left': remaining} if remaining else None,
+        # kept for older screens: True only while a parent has unlocked this screen
+        'can_give': bool(remaining),
         'undo_seconds': POSTER_UNDO_SECONDS,
     }
 
 
-def poster_add_star(actor: str, child_name: str, client_token: str = '') -> GoldStarAward:
+def poster_stick_released(actor: str, child_name: str) -> GoldStarAward:
+    """Kid taps their button: stick the oldest star a parent already gave."""
     child = resolve_child(child_name)
     if not child:
         raise GoldStarError('Unknown child.')
@@ -761,32 +822,102 @@ def poster_add_star(actor: str, child_name: str, client_token: str = '') -> Gold
         GoldStarAward.voided_at.is_(None),
         GoldStarAward.collected_at.is_(None),
     ).order_by(GoldStarAward.id).first()
-    if waiting and can_act_for_child(actor, child):
-        collect_star(actor, child, waiting.id)
-        return db.session.get(GoldStarAward, waiting.id)
-    if not is_parent(actor):
-        raise GoldStarError('Ask a grown-up to give you a star first!', 403)
-    award = award_star(actor, child, 'Star poster', client_token)
-    if award.collected_at is None:
-        collect_star(actor, child, award.id)
-    return db.session.get(GoldStarAward, award.id)
+    if not waiting:
+        raise NeedsParent()
+    result = db.session.execute(
+        update(GoldStarAward)
+        .where(GoldStarAward.id == waiting.id, GoldStarAward.collected_at.is_(None), GoldStarAward.voided_at.is_(None))
+        .values(collected_at=_now(), collected_by=_clean(actor, 128) or child)
+    )
+    if result.rowcount != 1:
+        db.session.rollback()
+        raise GoldStarError('That star was already stuck on the chart.', 409)
+    _log('collected', actor, child_name=child, message=f'{child} stuck a star on the chart.')
+    db.session.commit()
+    return db.session.get(GoldStarAward, waiting.id)
 
 
-def poster_undo(actor: str, award_id: int) -> None:
-    """Oops button: remove a star stuck on the poster in the last 2 minutes."""
+def poster_parent_add(parent: str, child_name: str, *, note: str = '', when=None, client_token: str = '') -> GoldStarAward:
+    """Parent mode: give and stick a star now, or on an earlier day."""
+    child = resolve_child(child_name)
+    if not child:
+        raise GoldStarError('Unknown child.')
+    note = _clean(note)
+    stamp = _check_star_day(_parse_when(when, default=_now()))
+    backdated = stamp < _now().replace(hour=0, minute=0, second=0, microsecond=0)
+    token = _clean(client_token, 64) or None
+    if token:
+        existing = GoldStarAward.query.filter_by(client_token=token).first()
+        if existing:
+            return existing
+    award = GoldStarAward(
+        child_name=child, note=note, awarded_by=_clean(parent, 128), client_token=token,
+        awarded_at=stamp, collected_at=stamp, collected_by=_clean(parent, 128),
+    )
+    db.session.add(award)
+    day_label = stamp.strftime('%a %b %d')
+    _log('awarded', parent, child_name=child, stars_delta=1,
+         message=f'{parent} gave {child} a star' + (f' for {day_label} (added later).' if backdated else '.'),
+         context=note)
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        existing = GoldStarAward.query.filter_by(client_token=token).first() if token else None
+        if existing:
+            return existing
+        raise
+    return award
+
+
+def poster_edit_star(parent: str, award_id: int, *, note=None, when=None) -> GoldStarAward:
+    award = db.session.get(GoldStarAward, int(award_id))
+    if not award or award.voided_at:
+        raise GoldStarError('Star not found.', 404)
+    changes = []
+    if note is not None:
+        new_note = _clean(note)
+        if new_note != (award.note or ''):
+            changes.append(f'description "{award.note or ""}" -> "{new_note}"')
+            award.note = new_note
+    if when not in (None, ''):
+        stamp = _check_star_day(_parse_when(when))
+        old = award.collected_at or award.awarded_at
+        if not old or old.date() != stamp.date():
+            changes.append(f'day {old.strftime("%a %b %d") if old else "?"} -> {stamp.strftime("%a %b %d")}')
+            award.awarded_at = stamp
+            if award.collected_at:
+                award.collected_at = stamp
+    if not changes:
+        return award
+    _log('edited', parent, child_name=award.child_name, message=f'{parent} edited a star.', context='; '.join(changes))
+    db.session.commit()
+    return award
+
+
+def poster_remove_star(parent: str, award_id: int, reason: str) -> None:
+    reason = _clean(reason, 220)
+    if not reason:
+        raise GoldStarError('Please give a short reason for removing the star.')
+    award = db.session.get(GoldStarAward, int(award_id))
+    if not award or award.voided_at:
+        raise GoldStarError('Star not found.', 404)
+    if award.collected_at and balances(award.child_name)['available'] < 1:
+        raise GoldStarError('That star was already spent on a reward. Refund the reward first on the Gold Star Club page.', 409)
+    award.voided_at = _now()
+    award.voided_by = _clean(parent, 128)
+    award.void_reason = reason
+    _log('corrected', parent, child_name=award.child_name, stars_delta=-1,
+         message=f'{parent} removed a star.', context=reason)
+    db.session.commit()
+
+
+def poster_undo(parent: str, award_id: int) -> None:
+    """Oops button right after a star was stuck (parent mode)."""
     from datetime import timedelta
-    if not is_parent(actor):
-        raise GoldStarError('Only a grown-up can undo a star.', 403)
     award = db.session.get(GoldStarAward, int(award_id))
     if not award or award.voided_at or not award.collected_at:
         raise GoldStarError('Star not found.', 404)
-    if award.collected_at < _now() - timedelta(seconds=POSTER_UNDO_SECONDS):
-        raise GoldStarError('That star has been on the poster too long to undo here. Use the Gold Star Club page.', 409)
-    if balances(award.child_name)['available'] < 1:
-        raise GoldStarError('That star was already spent on a reward.', 409)
-    award.voided_at = _now()
-    award.voided_by = _clean(actor, 128)
-    award.void_reason = 'Undone on the star poster (tapped by mistake)'
-    _log('corrected', actor, child_name=award.child_name, stars_delta=-1,
-         message='Star removed from the poster (tapped by mistake).', context=award.void_reason)
-    db.session.commit()
+    if award.collected_at < _now() - timedelta(seconds=POSTER_UNDO_SECONDS) and award.awarded_at < _now() - timedelta(seconds=POSTER_UNDO_SECONDS):
+        raise GoldStarError('Too late to undo here. Tap the star in parent mode to remove it.', 409)
+    poster_remove_star(parent, award_id, 'Undone on the star chart (tapped by mistake)')

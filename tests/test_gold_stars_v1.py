@@ -288,37 +288,88 @@ def test_home_screen_summary_memos_and_visibility(client, app):
     assert landing.status_code in (301, 302) and '/home-screen' in landing.headers['Location']
 
 
-def test_star_poster_add_week_view_undo_and_child_limits(client, app):
+def _set_pin(app, name, pin):
+    with app.app_context():
+        row = FamilyMember.query.filter_by(name=name).first()
+        row.pin = pin
+        db.session.commit()
+
+
+def _poster_child(body, name):
+    return next(c for c in body['poster']['children'] if c['name'] == name)
+
+
+def test_star_poster_kids_need_a_released_star_or_parent_pin(client, app):
     from datetime import datetime, timedelta
-    week_start = (datetime.utcnow() - timedelta(days=1)).isoformat() + 'Z'
+    week_start = (datetime.utcnow() - timedelta(days=3)).isoformat() + 'Z'
+    _set_pin(app, 'Mykal', '2468')
+    # the shared screen is signed in as a parent, but a kid tapping still does not count
     as_member(client, 'Mykal')
-    added = client.post('/api/gold-stars/poster/add', json={'child_name': 'Avery', 'client_token': 'p1', 'week_start': week_start})
-    assert added.status_code == 200
-    body = added.get_json()
-    avery = next(c for c in body['poster']['children'] if c['name'] == 'Avery')
-    assert avery['all_time'] == 1 and len(avery['week_stars']) == 1 and avery['available'] == 1
-    # same tap token twice = one star
-    client.post('/api/gold-stars/poster/add', json={'child_name': 'Avery', 'client_token': 'p1', 'week_start': week_start})
-    poster = client.get(f'/api/gold-stars/poster?week_start={week_start}').get_json()['poster']
-    assert next(c for c in poster['children'] if c['name'] == 'Avery')['all_time'] == 1
-    # an older week does not show this week's stars, but all-time still counts them
-    old = client.get('/api/gold-stars/poster?week_start=2020-01-05T00:00:00Z').get_json()['poster']
-    old_avery = next(c for c in old['children'] if c['name'] == 'Avery')
-    assert old_avery['week_stars'] == [] and old_avery['all_time'] == 1
+    tapped = client.post('/api/gold-stars/poster/add', json={'child_name': 'Avery', 'week_start': week_start})
+    assert tapped.status_code == 403
+    body = tapped.get_json()
+    assert body['code'] == 'needs_parent' and 'parent' in body['error'].lower()
+    assert _poster_child(body, 'Avery')['all_time'] == 0
+    assert body['poster']['parents'] == ['Mykal']
+    # giving without parent mode is refused too
+    assert client.post('/api/gold-stars/poster/add', json={'child_name': 'Avery', 'mode': 'give'}).status_code == 403
 
-    undo = client.post('/api/gold-stars/poster/undo', json={'award_id': body['award_id']})
-    assert undo.status_code == 200
-    assert next(c for c in undo.get_json()['poster']['children'] if c['name'] == 'Avery')['all_time'] == 0
-
-    # a child signed in can only stick stars a parent already gave
-    as_member(client, 'Harley')
-    assert client.post('/api/gold-stars/poster/add', json={'child_name': 'Harley'}).status_code == 403
-    as_member(client, 'Rachel')
-    client.post('/api/gold-stars/awards', json={'child_name': 'Harley'})
-    as_member(client, 'Harley')
-    stuck = client.post('/api/gold-stars/poster/add', json={'child_name': 'Harley'})
+    # a star a parent released can be stuck by the kid
+    client.post('/api/gold-stars/awards', json={'child_name': 'Avery', 'note': 'Cleaned up'})
+    stuck = client.post('/api/gold-stars/poster/add', json={'child_name': 'Avery', 'week_start': week_start})
     assert stuck.status_code == 200
-    assert next(c for c in stuck.get_json()['poster']['children'] if c['name'] == 'Harley')['waiting'] == 0
+    avery = _poster_child(stuck.get_json(), 'Avery')
+    assert avery['waiting'] == 0 and avery['all_time'] == 1 and len(avery['week_stars']) == 1
+
+    # wrong PIN, then right PIN opens parent mode
+    assert client.post('/api/gold-stars/poster/unlock', json={'parent': 'Mykal', 'pin': '0000'}).status_code == 403
+    unlocked = client.post('/api/gold-stars/poster/unlock', json={'parent': 'Mykal', 'pin': '2468'})
+    assert unlocked.status_code == 200 and unlocked.get_json()['poster']['parent_mode']['by'] == 'Mykal'
+    given = client.post('/api/gold-stars/poster/add', json={'child_name': 'Harley', 'mode': 'give', 'note': 'Kind words', 'client_token': 't1', 'week_start': week_start})
+    assert given.status_code == 200
+    harley = _poster_child(given.get_json(), 'Harley')
+    assert harley['all_time'] == 1 and harley['week_stars'][0]['note'] == 'Kind words' and harley['week_stars'][0]['by'] == 'Mykal'
+
+    # locking ends parent mode
+    client.post('/api/gold-stars/poster/lock')
+    assert client.post('/api/gold-stars/poster/add', json={'child_name': 'Harley', 'mode': 'give'}).status_code == 403
+
+
+def test_star_poster_backdate_edit_remove_and_lockout(client, app):
+    from datetime import datetime, timedelta
+    _set_pin(app, 'Rachel', '1357')
+    as_member(client, 'Rachel')
+    week_start = (datetime.utcnow() - timedelta(days=6)).isoformat() + 'Z'
+    client.post('/api/gold-stars/poster/unlock', json={'parent': 'Rachel', 'pin': '1357'})
+    two_days_ago = (datetime.utcnow() - timedelta(days=2)).replace(hour=17, minute=0).isoformat() + 'Z'
+    added = client.post('/api/gold-stars/poster/add', json={'child_name': 'Avery', 'mode': 'give', 'note': 'Helped with dishes', 'when': two_days_ago, 'week_start': week_start})
+    assert added.status_code == 200
+    star = _poster_child(added.get_json(), 'Avery')['week_stars'][0]
+    assert star['at'].startswith(two_days_ago[:10])
+    # future days are refused
+    tomorrow = (datetime.utcnow() + timedelta(days=2)).isoformat() + 'Z'
+    assert client.post('/api/gold-stars/poster/add', json={'child_name': 'Avery', 'mode': 'give', 'when': tomorrow}).status_code == 400
+
+    # edit description and move to yesterday
+    yesterday = (datetime.utcnow() - timedelta(days=1)).replace(hour=17, minute=0).isoformat() + 'Z'
+    edited = client.post(f"/api/gold-stars/poster/stars/{star['id']}/edit", json={'note': 'Helped with the dishes', 'when': yesterday, 'week_start': week_start})
+    assert edited.status_code == 200
+    star2 = _poster_child(edited.get_json(), 'Avery')['week_stars'][0]
+    assert star2['note'] == 'Helped with the dishes' and star2['at'].startswith(yesterday[:10])
+    history = client.get('/api/gold-stars/state').get_json()['state']['history']
+    assert any(h['event_type'] == 'edited' for h in history)
+
+    # remove needs a reason, then counts drop and history records it
+    assert client.post(f"/api/gold-stars/poster/stars/{star['id']}/remove", json={}).status_code == 400
+    removed = client.post(f"/api/gold-stars/poster/stars/{star['id']}/remove", json={'reason': 'Wrong child', 'week_start': week_start})
+    assert removed.status_code == 200
+    assert _poster_child(removed.get_json(), 'Avery')['all_time'] == 0
+
+    # five wrong PINs lock the PIN pad for a while
+    client.post('/api/gold-stars/poster/lock')
+    for _ in range(5):
+        client.post('/api/gold-stars/poster/unlock', json={'parent': 'Rachel', 'pin': '9999'})
+    assert client.post('/api/gold-stars/poster/unlock', json={'parent': 'Rachel', 'pin': '1357'}).status_code == 429
 
 
 def test_home_screen_inspiration_seed_add_and_household_greeting(client, app):

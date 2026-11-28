@@ -200,44 +200,127 @@ def api_gold_stars_refund(delivery_id: int):
 
 
 # ------------------------------------------------------------ star poster
+# Shared-screen rules: kids may only stick a star a parent released; giving,
+# back-dating, editing or removing stars needs a parent PIN ("parent mode").
 
-def _poster_response(actor: str, **extra):
-    week = request.args.get('week_start') or (request.get_json(silent=True) or {}).get('week_start')
-    payload = {'ok': True, 'poster': gs.poster_payload(actor, week)}
+_PIN_MAX_FAILS = 5
+_PIN_LOCK_SECONDS = 300
+
+
+def _parent_mode():
+    from datetime import datetime
+    by = session.get('poster_parent')
+    until_raw = session.get('poster_parent_until')
+    if not by or not until_raw:
+        return None, None
+    try:
+        until = datetime.fromisoformat(until_raw)
+    except ValueError:
+        return None, None
+    if until <= datetime.utcnow():
+        session.pop('poster_parent', None)
+        session.pop('poster_parent_until', None)
+        return None, None
+    return by, until
+
+
+def _require_parent_mode():
+    by, _ = _parent_mode()
+    if not by:
+        raise gs.NeedsParent('Parent mode is locked. A parent needs to enter their PIN.')
+    return by
+
+
+def _poster_response(actor: str, status: int = 200, **extra):
+    data = request.get_json(silent=True) or {}
+    week = request.args.get('week_start') or data.get('week_start')
+    by, until = _parent_mode()
+    payload = {'ok': status < 400, 'poster': gs.poster_payload(actor, week, parent_mode_by=by, parent_mode_until=until)}
     payload.update(extra)
-    return jsonify(payload)
+    return jsonify(payload), status
+
+
+def _poster_call(fn):
+    actor = _actor()
+    if not actor:
+        return jsonify({'ok': False, 'error': 'Please sign in.'}), 401
+    try:
+        extra = fn(actor) or {}
+    except gs.GoldStarError as err:
+        db.session.rollback()
+        return _poster_response(actor, err.status, error=err.message, code=getattr(err, 'code', ''))
+    return _poster_response(actor, **extra)
 
 
 @main_bp.route('/api/gold-stars/poster', methods=['GET'])
 def api_gold_stars_poster():
-    actor = _actor()
-    if not actor:
-        return jsonify({'ok': False, 'error': 'Please sign in.'}), 401
-    return _poster_response(actor)
+    return _poster_call(lambda actor: None)
+
+
+@main_bp.route('/api/gold-stars/poster/unlock', methods=['POST'])
+def api_gold_stars_poster_unlock():
+    from datetime import datetime, timedelta
+
+    def go(actor):
+        locked_until = session.get('poster_pin_locked_until')
+        if locked_until and datetime.fromisoformat(locked_until) > datetime.utcnow():
+            raise gs.GoldStarError('Too many wrong PINs. Try again in a few minutes.', 429)
+        data = _json()
+        try:
+            parent = gs.verify_parent_pin(data.get('parent'), data.get('pin'))
+        except gs.GoldStarError:
+            fails = int(session.get('poster_pin_fails') or 0) + 1
+            session['poster_pin_fails'] = fails
+            if fails >= _PIN_MAX_FAILS:
+                session['poster_pin_fails'] = 0
+                session['poster_pin_locked_until'] = (datetime.utcnow() + timedelta(seconds=_PIN_LOCK_SECONDS)).isoformat()
+            raise
+        session['poster_pin_fails'] = 0
+        session['poster_parent'] = parent
+        session['poster_parent_until'] = (datetime.utcnow() + timedelta(seconds=gs.PARENT_MODE_SECONDS)).isoformat()
+        return {'parent': parent}
+    return _poster_call(go)
+
+
+@main_bp.route('/api/gold-stars/poster/lock', methods=['POST'])
+def api_gold_stars_poster_lock():
+    session.pop('poster_parent', None)
+    session.pop('poster_parent_until', None)
+    return _poster_call(lambda actor: None)
 
 
 @main_bp.route('/api/gold-stars/poster/add', methods=['POST'])
 def api_gold_stars_poster_add():
-    actor = _actor()
-    if not actor:
-        return jsonify({'ok': False, 'error': 'Please sign in.'}), 401
-    data = _json()
-    try:
-        award = gs.poster_add_star(actor, data.get('child_name'), data.get('client_token') or '')
-    except gs.GoldStarError as err:
-        db.session.rollback()
-        return jsonify({'ok': False, 'error': err.message}), err.status
-    return _poster_response(actor, award_id=award.id)
+    def go(actor):
+        data = _json()
+        if str(data.get('mode') or 'stick') == 'give':
+            parent = _require_parent_mode()
+            award = gs.poster_parent_add(parent, data.get('child_name'), note=data.get('note') or '',
+                                         when=data.get('when'), client_token=data.get('client_token') or '')
+        else:
+            award = gs.poster_stick_released(actor, data.get('child_name'))
+        return {'award_id': award.id}
+    return _poster_call(go)
+
+
+@main_bp.route('/api/gold-stars/poster/stars/<int:award_id>/edit', methods=['POST'])
+def api_gold_stars_poster_edit(award_id: int):
+    def go(actor):
+        parent = _require_parent_mode()
+        data = _json()
+        gs.poster_edit_star(parent, award_id, note=data.get('note') if 'note' in data else None, when=data.get('when'))
+    return _poster_call(go)
+
+
+@main_bp.route('/api/gold-stars/poster/stars/<int:award_id>/remove', methods=['POST'])
+def api_gold_stars_poster_remove(award_id: int):
+    def go(actor):
+        gs.poster_remove_star(_require_parent_mode(), award_id, _json().get('reason') or '')
+    return _poster_call(go)
 
 
 @main_bp.route('/api/gold-stars/poster/undo', methods=['POST'])
 def api_gold_stars_poster_undo():
-    actor = _actor()
-    if not actor:
-        return jsonify({'ok': False, 'error': 'Please sign in.'}), 401
-    try:
-        gs.poster_undo(actor, int(_json().get('award_id') or 0))
-    except gs.GoldStarError as err:
-        db.session.rollback()
-        return jsonify({'ok': False, 'error': err.message}), err.status
-    return _poster_response(actor)
+    def go(actor):
+        gs.poster_undo(_require_parent_mode(), int(_json().get('award_id') or 0))
+    return _poster_call(go)

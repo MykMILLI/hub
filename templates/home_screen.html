@@ -121,6 +121,20 @@
     .add-star.waiting { animation: glow 1.4s ease-in-out infinite; }
     @keyframes glow { 50% { box-shadow: 0 5px 0 #b45309, 0 0 0 6px rgba(253, 224, 71, .7); } }
     .undo { border: 0; background: transparent; color: #9a3412; font-weight: 700; text-decoration: underline; cursor: pointer; font-size: .8em; }
+    .pm-btn { font-family: Inter, system-ui, sans-serif; font-size: .5em; border: 2px solid #b7793f; background: #fff7ed; color: #7c2d12; border-radius: 999px; padding: .25em .8em; font-weight: 800; cursor: pointer; }
+    .pm-btn.on { background: #16a34a; border-color: #15803d; color: #fff; }
+    .poster.parent-mode { border-color: #16a34a; }
+    .poster.parent-mode .chart .day { cursor: copy; }
+    .poster.parent-mode .chart .day:hover { background: rgba(187, 247, 208, .7); }
+    .poster.parent-mode .chart .day.future { cursor: default; background: transparent; }
+    .poster.parent-mode .chart .day.future::after { content: none; }
+    .poster.parent-mode .chart .day::after { content: "+"; color: rgba(22, 101, 52, .45); font-weight: 900; font-size: .9em; align-self: center; }
+    .poster.parent-mode .sticker { cursor: pointer; outline: 2px dashed rgba(22,101,52,.0); }
+    .chart .sticker { cursor: pointer; }
+    .pin-input { letter-spacing: .5em; text-align: center; font-size: 1.6em !important; max-width: 9em; }
+    .ask { text-align: center; }
+    .ask .big { font-size: 3rem; line-height: 1; }
+    .danger { background: #fee2e2; color: #b91c1c; }
     .poster-note { margin: .6rem 0 0; font-size: .82em; color: #7c5a3a; font-weight: 600; }
 
     /* "added!" confirmation */
@@ -255,7 +269,7 @@
       </div>
 
       <div class="poster a-stars hidden-by-access" data-access="reward_system" id="poster">
-        <h2>⭐ Our Star Chart <small id="posterWeek"></small></h2>
+        <h2><span>⭐ Our Star Chart <small id="posterWeek"></small></span><button type="button" class="pm-btn" id="pmBtn">🔒 Parent</button></h2>
         <div class="chart" id="chart"></div>
         <p class="poster-note" id="posterNote"></p>
       </div>
@@ -287,7 +301,11 @@
       const res = await fetch(url, Object.assign({ credentials: 'same-origin', headers: { 'Content-Type': 'application/json' } }, options || {}));
       const body = await res.json().catch(() => ({}));
       if (res.status === 401) { window.location.href = '/'; throw new Error('Please sign in'); }
-      if (!res.ok || (body && body.ok === false)) throw new Error((body && body.error) || 'Something went wrong');
+      if (!res.ok || (body && body.ok === false)) {
+        const error = new Error((body && body.error) || 'Something went wrong');
+        error.body = body; error.status = res.status;
+        throw error;
+      }
       return body;
     }
     function toast(msg) {
@@ -422,32 +440,66 @@
       state.poster = body.poster;
       renderPoster();
     }
+    const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    function dayNoonIso(i) { const d = weekStart(); d.setDate(d.getDate() + i); d.setHours(12, 0, 0, 0); return d.toISOString(); }
+    function dateNoonIso(yyyyMmDd) { const [y, m, d] = String(yyyyMmDd).split('-').map(Number); return new Date(y, m - 1, d, 12).toISOString(); }
+    function parentMode() { return state.poster && state.poster.parent_mode; }
+    function findStar(id) {
+      for (const c of (state.poster?.children || [])) { const st = c.week_stars.find((x) => x.id === id); if (st) return { star: st, child: c.name }; }
+      return null;
+    }
+
     function renderPoster(popId) {
       const p = state.poster;
       if (!p) return;
+      const pm = parentMode();
       const start = weekStart();
       const todayIdx = new Date().getDay();
+      $('poster').classList.toggle('parent-mode', !!pm);
       $('posterWeek').textContent = `Week of ${start.toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}`;
-      const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-      let html = '<div class="hd"></div>' + days.map((d, i) => `<div class="hd ${i === todayIdx ? 'today' : ''}">${d}</div>`).join('') + '<div class="hd">⭐</div>';
+      renderParentButton();
+      let html = '<div class="hd"></div>' + DAYS.map((d, i) => `<div class="hd ${i === todayIdx ? 'today' : ''}">${d}</div>`).join('') + '<div class="hd">⭐</div>';
       p.children.forEach((c) => {
         const byDay = [[], [], [], [], [], [], []];
         c.week_stars.forEach((st) => { byDay[new Date(st.at).getDay()].push(st); });
         html += `<div class="kid"><b>${esc(c.name)}</b><span>🏅 ${c.all_time} all-time</span>${c.week_stars.length ? `<em>${c.week_stars.length} this week</em>` : ''}</div>`;
-        html += byDay.map((list, i) => `<div class="day ${i === todayIdx ? 'today' : ''}">${list.map((st) =>
-          `<span class="sticker ${st.id === popId ? 'pop' : ''}" title="${esc(new Date(st.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }))}"></span>`).join('')}</div>`).join('');
+        html += byDay.map((list, i) => `<div class="day ${i === todayIdx ? 'today' : ''} ${i > todayIdx ? 'future' : ''}" data-poster-day="${i}" data-child="${esc(c.name)}">${list.map((st) =>
+          `<span class="sticker ${st.id === popId ? 'pop' : ''}" data-star-id="${st.id}" title="${esc(st.note || 'Gold star')}"></span>`).join('')}</div>`).join('');
         const recent = state.recent[c.name];
-        const canUndo = p.can_give && recent && Date.now() - recent.at < p.undo_seconds * 1000;
-        const label = c.waiting > 0 ? `Stick my star! (${c.waiting})` : 'Add my star ⭐';
+        const canUndo = pm && recent && Date.now() - recent.at < p.undo_seconds * 1000;
+        const label = c.waiting > 0 ? `Stick my star! (${c.waiting})` : (pm ? 'Give a star ⭐' : 'Add my star ⭐');
         html += `<div class="add">
-            <button type="button" class="add-star ${c.waiting > 0 ? 'waiting' : ''}" data-poster-add="${esc(c.name)}" ${(!p.can_give && c.waiting < 1) ? 'disabled' : ''}>${label}</button>
+            <button type="button" class="add-star ${c.waiting > 0 ? 'waiting' : ''}" data-poster-add="${esc(c.name)}">${label}</button>
             ${canUndo ? `<button type="button" class="undo" data-poster-undo="${recent.id}" data-child="${esc(c.name)}">Oops, undo</button>` : ''}
           </div>`;
       });
       $('chart').innerHTML = html;
-      $('posterNote').textContent = p.can_give
-        ? 'Did something great? Tap "Add my star" and watch it stick! The chart starts fresh every Sunday; the all-time count keeps growing.'
-        : 'When a grown-up gives you a star, tap your button to stick it on the chart.';
+      $('posterNote').textContent = pm
+        ? `Parent mode (${pm.by}): tap a day to add a star there, tap a star to change or remove it.`
+        : 'Got a star from a grown-up? Tap your button to stick it on the chart! New stars need a parent. The chart starts fresh every Sunday.';
+    }
+
+    let pmTimer = null;
+    function renderParentButton() {
+      const pm = parentMode();
+      const btn = $('pmBtn');
+      clearInterval(pmTimer);
+      if (!pm) { btn.classList.remove('on'); btn.textContent = '🔒 Parent'; return; }
+      const ends = Date.now() + pm.seconds_left * 1000;
+      const paint = () => {
+        const left = Math.max(0, Math.round((ends - Date.now()) / 1000));
+        btn.classList.add('on');
+        btn.textContent = `🔓 ${pm.by} · ${Math.floor(left / 60)}:${pad(left % 60)} · Lock`;
+        if (left <= 0) { clearInterval(pmTimer); loadPoster(); }
+      };
+      paint();
+      pmTimer = setInterval(paint, 1000);
+    }
+
+    async function posterPost(url, payload) {
+      const body = await api(url, { method: 'POST', body: JSON.stringify(Object.assign({ week_start: weekStart().toISOString() }, payload || {})) });
+      state.poster = body.poster;
+      return body;
     }
 
     async function refresh() {
@@ -491,24 +543,39 @@
           renderMemos(body.memos);
         }
         if (pa) {
-          if (pa.disabled) return;
-          pa.disabled = true;
           const child = pa.dataset.posterAdd;
-          const token = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
-          const body = await api('/api/gold-stars/poster/add', { method: 'POST', body: JSON.stringify({ child_name: child, client_token: token, week_start: weekStart().toISOString() }) });
-          state.recent[child] = { id: body.award_id, at: Date.now() };
-          state.poster = body.poster;
-          renderPoster(body.award_id);
-          toast(`⭐ Great job, ${child}!`);
-          setTimeout(() => renderPoster(), (state.poster.undo_seconds + 1) * 1000);
+          const c = (state.poster?.children || []).find((x) => x.name === child);
+          if (c && c.waiting > 0) {
+            pa.disabled = true;
+            const body = await posterPost('/api/gold-stars/poster/add', { child_name: child, mode: 'stick' });
+            state.recent[child] = { id: body.award_id, at: Date.now() };
+            renderPoster(body.award_id);
+            toast(`⭐ Great job, ${child}!`);
+          } else if (parentMode()) {
+            openPoster('give', { child, day: new Date().getDay() });
+          } else {
+            openPoster('ask', { child });
+          }
         }
         if (pu) {
           const child = pu.dataset.child;
-          const body = await api('/api/gold-stars/poster/undo', { method: 'POST', body: JSON.stringify({ award_id: Number(pu.dataset.posterUndo), week_start: weekStart().toISOString() }) });
+          await posterPost('/api/gold-stars/poster/undo', { award_id: Number(pu.dataset.posterUndo) });
           delete state.recent[child];
-          state.poster = body.poster;
           renderPoster();
           toast('Star removed');
+        }
+        const starEl = e.target.closest('[data-star-id]');
+        const dayEl = !starEl && e.target.closest('[data-poster-day]');
+        if (starEl) {
+          const found = findStar(Number(starEl.dataset.starId));
+          if (found && parentMode()) openPoster('edit', found);
+          else if (found) toast(`⭐ ${found.star.note || 'A gold star'} — from ${found.star.by || 'a parent'}`);
+        } else if (dayEl && parentMode() && !dayEl.classList.contains('future')) {
+          openPoster('give', { child: dayEl.dataset.child, day: Number(dayEl.dataset.posterDay) });
+        }
+        if (e.target.closest('#pmBtn')) {
+          if (parentMode()) { await posterPost('/api/gold-stars/poster/lock'); renderPoster(); toast('Parent mode locked'); }
+          else openPoster('unlock', {});
         }
       } catch (err) {
         toast(err.message);
@@ -589,6 +656,82 @@
         <div class="err" id="err"></div>
         <div class="actions"><button type="button" class="secondary" data-close>Cancel</button><button type="submit" class="primary">Add to the screen</button></div>`;
 
+    // ---- star chart sheets (ask a parent / unlock / give / edit)
+    let posterCtx = {};
+    function parentChips() {
+      const names = state.poster?.parents || [];
+      if (!names.length) return '<p class="err">No parent has a PIN yet. Set one in Home Hub → Settings → Family Members.</p>';
+      return choiceChips('parent', names.map((n) => [n, n]), names[0]);
+    }
+    function pinFields() {
+      return `<div class="field"><label>Which parent?</label>${parentChips()}</div>
+        <div class="field"><label for="pmPin">Parent PIN</label><input type="password" id="pmPin" class="pin-input" inputmode="numeric" maxlength="4" autocomplete="off"></div>`;
+    }
+    function dayChooser(selectedIdx, selectedIso) {
+      const todayIdx = new Date().getDay();
+      const opts = DAYS.slice(0, todayIdx + 1).map((d, i) => [String(i), i === todayIdx ? `Today` : d]);
+      opts.push(['pick', 'Earlier date…']);
+      const sel = selectedIso ? 'pick' : String(selectedIdx ?? todayIdx);
+      return `${choiceChips('pday', opts, sel)}
+        <div id="pdayWrap" style="margin-top:.5rem;${sel === 'pick' ? '' : 'display:none'}"><input type="date" id="pDate" max="${iso(new Date())}" value="${selectedIso || ''}"></div>`;
+    }
+    function chosenDayIso() {
+      const v = chipValues('pday')[0];
+      if (v === 'pick') {
+        const raw = sheet.querySelector('#pDate').value;
+        if (!raw) throw new Error('Pick the date.');
+        return dateNoonIso(raw);
+      }
+      return Number(v) === new Date().getDay() ? null : dayNoonIso(Number(v));
+    }
+    forms.ask = () => `
+        <div class="ask"><div class="big">⭐</div>
+        <h3 id="modalTitle" style="justify-content:center">Ask a parent for help!</h3>
+        <p style="margin:.2rem 0 0">Stars count when a grown-up gives them, ${esc(posterCtx.child || '')}. Go find Mom or Dad!</p></div>
+        ${pinFields()}
+        <div class="err" id="err"></div>
+        <div class="actions"><button type="button" class="secondary" data-close>OK</button><button type="submit" class="primary">Parent: unlock</button></div>`;
+    forms.unlock = () => `
+        <h3 id="modalTitle">🔒 Parent mode</h3>
+        <p style="margin:0">Unlock for 5 minutes to give stars, add stars to earlier days, or fix a star.</p>
+        ${pinFields()}
+        <div class="err" id="err"></div>
+        <div class="actions"><button type="button" class="secondary" data-close>Cancel</button><button type="submit" class="primary">Unlock</button></div>`;
+    forms.give = () => `
+        <h3 id="modalTitle">⭐ Give a star</h3>
+        <div class="field"><label>Who earned it?</label>${choiceChips('pchild', (state.poster?.children || []).map((c) => [c.name, c.name]), posterCtx.child)}</div>
+        <div class="field"><label>Which day?</label>${dayChooser(posterCtx.day)}</div>
+        <div class="field"><label for="pNote">What was it for?</label><input type="text" id="pNote" maxlength="140" placeholder="e.g. Shared toys with sister"></div>
+        <div class="err" id="err"></div>
+        <div class="actions"><button type="button" class="secondary" data-close>Cancel</button><button type="submit" class="primary">Give star</button></div>`;
+    forms.edit = () => {
+      const st = posterCtx.star;
+      const when = new Date(st.at);
+      const inWeek = when >= weekStart();
+      return `
+        <h3 id="modalTitle">✏️ Change ${esc(posterCtx.child)}'s star</h3>
+        <p style="margin:0;color:var(--muted)">Given by ${esc(st.by || 'a parent')} on ${esc(when.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }))}</p>
+        <div class="field"><label for="pNote">What was it for?</label><input type="text" id="pNote" maxlength="140" value="${esc(st.note || '')}"></div>
+        <div class="field"><label>Which day?</label>${dayChooser(inWeek ? when.getDay() : null, inWeek ? null : iso(when))}</div>
+        <div class="field"><label for="pReason">Removing it? Say why (kept in history)</label><input type="text" id="pReason" maxlength="200" placeholder="e.g. Added to the wrong child"></div>
+        <div class="err" id="err"></div>
+        <div class="actions"><button type="button" class="danger" data-remove-star>Remove star</button><button type="submit" class="primary">Save changes</button></div>`;
+    };
+    function openPoster(which, ctx) { posterCtx = ctx || {}; open(which); if (which === 'ask' || which === 'unlock') setTimeout(() => sheet.querySelector('#pmPin')?.focus(), 80); }
+    sheet.addEventListener('click', async (e) => {
+      const chip = e.target.closest('[data-chips="pday"] .chip');
+      if (chip) sheet.querySelector('#pdayWrap').style.display = chip.dataset.value === 'pick' ? '' : 'none';
+      if (e.target.closest('[data-remove-star]')) {
+        const err = sheet.querySelector('#err');
+        const reason = sheet.querySelector('#pReason').value.trim();
+        if (!reason) { err.textContent = 'Type why you are removing it first.'; sheet.querySelector('#pReason').focus(); return; }
+        try {
+          await posterPost(`/api/gold-stars/poster/stars/${posterCtx.star.id}/remove`, { reason });
+          renderPoster(); close(); toast('Star removed');
+        } catch (ex) { err.textContent = ex.message; if (ex.body?.poster) { state.poster = ex.body.poster; renderPoster(); } }
+      }
+    });
+
     function showAdded(item, listName) {
       sheet.innerHTML = `
         <div class="done-box">
@@ -657,6 +800,41 @@
           toast('To-do added ✅');
           close(); loadTodos();
         }
+        if (mode === 'ask' || mode === 'unlock') {
+          const parent = chipValues('parent')[0];
+          const pin = sheet.querySelector('#pmPin').value.trim();
+          if (!parent) throw new Error('No parent PIN is set up yet.');
+          if (!/^\d{4}$/.test(pin)) throw new Error('Enter the 4-digit PIN.');
+          try {
+            await posterPost('/api/gold-stars/poster/unlock', { parent, pin });
+          } finally {
+            const pinEl = sheet.querySelector('#pmPin'); if (pinEl) pinEl.value = '';
+          }
+          renderPoster();
+          if (mode === 'ask') { openPoster('give', { child: posterCtx.child, day: new Date().getDay() }); return; }
+          toast(`🔓 Parent mode on for 5 minutes`);
+          close();
+        }
+        if (mode === 'give') {
+          const child = chipValues('pchild')[0];
+          if (!child) throw new Error('Choose who earned it.');
+          const when = chosenDayIso();
+          const token = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
+          const body = await posterPost('/api/gold-stars/poster/add', { mode: 'give', child_name: child, note: sheet.querySelector('#pNote').value.trim(), when, client_token: token });
+          if (!when) state.recent[child] = { id: body.award_id, at: Date.now() };
+          renderPoster(body.award_id);
+          toast(`⭐ Star added for ${child}${when ? ` on ${new Date(when).toLocaleDateString(undefined, { weekday: 'long' })}` : ''}`);
+          close();
+        }
+        if (mode === 'edit') {
+          // only send a new day if the chosen (local) day differs from the star's day
+          const v = chipValues('pday')[0];
+          const chosenLocal = v === 'pick' ? sheet.querySelector('#pDate').value : (() => { const d = weekStart(); d.setDate(d.getDate() + Number(v)); return iso(d); })();
+          if (!chosenLocal) throw new Error('Pick the date.');
+          const when = chosenLocal === iso(new Date(posterCtx.star.at)) ? null : dateNoonIso(chosenLocal);
+          await posterPost(`/api/gold-stars/poster/stars/${posterCtx.star.id}/edit`, { note: sheet.querySelector('#pNote').value.trim(), when });
+          renderPoster(); close(); toast('Star updated');
+        }
         if (mode === 'inspire') {
           const text = sheet.querySelector('#iText').value.trim();
           const reference = sheet.querySelector('#iRef').value.trim();
@@ -697,6 +875,7 @@
         }
       } catch (ex) {
         err.textContent = ex.message;
+        if (ex.body && ex.body.poster) { state.poster = ex.body.poster; renderPoster(); }
       } finally {
         btn.disabled = false;
       }
