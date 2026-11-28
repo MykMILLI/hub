@@ -152,6 +152,7 @@ def _event_to_dict(event: FamilyCalendarEvent) -> dict:
         'occurrence_end': event.end_date.isoformat() if event.end_date else None,
         'created_by': event.created_by,
         'invited_members': invited,
+        'for_members': _safe_invited_members(getattr(event, 'for_members_json', '[]') or '[]'),
         'photo_url': f"/uploads/calendar/{event.photo_filename}" if event.photo_filename else None,
         'created_at': event.created_at.isoformat() if event.created_at else None,
         'updated_at': event.updated_at.isoformat() if event.updated_at else None,
@@ -1128,6 +1129,7 @@ def api_calendar_create_event():
         recurrence_count=(recurrence_count if is_recurring else None),
         created_by=actor,
         invited_members_json=json.dumps(invited_members),
+        for_members_json=json.dumps(_safe_invited_members(data.get('for_members'))),
         photo_filename=photo_filename,
     )
     db.session.add(row)
@@ -1272,6 +1274,8 @@ def api_calendar_update_event(event_id: int):
     row.recurrence_until = recurrence_until if is_recurring else None
     row.recurrence_count = recurrence_count if is_recurring else None
     row.invited_members_json = json.dumps(invited_members)
+    if 'for_members' in data:
+        row.for_members_json = json.dumps(_safe_invited_members(data.get('for_members')))
     db.session.commit()
 
     return jsonify({'ok': True, 'event': _event_to_dict(row)})

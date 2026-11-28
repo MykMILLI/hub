@@ -390,3 +390,25 @@ def test_home_screen_inspiration_seed_add_and_household_greeting(client, app):
     # private memos never show on the shared screen
     client.post('/api/home-screen/memos', json={'text': 'Secret', 'visibility': 'private'})
     assert all(m['text'] != 'Secret' for m in client.get('/api/home-screen/summary').get_json()['memos'])
+
+
+def test_calendar_event_for_members_create_update_and_partial_edit(client):
+    as_member(client, 'Mykal')
+    created = client.post('/api/calendar/events', json={
+        'title': 'Pig roast', 'start_date': '2026-12-05', 'end_date': '2026-12-05',
+        'is_all_day': 'false', 'start_time': '16:00', 'end_time': '20:00',
+    })
+    assert created.status_code == 200
+    event = created.get_json()['event']
+    assert event['for_members'] == [] and event['created_by'] == 'Mykal'
+    # set who it's for without touching anything else (home screen "who is it for")
+    updated = client.put(f"/api/calendar/events/{event['id']}", json={'for_members': ['Mykal', 'Rachel']})
+    assert updated.status_code == 200
+    ev2 = updated.get_json()['event']
+    assert ev2['for_members'] == ['Mykal', 'Rachel']
+    assert ev2['title'] == 'Pig roast' and ev2['start_time'] == '16:00'
+    listed = client.get('/api/calendar/events?start=2026-12-01&end=2026-12-07').get_json()['events']
+    assert next(e for e in listed if e['title'] == 'Pig roast')['for_members'] == ['Mykal', 'Rachel']
+    # created with people from the start
+    with_people = client.post('/api/calendar/events', json={'title': 'Swim', 'start_date': '2026-12-06', 'for_members': ['Avery']}).get_json()['event']
+    assert with_people['for_members'] == ['Avery']

@@ -402,6 +402,11 @@
       </div>
 
       <div>
+        <div class="text-sm text-gray-600 mb-1">Who is it for? <span class="text-xs text-gray-500">(shown on the calendar and home screen; leave empty for everyone)</span></div>
+        <div id="cal-for-list" class="grid grid-cols-2 md:grid-cols-3 gap-2 p-2 border rounded dark:border-gray-600"></div>
+      </div>
+
+      <div>
         <div class="text-sm text-gray-600 mb-1">Invite Family Members</div>
         <div id="cal-invite-list" class="grid grid-cols-2 md:grid-cols-3 gap-2 p-2 border rounded dark:border-gray-600"></div>
       </div>
@@ -667,6 +672,26 @@
     }
   }
 
+  function renderForList(selectedNames = []){
+    const el = document.getElementById('cal-for-list');
+    if (!el) return;
+    const selected = new Set((selectedNames || []).filter(Boolean));
+    el.innerHTML = members.map(name => `
+      <label class="flex items-center gap-2 text-sm">
+        <input type="checkbox" class="cal-for" value="${escapeHtml(name)}" ${selected.has(name) ? 'checked' : ''}>
+        <span>${escapeHtml(name)}</span>
+      </label>`).join('');
+  }
+
+  // Who an event applies to: the "for" list if set, otherwise the people
+  // invited (plus the creator). Empty means the whole family.
+  function eventPeople(ev){
+    const forList = (ev.for_members || []).filter(Boolean);
+    if (forList.length) return forList;
+    const invited = (ev.invited_members || []).filter(Boolean);
+    return invited.length ? [ev.created_by, ...invited].filter(Boolean) : [];
+  }
+
   function renderInviteList(selectedNames = []){
     if (!inviteList) return;
     const selected = new Set((selectedNames || []).filter(Boolean));
@@ -809,7 +834,10 @@
     return meta.color || personPalette[idx % personPalette.length];
   }
   function tgEventsForPerson(list, name){
-    return list.filter(ev => ev.created_by === name || (ev.invited_members || []).includes(name));
+    return list.filter(ev => {
+      const people = eventPeople(ev);
+      return people.length ? people.includes(name) : ev.created_by === name;
+    });
   }
 
   function renderTimeGrid(kind){
@@ -876,7 +904,7 @@
         const widthPct = 100 / it.cols;
         const left = it.col * widthPct;
         const ev = it.ev;
-        const who = [ev.created_by, ...(ev.invited_members || [])].filter(Boolean);
+        const who = eventPeople(ev).length ? eventPeople(ev) : ['Everyone'];
         const short = height < 40;
         const color = ev.color || (col.color || '#6366f1');
         return `<div class="tg-event cal-event-entry cal-drag-event ${short ? 'tg-short' : ''}" ${sharedMode ? '' : `draggable="true" data-id="${ev.id}"`} data-event-id="${ev.id}" data-occurrence-start="${ev.occurrence_start || ev.start_date || ''}"
@@ -1192,7 +1220,7 @@
       return;
     }
     const memberCounts = members.map(name => {
-      const count = events.filter(ev => ev.created_by === name || (ev.invited_members || []).includes(name)).length;
+      const count = events.filter(ev => { const p = eventPeople(ev); return p.length ? p.includes(name) : ev.created_by === name; }).length;
       return { name, count };
     });
     avatarStrip.innerHTML = memberCounts.map(row => {
@@ -1365,6 +1393,7 @@
       currentMemberName = String(data.self_name || '').trim();
       memberFilter.innerHTML = '<option value="">All Members</option>' + members.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
       renderInviteList();
+      renderForList();
       renderAvatarStrip();
     } catch(err){
       toast('Failed to load members', 'error');
@@ -1451,6 +1480,7 @@
       deleteBtn.classList.remove('hidden');
       const invitedSet = new Set(eventObj.invited_members || []);
       renderInviteList([...invitedSet].filter(name => name !== currentMemberName));
+      renderForList(eventObj.for_members || []);
     } else {
       eventIdInput.value = '';
       titleInput.value = '';
@@ -1474,6 +1504,7 @@
       photoInput.value = '';
       deleteBtn.classList.add('hidden');
       renderInviteList();
+      renderForList();
     }
     updateAllDayInputs();
   }
@@ -1740,6 +1771,7 @@
     form.set('color', colorInput.value);
     form.set('description_html', descriptionEditor.innerHTML || '');
     form.set('invited_members', JSON.stringify(invited));
+    form.set('for_members', JSON.stringify([...document.querySelectorAll('.cal-for:checked')].map(cb => cb.value)));
     form.set('visibility', visibility);
     form.set('reminder_at', reminderInput.value || '');
     form.set('is_recurring', recurringInput.checked ? '1' : '0');

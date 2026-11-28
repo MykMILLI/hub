@@ -1047,6 +1047,7 @@ class FamilyCalendarEvent(db.Model):
     recurrence_count = db.Column(db.Integer)
     created_by = db.Column(db.String(64), nullable=False)
     invited_members_json = db.Column(db.Text, default='[]')  # JSON list of member names
+    for_members_json = db.Column(db.Text, default='[]')  # who the event is for / applies to (display + per-person views)
     external_uid = db.Column(db.String(256), index=True)
     external_source_url = db.Column(db.Text)
     photo_filename = db.Column(db.String(256))

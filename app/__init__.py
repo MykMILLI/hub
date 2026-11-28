@@ -212,6 +212,7 @@ def create_app(test_config: dict | None = None):
                 ensure_column('family_member', 'weather_location_name', 'TEXT', None)
                 ensure_column('family_member', 'weather_use_gps_location', 'INTEGER', 0)
                 ensure_column('family_member', 'access_tier', "TEXT DEFAULT 'immediate'", 'immediate')
+                ensure_column('family_calendar_event', 'for_members_json', "TEXT DEFAULT '[]'", '[]')
                 ensure_column('plaid_account', 'plaid_item_id', 'TEXT', None)
                 ensure_column('plaid_account', 'item_account_key', 'TEXT', None)
                 ensure_column(_RecurringExpense.__tablename__, 'monthly_mode', 'TEXT', 'day_of_month')

@@ -135,6 +135,23 @@
     .ask { text-align: center; }
     .ask .big { font-size: 3rem; line-height: 1; }
     .danger { background: #fee2e2; color: #b91c1c; }
+    .tabs { display: inline-flex; background: #f3e8ff; border-radius: 999px; padding: 3px; gap: 2px; }
+    .tabs button { border: 0; background: transparent; border-radius: 999px; padding: .3em .8em; font-weight: 800; font-size: .8em; cursor: pointer; color: #6b21a8; }
+    .tabs button.on { background: #7c3aed; color: #fff; }
+    .person { margin: .5rem 0 .2rem; display: flex; justify-content: space-between; align-items: baseline; font-weight: 800; }
+    .person:first-child { margin-top: 0; }
+    .person small { color: var(--muted); font-weight: 700; font-size: .75em; }
+    .chart-link { border: 0; background: transparent; color: var(--purple); font-weight: 700; cursor: pointer; font-size: .75em; }
+    .ev { cursor: pointer; }
+    .sheet.wide { max-width: 1100px; }
+    .chore-grid { width: 100%; border-collapse: separate; border-spacing: 0; margin-top: .4rem; table-layout: fixed; }
+    .chore-grid th:first-child, .chore-grid td:first-child { width: 32%; }
+    .chore-grid th, .chore-grid td { padding: .35rem .3rem; text-align: center; border-bottom: 1px solid #ede9fe; }
+    .chore-grid th:first-child, .chore-grid td:first-child { text-align: left; }
+    .chore-grid th.today, .chore-grid td.today { background: #f5f3ff; }
+    .cdot { display: inline-grid; place-items: center; width: 1.8em; height: 1.8em; border-radius: 50%; border: 2px solid #c4b5fd; color: #fff; font-weight: 900; }
+    .cdot.done { background: #22c55e; border-color: #22c55e; }
+    .cdot.tap { cursor: pointer; }
     .poster-note { margin: .6rem 0 0; font-size: .82em; color: #7c5a3a; font-weight: 600; }
 
     /* "added!" confirmation */
@@ -259,7 +276,8 @@
       </div>
 
       <div class="panel a-todos hidden-by-access" data-access="chores">
-        <h2>✅ To-dos <a href="/chores?tab=todo">All ›</a></h2>
+        <h2><span class="tabs" role="tablist"><button type="button" data-task-tab="todo" id="tabTodo">✅ To-dos</button><button type="button" data-task-tab="chore" id="tabChore">🧹 Chores</button></span>
+          <span><button type="button" class="chart-link" data-open-chores>Chore chart ›</button> <a href="/chores">All ›</a></span></h2>
         <div id="todos" class="scroll"><div class="empty">Loading…</div></div>
       </div>
 
@@ -290,6 +308,7 @@
       summary: null, people: [], household: [], access: {}, lists: [],
       groceryListId: Number(store.get('homeScreenGroceryList', 0)) || null,
       wakeLock: null, wakeUntil: 0, poster: null, recent: {}, nameIdx: 0,
+      agendaEvents: {}, tasks: [], taskTab: store.get('homeScreenTaskTab', 'todo'),
     };
     const $ = (id) => document.getElementById(id);
     const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m]));
@@ -353,6 +372,14 @@
       return { a: fmt(ev.start_time), b: ev.end_time ? `to ${fmt(ev.end_time)}` : '' };
     }
 
+    // Who an event is for: its "for" list, else the people invited (+ creator); empty = everyone.
+    function eventPeople(ev) {
+      const forList = (ev.for_members || []).filter(Boolean);
+      if (forList.length) return forList;
+      const invited = (ev.invited_members || []).filter(Boolean);
+      return invited.length ? [...new Set([ev.created_by, ...invited].filter(Boolean))] : [];
+    }
+
     async function loadAgenda() {
       if (!state.access.shared_calendar) return;
       const start = new Date();
@@ -381,10 +408,11 @@
             const [sh, sm] = ev.start_time.split(':').map(Number); const [eh, em] = ev.end_time.split(':').map(Number);
             isNow = nowMins >= sh * 60 + sm && nowMins < eh * 60 + em;
           }
-          const who = [ev.created_by, ...(ev.invited_members || [])].filter(Boolean);
-          return `<div class="ev ${isNow ? 'now' : ''}" style="--ev:${esc(ev.color || '#7c3aed')}">
+          const who = eventPeople(ev);
+          state.agendaEvents[ev.id] = ev;
+          return `<div class="ev ${isNow ? 'now' : ''}" data-ev-id="${ev.id}" title="Tap to set who it's for" style="--ev:${esc(ev.color || '#7c3aed')}">
               <div class="ev-time">${esc(t.a)}<small>${esc(t.b)}</small></div>
-              <div class="ev-body"><b>${isNow ? '🔴 ' : ''}${esc(ev.title)}</b><span>${esc(who.join(', '))}</span></div>
+              <div class="ev-body"><b>${isNow ? '🔴 ' : ''}${esc(ev.title)}</b><span>${esc(who.length ? who.join(', ') : 'Everyone')}</span></div>
             </div>`;
         }).join('');
         return `<div class="day-label">${esc(label(d, i))}</div>${rows}`;
@@ -410,17 +438,71 @@
         </button>`).join('') || '<div class="empty">The list is empty.</div>';
     }
 
+    // ---------------------------------------------------------- to-dos & chores
+    const WEEK = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    function choreDoneToday(t) {
+      const p = t.weekly_progress;
+      if (p) return !!p.current_occurrence_completed;
+      return !!t.done;
+    }
+    function choreDueToday(t) {
+      const days = t.days_of_week || [];
+      return !days.length || days.includes(WEEK[new Date().getDay()]);
+    }
+    function choresByPerson(list) {
+      const groups = new Map();
+      list.forEach((t) => {
+        const people = (t.assignees && t.assignees.length) ? t.assignees : ['Anyone'];
+        people.forEach((p) => { if (!groups.has(p)) groups.set(p, []); groups.get(p).push(t); });
+      });
+      const order = state.people.map((p) => p.name);
+      return [...groups.entries()].sort((a, b) => {
+        const ia = order.indexOf(a[0]); const ib = order.indexOf(b[0]);
+        return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+      });
+    }
     async function loadTodos() {
       if (!state.access.chores) return;
-      const list = await api('/api/chores');
-      const items = (Array.isArray(list) ? list : []).filter((t) => !t.done).slice(0, 10);
-      $('todos').innerHTML = items.map((t) => {
-        const who = (t.assignees || []).join(', ');
-        const due = t.due_date ? new Date(`${t.due_date}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) : '';
-        return `<button type="button" class="check" data-todo="${t.id}">
-          <span class="box">✓</span><span class="label">${esc(t.description)}<small>${esc([who, due && `due ${due}`].filter(Boolean).join(' · '))}</small></span>
-        </button>`;
-      }).join('') || '<div class="empty">All done!</div>';
+      const list = await api(`/api/chores?include_completed=1&as_of=${iso(new Date())}`);
+      state.tasks = Array.isArray(list) ? list : [];
+      renderTasks();
+    }
+    function renderTasks() {
+      const todos = state.tasks.filter((t) => t.task_type !== 'chore' && !t.done);
+      const chores = state.tasks.filter((t) => t.task_type === 'chore');
+      const choresToday = chores.filter(choreDueToday);
+      const openChores = choresToday.filter((t) => !choreDoneToday(t)).length;
+      $('tabTodo').textContent = `✅ To-dos${todos.length ? ` (${todos.length})` : ''}`;
+      $('tabChore').textContent = `🧹 Chores${openChores ? ` (${openChores})` : ''}`;
+      $('tabTodo').classList.toggle('on', state.taskTab !== 'chore');
+      $('tabChore').classList.toggle('on', state.taskTab === 'chore');
+      if (state.taskTab !== 'chore') {
+        $('todos').innerHTML = todos.slice(0, 30).map((t) => {
+          const who = (t.assignees || []).join(', ');
+          const due = t.due_date ? new Date(`${t.due_date}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) : '';
+          return `<button type="button" class="check" data-todo="${t.id}">
+            <span class="box">✓</span><span class="label">${esc(t.description)}<small>${esc([who, due && `due ${due}`].filter(Boolean).join(' · '))}</small></span>
+          </button>`;
+        }).join('') || '<div class="empty">All done!</div>';
+        return;
+      }
+      const groups = choresByPerson(choresToday);
+      $('todos').innerHTML = groups.map(([person, items]) => {
+        const done = items.filter(choreDoneToday).length;
+        return `<div class="person">${esc(person)} <small>${done} of ${items.length} done today</small></div>` + items.map((t) => {
+          const isDone = choreDoneToday(t);
+          const p = t.weekly_progress;
+          const sub = p ? `${p.completed_count} of ${p.required_count} this week` : 'Any day';
+          return `<button type="button" class="check ${isDone ? 'done' : ''}" data-chore="${t.id}" data-done="${isDone ? 1 : 0}">
+            <span class="box">✓</span><span class="label">${esc(t.description)}<small>${esc(sub)}</small></span>
+          </button>`;
+        }).join('');
+      }).join('') || '<div class="empty">No chores today. 🎉</div>';
+    }
+    async function toggleChore(id, makeDone) {
+      await api(`/api/chores/${id}/done`, { method: 'POST', body: JSON.stringify({ done: makeDone, occurrence_date: iso(new Date()) }) });
+      await loadTodos();
+      if (mode === 'chores') { sheet.innerHTML = forms.chores(); }
     }
 
     function renderMemos(memos) {
@@ -524,6 +606,12 @@
       const g = e.target.closest('[data-grocery]');
       const t = e.target.closest('[data-todo]');
       const m = e.target.closest('[data-memo]');
+      const tab = e.target.closest('[data-task-tab]');
+      const ch = e.target.closest('[data-chore]');
+      const evEl = e.target.closest('[data-ev-id]');
+      if (tab) { state.taskTab = tab.dataset.taskTab; store.set('homeScreenTaskTab', state.taskTab); renderTasks(); return; }
+      if (e.target.closest('[data-open-chores]')) { open('chores'); return; }
+      if (evEl) { posterCtx = { ev: state.agendaEvents[evEl.dataset.evId] }; if (posterCtx.ev) open('whofor'); return; }
       const pa = e.target.closest('[data-poster-add]');
       const pu = e.target.closest('[data-poster-undo]');
       try {
@@ -537,6 +625,12 @@
           await api(`/api/chores/${t.dataset.todo}/done`, { method: 'POST', body: JSON.stringify({ done: true }) });
           toast('Nice work! ✅');
           setTimeout(loadTodos, 700);
+        }
+        if (ch) {
+          const makeDone = ch.dataset.done !== '1';
+          ch.classList.toggle('done', makeDone);
+          await toggleChore(ch.dataset.chore, makeDone);
+          if (makeDone) toast('Chore done! 🧹');
         }
         if (m) {
           const body = await api(`/api/home-screen/memos/${m.dataset.memo}/done`, { method: 'POST' });
@@ -717,6 +811,40 @@
         <div class="err" id="err"></div>
         <div class="actions"><button type="button" class="danger" data-remove-star>Remove star</button><button type="submit" class="primary">Save changes</button></div>`;
     };
+    forms.whofor = () => {
+      const ev = posterCtx.ev;
+      const current = eventPeople(ev);
+      return `
+        <h3 id="modalTitle">📅 ${esc(ev.title)}</h3>
+        <p style="margin:0;color:var(--muted)">${esc(new Date(`${ev.start_date}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }))}${ev.start_time ? ` · ${esc(eventTimeRange(ev).a)}` : ''} · added by ${esc(ev.created_by || 'someone')}</p>
+        <div class="field"><label>Who is it for? (none = everyone)</label>${peopleChips('forwho', { preselect: current })}</div>
+        <div class="err" id="err"></div>
+        <div class="actions"><button type="button" class="secondary" data-close>Cancel</button><button type="submit" class="primary">Save</button></div>`;
+    };
+    forms.chores = () => {
+      const chores = state.tasks.filter((t) => t.task_type === 'chore');
+      const todayIdx = new Date().getDay();
+      const body = choresByPerson(chores).map(([person, items]) => `
+        <div class="person" style="margin-top:1rem">${esc(person)}</div>
+        <table class="chore-grid"><thead><tr><th>Chore</th>${WEEK.map((d, i) => `<th class="${i === todayIdx ? 'today' : ''}">${d}</th>`).join('')}</tr></thead><tbody>
+        ${items.map((t) => {
+          const days = t.days_of_week || [];
+          const doneDays = (t.weekly_progress && t.weekly_progress.completed_days) || [];
+          return `<tr><td>${esc(t.description)}</td>${WEEK.map((d, i) => {
+            const scheduled = !days.length ? i === todayIdx : days.includes(d);
+            if (!scheduled) return `<td class="${i === todayIdx ? 'today' : ''}"></td>`;
+            const isDone = i === todayIdx ? choreDoneToday(t) : doneDays.includes(d);
+            const tap = i === todayIdx;
+            return `<td class="${i === todayIdx ? 'today' : ''}"><span class="cdot ${isDone ? 'done' : ''} ${tap ? 'tap' : ''}" ${tap ? `data-chore="${t.id}" data-done="${isDone ? 1 : 0}"` : ''}>${isDone ? '✓' : ''}</span></td>`;
+          }).join('')}</tr>`;
+        }).join('')}</tbody></table>`).join('') || '<p class="empty">No chores set up yet. Add them on the Chores page.</p>';
+      return `
+        <h3 id="modalTitle">🧹 This week's chores</h3>
+        <p style="margin:0;color:var(--muted)">Tap today's circle to check a chore off.</p>
+        ${body}
+        <div class="actions"><a class="secondary" href="/chores" style="flex:1;text-align:center;text-decoration:none;border-radius:1rem;padding:.95rem;font-weight:800">Edit chores</a><button type="button" class="primary" data-close>Done</button></div>`;
+    };
+
     function openPoster(which, ctx) { posterCtx = ctx || {}; open(which); if (which === 'ask' || which === 'unlock') setTimeout(() => sheet.querySelector('#pmPin')?.focus(), 80); }
     sheet.addEventListener('click', async (e) => {
       const chip = e.target.closest('[data-chips="pday"] .chip');
@@ -751,6 +879,7 @@
 
     function open(which) {
       mode = which;
+      sheet.classList.toggle('wide', which === 'chores');
       sheet.innerHTML = forms[which]();
       modal.classList.add('open');
       if (which === 'event') {
@@ -799,6 +928,12 @@
           }) });
           toast('To-do added ✅');
           close(); loadTodos();
+        }
+        if (mode === 'whofor') {
+          const ev = posterCtx.ev;
+          await api(`/api/calendar/events/${ev.base_event_id || ev.id}`, { method: 'PUT', body: JSON.stringify({ for_members: chipValues('forwho') }) });
+          toast('Saved');
+          close(); loadAgenda();
         }
         if (mode === 'ask' || mode === 'unlock') {
           const parent = chipValues('parent')[0];
@@ -868,7 +1003,7 @@
           await api('/api/calendar/events', { method: 'POST', body: JSON.stringify({
             title, event_type: 'event', start_date: date, end_date: date,
             is_all_day: allDay ? 'true' : 'false', start_time: allDay ? '' : start, end_time: allDay ? '' : end,
-            invited_members: who, visibility: state.summary?.is_extended ? 'everyone' : (chipValues('evvis')[0] || 'family'),
+            invited_members: who, for_members: chipValues('who'), visibility: state.summary?.is_extended ? 'everyone' : (chipValues('evvis')[0] || 'family'),
           }) });
           toast('Added to the calendar 📅');
           close(); loadAgenda();
