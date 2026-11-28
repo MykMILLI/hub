@@ -412,3 +412,54 @@ def test_calendar_event_for_members_create_update_and_partial_edit(client):
     # created with people from the start
     with_people = client.post('/api/calendar/events', json={'title': 'Swim', 'start_date': '2026-12-06', 'for_members': ['Avery']}).get_json()['event']
     assert with_people['for_members'] == ['Avery']
+
+
+def test_up_for_grabs_chore_claim_and_household_notification(client, app):
+    from app.models import AppNotification
+    as_member(client, 'Rachel')
+    made = client.post('/api/chores', json={'description': 'Unload dishwasher', 'creator': 'Rachel', 'task_type': 'chore',
+                                            'assignees': [], 'tags': ['up-for-grabs'], 'due_date': '2026-12-01'})
+    assert made.status_code == 200
+    chore = made.get_json()['item']
+    assert chore['assignees'] == [] and 'up-for-grabs' in chore['tags']
+    with app.app_context():
+        notes = AppNotification.query.filter_by(event_type='chore_up_for_grabs').all()
+        assert {n.target_member for n in notes} >= {'Mykal', 'Avery', 'Harley'}
+        assert 'Rachel' not in {n.target_member for n in notes}
+    claimed = client.post(f"/api/chores/{chore['id']}/claim", json={'name': 'Avery'})
+    assert claimed.status_code == 200
+    item = claimed.get_json()['item']
+    assert item['assignees'] == ['Avery'] and 'up-for-grabs' not in item['tags']
+    assert client.post(f"/api/chores/{chore['id']}/claim", json={'name': 'Harley'}).status_code == 409
+
+
+def test_memo_from_and_acknowledgements(client, app):
+    from app.models import AppNotification
+    as_member(client, 'Mykal')
+    posted = client.post('/api/home-screen/memos', json={'text': "Going to a friend's house", 'from': 'Avery', 'visibility': 'family'})
+    memo = posted.get_json()['memo']
+    assert memo['creator'] == 'Avery' and memo['acks'] == []
+    with app.app_context():
+        targets = {n.target_member for n in AppNotification.query.filter_by(event_type='memo_posted').all()}
+        assert 'Avery' not in targets and {'Rachel', 'Mykal'} <= targets
+    acked = client.post(f"/api/home-screen/memos/{memo['id']}/ack", json={'name': 'Rachel'})
+    assert acked.status_code == 200
+    again = client.post(f"/api/home-screen/memos/{memo['id']}/ack", json={'name': 'Rachel'})
+    acks = again.get_json()['memo']['acks']
+    assert [a['name'] for a in acks] == ['Rachel']
+    assert client.post(f"/api/home-screen/memos/{memo['id']}/ack", json={'name': 'Avery'}).status_code == 400
+    with app.app_context():
+        assert AppNotification.query.filter_by(event_type='memo_acknowledged', target_member='Avery').count() == 1
+
+
+def test_administrator_login_is_not_a_family_member_for_chores(client, app):
+    with app.app_context():
+        db.session.add(FamilyMember(name='Administrator', role='admin'))
+        db.session.commit()
+    from app.blueprints.chores import _family_members
+    with app.app_context():
+        assert 'Administrator' not in _family_members()
+    as_member(client, 'Rachel')
+    summary = client.get('/api/home-screen/summary').get_json()
+    assert 'Administrator' not in [p['name'] for p in summary['people']]
+    assert 'Administrator' not in summary['household']

@@ -95,8 +95,9 @@
     .poster { position: relative; border-radius: 1.2rem; padding: clamp(.6rem, 1vw, 1rem); min-height: 0; overflow-y: auto; color: #3b2414;
       background: radial-gradient(circle at 20% 15%, rgba(255,255,255,.35), transparent 40%), repeating-linear-gradient(45deg, rgba(120,80,30,.03) 0 6px, transparent 6px 12px), #f6deb0;
       border: 10px solid #b7793f; box-shadow: inset 0 0 0 3px #e7c189, 0 14px 30px rgba(76, 40, 10, .25); }
-    .poster::before, .poster::after { content: ""; position: absolute; top: -14px; width: 22px; height: 22px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #ff8a8a, #c81e1e); box-shadow: 0 3px 4px rgba(0,0,0,.3); }
-    .poster::before { left: 18px; } .poster::after { right: 18px; }
+    .poster::before, .poster::after { content: ""; position: absolute; top: 6px; z-index: 2; width: 22px; height: 22px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #ff8a8a, #c81e1e); box-shadow: 0 3px 4px rgba(0,0,0,.3); }
+    .poster::before { left: 8px; } .poster::after { right: 8px; }
+    .poster h2 { padding: 0 1.4rem; }
     .poster h2 { margin: 0 0 .4rem; font-family: "Marker Felt", "Comic Sans MS", "Chalkboard SE", cursive; font-size: 1.5em; color: #9a3412; display: flex; justify-content: space-between; align-items: baseline; gap: .5rem; flex-wrap: wrap; }
     .poster h2 small { font-family: Inter, system-ui, sans-serif; font-size: .5em; color: #7c5a3a; font-weight: 700; }
     .chart { display: grid; grid-template-columns: minmax(6.5em, 1.1fr) repeat(7, minmax(2.6em, 1fr)) minmax(6.2em, auto); border: 3px solid #7c4a1e; border-radius: .6rem; overflow: hidden; background: rgba(255,255,255,.55); }
@@ -135,6 +136,13 @@
     .ask { text-align: center; }
     .ask .big { font-size: 3rem; line-height: 1; }
     .danger { background: #fee2e2; color: #b91c1c; }
+    .memo .seen { display: block; font-size: .72em; color: rgba(0,0,0,.55); margin-top: .35rem; }
+    .memo .ack { position: absolute; right: 2.4rem; bottom: .3rem; border: 0; background: rgba(255,255,255,.75); border-radius: 999px; padding: .2em .6em; font-weight: 800; font-size: .75em; cursor: pointer; }
+    .badge-new { display: inline-block; background: #f43f5e; color: #fff; border-radius: 999px; font-size: .65em; font-weight: 900; padding: .1em .5em; margin-left: .35em; vertical-align: middle; }
+    .claim { margin-left: auto; border: 0; border-radius: 999px; background: #7c3aed; color: #fff; font-weight: 800; padding: .35em .8em; cursor: pointer; white-space: nowrap; }
+    .grab { display: flex; align-items: center; gap: .6rem; padding: .45rem .1rem; border-bottom: 1px dashed rgba(139, 92, 246, .15); }
+    .grab:last-child { border-bottom: 0; }
+    .grab .label small { display: block; color: var(--muted); font-size: .78em; }
     .tabs { display: inline-flex; background: #f3e8ff; border-radius: 999px; padding: 3px; gap: 2px; }
     .tabs button { border: 0; background: transparent; border-radius: 999px; padding: .3em .8em; font-weight: 800; font-size: .8em; cursor: pointer; color: #6b21a8; }
     .tabs button.on { background: #7c3aed; color: #fff; }
@@ -467,37 +475,60 @@
       state.tasks = Array.isArray(list) ? list : [];
       renderTasks();
     }
+    const isNew = (t) => t.timestamp && (Date.now() - new Date(t.timestamp + (/[zZ]|[+-]\d\d:?\d\d$/.test(t.timestamp) ? '' : 'Z')).getTime()) < 48 * 3600 * 1000;
+    const newBadge = (t) => (isNew(t) ? '<span class="badge-new">NEW</span>' : '');
+    const isToday = (stamp) => { if (!stamp) return false; const d = new Date(stamp + (/[zZ]|[+-]\d\d:?\d\d$/.test(stamp) ? '' : 'Z')); return iso(d) === iso(new Date()); };
+    function choreVisibleToday(t) {
+      const days = t.days_of_week || [];
+      if (days.length) return days.includes(WEEK[new Date().getDay()]);
+      return !t.done || isToday(t.completed_at);  // one-off: show until done (and the day it was done)
+    }
+    function todoRow(t, showOwner) {
+      const who = showOwner ? (t.assignees || []).join(', ') : '';
+      const due = t.due_date ? new Date(`${t.due_date}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) : '';
+      return `<button type="button" class="check" data-todo="${t.id}">
+        <span class="box">✓</span><span class="label">${esc(t.description)}${newBadge(t)}<small>${esc([who, due && `due ${due}`].filter(Boolean).join(' · '))}</small></span>
+      </button>`;
+    }
     function renderTasks() {
       const todos = state.tasks.filter((t) => t.task_type !== 'chore' && !t.done);
-      const chores = state.tasks.filter((t) => t.task_type === 'chore');
-      const choresToday = chores.filter(choreDueToday);
-      const openChores = choresToday.filter((t) => !choreDoneToday(t)).length;
+      const chores = state.tasks.filter((t) => t.task_type === 'chore' && choreVisibleToday(t));
+      const grabs = chores.filter((t) => !(t.assignees || []).length && !t.done);
+      const assigned = chores.filter((t) => (t.assignees || []).length);
+      const openChores = grabs.length + assigned.filter((t) => !choreDoneToday(t)).length;
       $('tabTodo').textContent = `✅ To-dos${todos.length ? ` (${todos.length})` : ''}`;
       $('tabChore').textContent = `🧹 Chores${openChores ? ` (${openChores})` : ''}`;
       $('tabTodo').classList.toggle('on', state.taskTab !== 'chore');
       $('tabChore').classList.toggle('on', state.taskTab === 'chore');
       if (state.taskTab !== 'chore') {
-        $('todos').innerHTML = todos.slice(0, 30).map((t) => {
-          const who = (t.assignees || []).join(', ');
-          const due = t.due_date ? new Date(`${t.due_date}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) : '';
-          return `<button type="button" class="check" data-todo="${t.id}">
-            <span class="box">✓</span><span class="label">${esc(t.description)}<small>${esc([who, due && `due ${due}`].filter(Boolean).join(' · '))}</small></span>
-          </button>`;
-        }).join('') || '<div class="empty">All done!</div>';
+        const personal = todos.filter((t) => (t.tags || []).includes('personal') && (t.assignees || []).length);
+        const family = todos.filter((t) => !personal.includes(t));
+        const byOwner = new Map();
+        personal.forEach((t) => { const o = t.assignees[0]; if (!byOwner.has(o)) byOwner.set(o, []); byOwner.get(o).push(t); });
+        let html = family.length ? `<div class="person">🏠 Family <small>${family.length} to do</small></div>` + family.map((t) => todoRow(t, true)).join('') : '';
+        byOwner.forEach((items, owner) => { html += `<div class="person">👤 ${esc(owner)} <small>personal</small></div>` + items.map((t) => todoRow(t, false)).join(''); });
+        $('todos').innerHTML = html || '<div class="empty">All done!</div>';
         return;
       }
-      const groups = choresByPerson(choresToday);
-      $('todos').innerHTML = groups.map(([person, items]) => {
+      let html = '';
+      if (grabs.length) {
+        html += `<div class="person">🙋 Up for grabs <small>anyone can take these</small></div>` + grabs.map((t) => {
+          const when = t.due_date ? (t.due_date === iso(new Date()) ? 'Today' : `By ${new Date(`${t.due_date}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long' })}`) : 'Any time';
+          return `<div class="grab"><span class="label">${esc(t.description)}${newBadge(t)}<small>${esc(when)}</small></span><button type="button" class="claim" data-claim="${t.id}">I'll do it</button></div>`;
+        }).join('');
+      }
+      html += choresByPerson(assigned).map(([person, items]) => {
         const done = items.filter(choreDoneToday).length;
         return `<div class="person">${esc(person)} <small>${done} of ${items.length} done today</small></div>` + items.map((t) => {
           const isDone = choreDoneToday(t);
           const p = t.weekly_progress;
-          const sub = p ? `${p.completed_count} of ${p.required_count} this week` : 'Any day';
+          const sub = p ? `${p.completed_count} of ${p.required_count} this week` : (t.due_date && t.due_date !== iso(new Date()) ? `By ${new Date(`${t.due_date}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long' })}` : 'Today');
           return `<button type="button" class="check ${isDone ? 'done' : ''}" data-chore="${t.id}" data-done="${isDone ? 1 : 0}">
-            <span class="box">✓</span><span class="label">${esc(t.description)}<small>${esc(sub)}</small></span>
+            <span class="box">✓</span><span class="label">${esc(t.description)}${newBadge(t)}<small>${esc(sub)}</small></span>
           </button>`;
         }).join('');
-      }).join('') || '<div class="empty">No chores today. 🎉</div>';
+      }).join('');
+      $('todos').innerHTML = html || '<div class="empty">No chores today. 🎉</div>';
     }
     async function toggleChore(id, makeDone) {
       await api(`/api/chores/${id}/done`, { method: 'POST', body: JSON.stringify({ done: makeDone, occurrence_date: iso(new Date()) }) });
@@ -506,9 +537,18 @@
     }
 
     function renderMemos(memos) {
-      $('memos').innerHTML = (memos || []).map((m) => `
-        <div class="memo"><p>${esc(m.text)}</p><span class="by">— ${esc(m.creator)}</span>
-        ${(m.creator === ME || state.summary?.is_admin) ? `<button class="x" type="button" data-memo="${m.id}" aria-label="Clear memo">✕</button>` : ''}</div>`).join('')
+      state.memos = {};
+      $('memos').innerHTML = (memos || []).map((m) => {
+        state.memos[m.id] = m;
+        const seen = (m.acks || []).map((a) => a.name);
+        const someoneLeft = state.household.some((n) => n !== m.creator && !seen.includes(n));
+        return `
+        <div class="memo"><p>${esc(m.text)}</p>
+        ${seen.length ? `<span class="seen">👀 Seen by ${esc(seen.join(', '))}</span>` : ''}
+        <span class="by">— ${esc(m.creator)}</span>
+        ${someoneLeft ? `<button class="ack" type="button" data-ack="${m.id}">👍 Got it</button>` : ''}
+        ${(m.creator === ME || state.summary?.is_admin) ? `<button class="x" type="button" data-memo="${m.id}" aria-label="Clear memo">✕</button>` : ''}</div>`;
+      }).join('')
         || '<div class="empty">No memos. Tap 📝 to leave one.</div>';
     }
 
@@ -609,6 +649,10 @@
       const tab = e.target.closest('[data-task-tab]');
       const ch = e.target.closest('[data-chore]');
       const evEl = e.target.closest('[data-ev-id]');
+      const ackEl = e.target.closest('[data-ack]');
+      const claimEl = e.target.closest('[data-claim]');
+      if (ackEl) { posterCtx = { memo: state.memos[ackEl.dataset.ack] }; open('ack'); return; }
+      if (claimEl) { posterCtx = { chore: state.tasks.find((t) => String(t.id) === claimEl.dataset.claim) }; if (posterCtx.chore) open('claim'); return; }
       if (tab) { state.taskTab = tab.dataset.taskTab; store.set('homeScreenTaskTab', state.taskTab); renderTasks(); return; }
       if (e.target.closest('[data-open-chores]')) { open('chores'); return; }
       if (evEl) { posterCtx = { ev: state.agendaEvents[evEl.dataset.evId] }; if (posterCtx.ev) open('whofor'); return; }
@@ -701,6 +745,16 @@
       chip.classList.toggle('on', group.dataset.multi === '1' ? !chip.classList.contains('on') : true);
       if (group.dataset.chips === 'when') sheet.querySelector('#evDateWrap').style.display = chip.dataset.value === 'pick' ? '' : 'none';
       if (group.dataset.chips === 'evkind') sheet.querySelector('#evTimes').style.display = chip.dataset.value === 'timed' ? '' : 'none';
+      if (group.dataset.chips === 'ttype') {
+        sheet.querySelectorAll('[data-tsec]').forEach((sec) => { sec.style.display = sec.dataset.tsec.split(' ').includes(chip.dataset.value) ? '' : 'none'; });
+      }
+      if (group.dataset.chips === 'cmode') {
+        sheet.querySelector('#cAssign').style.display = chip.dataset.value === 'assign' ? '' : 'none';
+        // up-for-grabs chores are one-offs (today / this week)
+        const rep = sheet.querySelector('[data-chips="cfreq"] [data-value="repeat"]');
+        if (rep) { rep.style.display = chip.dataset.value === 'grab' ? 'none' : ''; if (chip.dataset.value === 'grab' && rep.classList.contains('on')) { rep.classList.remove('on'); sheet.querySelector('[data-chips="cfreq"] [data-value="today"]').classList.add('on'); sheet.querySelector('#cDays').style.display = 'none'; } }
+      }
+      if (group.dataset.chips === 'cfreq') sheet.querySelector('#cDays').style.display = chip.dataset.value === 'repeat' ? '' : 'none';
     });
 
     const forms = {
@@ -712,15 +766,30 @@
         <div class="err" id="err"></div>
         <div class="actions"><button type="button" class="secondary" data-close>Done</button><button type="submit" class="primary">Add</button></div>`,
       todo: () => `
-        <h3 id="modalTitle">✅ New to-do</h3>
+        <h3 id="modalTitle">✅ Add a to-do or chore</h3>
+        <div class="field"><label>What kind?</label>${choiceChips('ttype', [['general', '🏠 Family to-do'], ['personal', '👤 Personal to-do'], ['chore', '🧹 Chore']], 'general')}</div>
         <div class="field"><label for="tText">What needs doing?</label><input type="text" id="tText" placeholder="e.g. Call the plumber" required></div>
-        <div class="field"><label>Who's doing it?</label>${peopleChips('who')}</div>
-        <div class="field"><label>When?</label>${choiceChips('due', [['', 'No date'], ['0', 'Today'], ['1', 'Tomorrow'], ['7', 'This week']], '')}</div>
+        <div data-tsec="general">
+          <div class="field"><label>Who's helping? (optional)</label>${peopleChips('who')}</div>
+        </div>
+        <div data-tsec="personal" style="display:none">
+          <div class="field"><label>Whose to-do is it?</label>${peopleChips('owner', { multi: false })}</div>
+        </div>
+        <div data-tsec="general personal">
+          <div class="field"><label>When?</label>${choiceChips('due', [['', 'No date'], ['0', 'Today'], ['1', 'Tomorrow'], ['7', 'This week']], '')}</div>
+        </div>
+        <div data-tsec="chore" style="display:none">
+          <div class="field"><label>Who does it?</label>${choiceChips('cmode', [['grab', '🙋 Up for grabs (anyone can take it)'], ['assign', '👉 Assign to someone']], 'grab')}</div>
+          <div class="field" id="cAssign" style="display:none"><label>Assign to</label>${peopleChips('cwho')}</div>
+          <div class="field"><label>How often?</label>${choiceChips('cfreq', [['today', 'Just today'], ['week', 'This week'], ['repeat', 'Repeats every week']], 'today')}</div>
+          <div class="field" id="cDays" style="display:none"><label>On these days</label>${choiceChips('cdays', WEEK.map((d) => [d, d]), WEEK[new Date().getDay()]).replace('data-multi="0"', 'data-multi="1"')}</div>
+        </div>
         <div class="err" id="err"></div>
-        <div class="actions"><button type="button" class="secondary" data-close>Cancel</button><button type="submit" class="primary">Add to-do</button></div>`,
+        <div class="actions"><button type="button" class="secondary" data-close>Cancel</button><button type="submit" class="primary">Add</button></div>`,
       memo: () => `
         <h3 id="modalTitle">📝 Leave a memo</h3>
-        <div class="field"><label for="mText">Your note</label><textarea id="mText" placeholder="e.g. Plumber coming Tuesday at 10" required></textarea></div>
+        <div class="field"><label>Who's it from?</label>${peopleChips('mfrom', { multi: false })}</div>
+        <div class="field"><label for="mText">Your note</label><textarea id="mText" placeholder="e.g. Going to a friend's house until 5" required></textarea></div>
         <div class="field"><label>Who can see it?</label>${choiceChips('vis', state.summary?.is_extended
           ? [['everyone', 'Whole family']]
           : [['family', 'Our household'], ['everyone', 'Household + extended family']], state.summary?.is_extended ? 'everyone' : 'family')}</div>
@@ -811,6 +880,26 @@
         <div class="err" id="err"></div>
         <div class="actions"><button type="button" class="danger" data-remove-star>Remove star</button><button type="submit" class="primary">Save changes</button></div>`;
     };
+    forms.ack = () => {
+      const m = posterCtx.memo;
+      const seen = (m.acks || []).map((a) => a.name);
+      const names = state.household.filter((n) => n !== m.creator && !seen.includes(n));
+      return `
+        <h3 id="modalTitle">👍 Got it</h3>
+        <p style="margin:0">“${esc(m.text)}” — ${esc(m.creator)}</p>
+        <div class="field"><label>Who saw it?</label>${choiceChips('acker', names.map((n) => [n, n]), names[0])}</div>
+        <div class="err" id="err"></div>
+        <div class="actions"><button type="button" class="secondary" data-close>Cancel</button><button type="submit" class="primary">I saw it</button></div>`;
+    };
+    forms.claim = () => {
+      const t = posterCtx.chore;
+      return `
+        <h3 id="modalTitle">🙋 Who's doing it?</h3>
+        <p style="margin:0">${esc(t.description)}</p>
+        <div class="field"><label>I'll do it:</label>${peopleChips('claimer', { multi: false })}</div>
+        <div class="err" id="err"></div>
+        <div class="actions"><button type="button" class="secondary" data-close>Cancel</button><button type="submit" class="primary">Take this chore</button></div>`;
+    };
     forms.whofor = () => {
       const ev = posterCtx.ev;
       const current = eventPeople(ev);
@@ -822,7 +911,7 @@
         <div class="actions"><button type="button" class="secondary" data-close>Cancel</button><button type="submit" class="primary">Save</button></div>`;
     };
     forms.chores = () => {
-      const chores = state.tasks.filter((t) => t.task_type === 'chore');
+      const chores = state.tasks.filter((t) => t.task_type === 'chore' && ((t.days_of_week || []).length || choreVisibleToday(t)));
       const todayIdx = new Date().getDay();
       const body = choresByPerson(chores).map(([person, items]) => `
         <div class="person" style="margin-top:1rem">${esc(person)}</div>
@@ -919,14 +1008,50 @@
         }
         if (mode === 'todo') {
           const description = sheet.querySelector('#tText').value.trim();
-          if (!description) throw new Error('Type the to-do first.');
-          const due = chipValues('due')[0];
-          const assignees = chipValues('who');
-          await api('/api/chores', { method: 'POST', body: JSON.stringify({
-            description, creator: ME, task_type: 'todo', assignees,
-            due_date: due === '' || due === undefined ? null : iso(addDays(new Date(), Number(due))),
-          }) });
-          toast('To-do added ✅');
+          if (!description) throw new Error('Type what needs doing first.');
+          const kind = chipValues('ttype')[0] || 'general';
+          const dueOffset = chipValues('due')[0];
+          const dueDate = dueOffset === '' || dueOffset === undefined ? null : iso(addDays(new Date(), Number(dueOffset)));
+          let payload;
+          if (kind === 'general') {
+            payload = { description, creator: ME, task_type: 'todo', assignees: chipValues('who'), due_date: dueDate, tags: ['family'] };
+          } else if (kind === 'personal') {
+            const owner = chipValues('owner')[0];
+            if (!owner) throw new Error('Choose whose to-do it is.');
+            payload = { description, creator: ME, task_type: 'todo', assignees: [owner], due_date: dueDate, tags: ['personal'] };
+          } else {
+            const cmode = chipValues('cmode')[0] || 'grab';
+            const freq = chipValues('cfreq')[0] || 'today';
+            const assignees = cmode === 'assign' ? chipValues('cwho') : [];
+            if (cmode === 'assign' && !assignees.length) throw new Error('Choose who the chore is for.');
+            const endOfWeek = addDays(new Date(), 6 - new Date().getDay());
+            payload = { description, creator: ME, task_type: 'chore', assignees, tags: cmode === 'grab' ? ['up-for-grabs'] : [] };
+            if (freq === 'repeat') {
+              payload.days_of_week = chipValues('cdays');
+              if (!payload.days_of_week.length) throw new Error('Pick at least one day.');
+            } else {
+              payload.due_date = iso(freq === 'week' ? endOfWeek : new Date());
+            }
+          }
+          await api('/api/chores', { method: 'POST', body: JSON.stringify(payload) });
+          state.taskTab = kind === 'chore' ? 'chore' : 'todo';
+          store.set('homeScreenTaskTab', state.taskTab);
+          toast(kind === 'chore' ? (payload.assignees.length ? `Chore added for ${payload.assignees.join(', ')} 🧹` : 'Chore is up for grabs 🙋') : 'To-do added ✅');
+          close(); loadTodos();
+        }
+        if (mode === 'ack') {
+          const name = chipValues('acker')[0];
+          if (!name) throw new Error('Choose who saw it.');
+          const body = await api(`/api/home-screen/memos/${posterCtx.memo.id}/ack`, { method: 'POST', body: JSON.stringify({ name }) });
+          renderMemos(body.memos);
+          toast(`Thanks, ${name}! 👍`);
+          close();
+        }
+        if (mode === 'claim') {
+          const name = chipValues('claimer')[0];
+          if (!name) throw new Error('Choose who is taking it.');
+          await api(`/api/chores/${posterCtx.chore.id}/claim`, { method: 'POST', body: JSON.stringify({ name }) });
+          toast(`${name} took it — thank you! 🧹`);
           close(); loadTodos();
         }
         if (mode === 'whofor') {
@@ -983,7 +1108,7 @@
         if (mode === 'memo') {
           const text = sheet.querySelector('#mText').value.trim();
           if (!text) throw new Error('Write your memo first.');
-          const body = await api('/api/home-screen/memos', { method: 'POST', body: JSON.stringify({ text, visibility: chipValues('vis')[0] || 'family' }) });
+          const body = await api('/api/home-screen/memos', { method: 'POST', body: JSON.stringify({ text, from: chipValues('mfrom')[0] || '', visibility: chipValues('vis')[0] || 'family' }) });
           renderMemos(body.memos);
           toast('Memo posted 📝');
           close();

@@ -8,6 +8,7 @@ from flask import render_template, request, redirect, url_for, current_app, json
 from ..models import ActivityLog, db, Chore, ChoreRewardAward, ChoreWeeklyCompletion, FamilyMember
 from ..blueprints import main_bp
 from ..security import sanitize_text
+from ..permissions import is_system_account
 from ..services.chore_recurrence import (
     WEEKDAY_LABELS as _WEEKDAY_LABELS,
     day_label as _day_label,
@@ -64,9 +65,9 @@ def _family_members() -> list[str]:
     if not names:
         cfg_members = current_app.config.get('HOMEHUB_CONFIG', {}).get('family_members', [])
         names = [sanitize_text(str(item or '')).strip() for item in cfg_members if sanitize_text(str(item or '')).strip()]
-    admin_name = sanitize_text(current_app.config.get('HOMEHUB_CONFIG', {}).get('admin_name', 'Administrator')).strip()
-    if admin_name and admin_name not in names:
-        names.append(admin_name)
+    # The built-in admin login (e.g. "Administrator") is an account, not a
+    # family member, so it never gets a chore column or appears as an assignee.
+    names = [n for n in names if not is_system_account(n)]
     return sorted(set(names), key=lambda n: n.lower())
 
 
@@ -695,6 +696,18 @@ def api_create_chore():
         db.session.commit()
         payload = _serialize_task(chore)
         _emit_task_notifications(before=None, after=payload, actor=creator)
+        if payload.get('task_type') == 'chore' and not payload.get('assignees') and UP_FOR_GRABS_TAG in (payload.get('tags') or []):
+            targets = [n for n in _household_names() if n.lower() != (creator or '').lower()]
+            if targets:
+                publish_notification(
+                    event_type='chore_up_for_grabs',
+                    title='Chore up for grabs',
+                    message=f"{creator or 'A family member'} added a chore anyone can take: {description[:160]}",
+                    target_members=targets,
+                    created_by=creator,
+                    payload={'task_id': chore.id, 'url': '/home-screen'},
+                    channels=['in_app', 'mobile'],
+                )
 
         return jsonify({
             'ok': True,
@@ -702,6 +715,52 @@ def api_create_chore():
         })
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 400
+
+
+UP_FOR_GRABS_TAG = 'up-for-grabs'
+
+
+def _household_names() -> list[str]:
+    rows = FamilyMember.query.order_by(FamilyMember.name.asc()).all()
+    return [
+        r.name for r in rows
+        if r.name and not is_system_account(r.name) and (getattr(r, 'access_tier', 'immediate') or 'immediate') != 'extended'
+    ]
+
+
+@main_bp.route('/api/chores/<int:chore_id>/claim', methods=['POST'])
+def api_claim_chore(chore_id):
+    """Someone takes an up-for-grabs chore: it becomes theirs."""
+    chore = Chore.query.get_or_404(chore_id)
+    data = request.get_json(silent=True) or {}
+    actor = sanitize_text(session.get('current_member') or '').strip()
+    wanted = sanitize_text(str(data.get('name') or actor)).strip()
+    member = FamilyMember.query.filter(db.func.lower(FamilyMember.name) == wanted.lower()).first()
+    if not member or is_system_account(member.name):
+        return jsonify({'ok': False, 'error': 'Choose who is taking this chore.'}), 400
+    if (chore.task_type or '') != 'chore':
+        return jsonify({'ok': False, 'error': 'Only chores can be claimed.'}), 400
+    current = _parse_assignees(getattr(chore, 'assignees_json', '[]'), getattr(chore, 'assignee', None), task_type='chore')
+    if current:
+        return jsonify({'ok': False, 'error': f"{', '.join(current)} already took this chore."}), 409
+    before = _serialize_task(chore)
+    chore.assignee = member.name
+    chore.assignees_json = json.dumps([member.name])
+    tags = [t for t in _parse_tags(chore.tags) if t != UP_FOR_GRABS_TAG]
+    chore.tags = json.dumps(tags)
+    _log_task_timeline_event(task_id=chore.id, actor=actor or member.name, action='chore.claimed',
+                             summary=f"{member.name} took the chore: {chore.description[:120]}")
+    db.session.commit()
+    after = _serialize_task(chore)
+    others = [n for n in _household_names() if n.lower() != member.name.lower()]
+    if others:
+        publish_notification(
+            event_type='chore_claimed', title=f'{member.name} took a chore',
+            message=f"{member.name} will do: {chore.description[:160]}",
+            target_members=others, created_by=member.name,
+            payload={'task_id': chore.id, 'url': '/home-screen'}, channels=['in_app'],
+        )
+    return jsonify({'ok': True, 'item': after, 'before': before})
 
 
 @main_bp.route('/api/chores/<int:chore_id>', methods=['PUT'])

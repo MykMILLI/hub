@@ -1422,3 +1422,12 @@ class HomeScreenInspiration(db.Model):
     active = db.Column(db.Boolean, default=True, nullable=False)
     created_by = db.Column(db.String(128), default='')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class MemoAck(db.Model):
+    """'Got it' on a home-screen memo, so everyone knows who has seen it."""
+    __table_args__ = (db.UniqueConstraint('note_id', 'member_name', name='uq_memo_ack_member'),)
+    id = db.Column(db.Integer, primary_key=True)
+    note_id = db.Column(db.Integer, nullable=False, index=True)
+    member_name = db.Column(db.String(128), nullable=False)
+    acked_at = db.Column(db.DateTime, default=datetime.utcnow)

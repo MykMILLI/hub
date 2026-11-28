@@ -12,12 +12,13 @@ from flask import current_app, jsonify, render_template, request, session
 
 from . import main_bp
 from .. import db
-from ..models import FamilyMember, HomeScreenInspiration, Note
+from ..models import FamilyMember, HomeScreenInspiration, MemoAck, Note
 from ..permissions import (
     can_access_app_module,
     has_visibility_access,
     is_admin_name,
     is_extended_member,
+    is_system_account,
     sanitize_visibility,
 )
 from ..security import sanitize_text
@@ -36,13 +37,33 @@ def _hub_name() -> str:
 
 
 def _memo_dict(note: Note) -> dict:
+    acks = MemoAck.query.filter_by(note_id=note.id).order_by(MemoAck.acked_at).all()
     return {
         'id': note.id,
         'text': note.title or '',
         'creator': note.creator or '',
         'visibility': note.visibility or 'family',
         'created_at': (note.timestamp.isoformat() + 'Z') if note.timestamp else '',
+        'acks': [{'name': a.member_name, 'at': (a.acked_at.isoformat() + 'Z') if a.acked_at else ''} for a in acks],
     }
+
+
+def _household_names(exclude: str = '') -> list[str]:
+    rows = FamilyMember.query.order_by(FamilyMember.added_at).all()
+    return [
+        m.name for m in rows
+        if (m.access_tier or 'immediate') != 'extended'
+        and not is_system_account(m.name)
+        and m.name != exclude
+    ]
+
+
+def _resolve_member(name) -> str:
+    clean = sanitize_text(str(name or '')).strip()
+    if not clean:
+        return ''
+    row = FamilyMember.query.filter(db.func.lower(FamilyMember.name) == clean.lower()).first()
+    return row.name if row and not is_system_account(row.name) else ''
 
 
 def _visible_memos(actor: str, limit: int = 12) -> list[dict]:
@@ -90,10 +111,11 @@ def api_home_screen_summary():
     people = [
         {'name': m.name, 'avatar': m.avatar or '', 'role': m.role or 'standard'}
         for m in members
-        if not extended or (m.access_tier or 'immediate') == 'extended' or (m.role or '') == 'admin' or m.name == actor
+        if not is_system_account(m.name)
+        and (not extended or (m.access_tier or 'immediate') == 'extended' or (m.role or '') == 'admin' or m.name == actor)
     ]
     # Names the greeting rotates through: the household (not extended family).
-    household = [m.name for m in members if (m.access_tier or 'immediate') != 'extended']
+    household = [m.name for m in members if (m.access_tier or 'immediate') != 'extended' and not is_system_account(m.name)]
     gold = None
     if access.get('reward_system'):
         try:
@@ -141,10 +163,11 @@ def api_home_screen_add_memo():
     allowed = [sanitize_text(str(n)).strip() for n in allowed if sanitize_text(str(n)).strip()]
     if allowed:
         visibility = 'restricted'
+    author = _resolve_member(data.get('from')) or actor
     note = Note(
         title=text,
         content=text,
-        creator=actor,
+        creator=author,
         updated_by=actor,
         note_type='memo',
         visibility=visibility,
@@ -152,7 +175,55 @@ def api_home_screen_add_memo():
         require_pin=False,
     )
     db.session.add(note)
+    db.session.flush()
+    if visibility in {'family', 'everyone'}:
+        try:
+            from ..services.notification_service import publish_notification
+            targets = _household_names(exclude=author)
+            if visibility == 'everyone':
+                targets += [m.name for m in FamilyMember.query.all() if (m.access_tier or '') == 'extended' and m.name != author]
+            if targets:
+                publish_notification(
+                    event_type='memo_posted', title=f'New memo from {author}', message=text[:200],
+                    target_members=targets, created_by=author,
+                    payload={'memo_id': note.id, 'url': '/home-screen'}, channels=['in_app', 'mobile'],
+                )
+        except Exception:
+            pass
     db.session.commit()
+    return jsonify({'ok': True, 'memo': _memo_dict(note), 'memos': _visible_memos(actor)})
+
+
+@main_bp.route('/api/home-screen/memos/<int:memo_id>/ack', methods=['POST'])
+def api_home_screen_memo_ack(memo_id: int):
+    actor = _actor()
+    if not actor:
+        return jsonify({'ok': False, 'error': 'Please sign in.'}), 401
+    note = db.session.get(Note, memo_id)
+    if not note or note.note_type != 'memo' or note.is_task:
+        return jsonify({'ok': False, 'error': 'Memo not found.'}), 404
+    if not has_visibility_access(note.visibility or 'family', note.creator or '', note.allowed_members_json or '[]', actor):
+        return jsonify({'ok': False, 'error': 'Memo not found.'}), 404
+    data = request.get_json(silent=True) or {}
+    who = _resolve_member(data.get('name')) or actor
+    if who == (note.creator or ''):
+        return jsonify({'ok': False, 'error': "That's your own memo."}), 400
+    if not MemoAck.query.filter_by(note_id=note.id, member_name=who).first():
+        db.session.add(MemoAck(note_id=note.id, member_name=who))
+        try:
+            from ..services.notification_service import publish_notification
+            if note.creator and not is_system_account(note.creator):
+                publish_notification(
+                    event_type='memo_acknowledged', title=f'{who} saw your memo', message=(note.title or '')[:200],
+                    target_members=[note.creator], created_by=who,
+                    payload={'memo_id': note.id, 'url': '/home-screen'}, channels=['in_app'],
+                )
+        except Exception:
+            pass
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()  # double tap: already acknowledged
     return jsonify({'ok': True, 'memo': _memo_dict(note), 'memos': _visible_memos(actor)})
 
 

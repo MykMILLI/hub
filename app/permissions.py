@@ -223,6 +223,12 @@ def is_admin_name(name: str | None) -> bool:
     return role == 'admin'
 
 
+def is_system_account(name: str | None) -> bool:
+    """True for the built-in admin login ("Administrator"/"admin"): an account,
+    not a family member, so it gets no chores and is not greeted on screens."""
+    return sanitize_text(name or '').strip().lower() in {'administrator', 'admin'}
+
+
 def normalize_tier(value) -> str:
     clean = sanitize_text(str(value or '')).strip().lower()
     return clean if clean in ACCESS_TIERS else 'immediate'
