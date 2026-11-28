@@ -3,3 +3,7 @@
 *.tgz
 *.tar.gz
 data/vapid_keys.json
+
+# Python bytecode (rebuilt automatically; never commit)
+__pycache__/
+*.pyc
